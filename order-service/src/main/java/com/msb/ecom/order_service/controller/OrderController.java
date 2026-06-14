@@ -4,6 +4,8 @@ import com.msb.ecom.order_service.dto.OrderRequest;
 import com.msb.ecom.order_service.dto.OrderResponse;
 import com.msb.ecom.order_service.service.OrderService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +19,15 @@ import jakarta.validation.Valid;
 public class OrderController {
 
     private final OrderService orderService;
+
+
+
+    @Bean
+    CommandLineRunner runner(OrderService service) {
+        return args -> {
+            service.saveItem();
+        };
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

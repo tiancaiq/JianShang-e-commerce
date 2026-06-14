@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,6 +20,19 @@ import java.util.UUID;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+
+
+    public void saveItem() {
+
+        Order item = Order.builder()
+                .orderNumber("ORDER-1001")
+                .skuCode("IPHONE16")
+                .price(new BigDecimal("999.99"))
+                .quantity(2)
+                .build();
+
+        orderRepository.save(item);
+    }
 
     public OrderResponse placeOrder(OrderRequest orderRequest) {
         Order order = Order.builder()
