@@ -1,0 +1,207 @@
+name: Pull Request Quality
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      force_failure_job:
+        description: "Optional controlled failure target: backend, architecture, frontend, migrations, dependencies, or secrets"
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - backend
+          - architecture
+          - frontend
+          - migrations
+          - dependencies
+          - secrets
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend Compile And Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'backend'
+        run: exit 1
+
+      - name: Run backend tests
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B test
+
+  architecture:
+    name: Architecture Guardrails
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'architecture'
+        run: exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run architecture checks
+        run: python tools/architecture_checks.py
+
+      - name: Run controlled violation examples
+        run: python tools/architecture_checks.py --self-test
+
+      - name: Check whitespace and conflict markers
+        run: git diff --check
+
+  frontend:
+    name: Frontend Build And Test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'frontend'
+        run: exit 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Test frontend
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+
+  migrations:
+    name: Migration Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'migrations'
+        run: exit 1
+
+      - name: Validate migration-owning services
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B -pl auth-service,order-service,inventory-service,payment-service -am test
+
+  dependencies:
+    name: Dependency Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'dependencies'
+        run: exit 1
+
+      - name: Resolve Maven dependencies
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B -DskipTests dependency:resolve
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=critical
+
+      - name: Dependency review
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+
+  secrets:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'secrets'
+        run: exit 1
+
+      - name: Scan for high-confidence secret patterns
+        run: |
+          set -euo pipefail
+          pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{20,})'
+          if grep -RInE \
+            --exclude-dir=.git \
+            --exclude-dir=target \
+            --exclude-dir=node_modules \
+            --exclude=package-lock.json \
+            "$pattern" .; then
+            echo "High-confidence secret pattern found. Remove or rotate the value before merging."
+            exit 1
+          fi
+          echo "No high-confidence secret patterns found."
