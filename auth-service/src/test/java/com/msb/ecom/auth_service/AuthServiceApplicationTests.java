@@ -16,6 +16,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
@@ -71,5 +73,25 @@ class AuthServiceApplicationTests {
                 .statusCode(200)
                 .body("token", notNullValue())
                 .body("email", equalTo(email));
+    }
+
+    @Test
+    void shouldReturnStandardValidationErrorWithCorrelationId() {
+        RestAssured.given()
+                .header("X-Correlation-Id", "auth-validation-123")
+                .contentType(ContentType.JSON)
+                .body(new SignupRequest("not-an-email", null, "short"))
+                .when()
+                .post("/auth/signup")
+                .then()
+                .statusCode(400)
+                .header("X-Correlation-Id", equalTo("auth-validation-123"))
+                .body("error.code", equalTo("VALIDATION_FAILED"))
+                .body("error.message", equalTo("One or more fields are invalid."))
+                .body("error.correlationId", equalTo("auth-validation-123"))
+                .body("error.fieldErrors.field", hasItem("email"))
+                .body("$", not(org.hamcrest.Matchers.hasKey("timestamp")))
+                .body("$", not(org.hamcrest.Matchers.hasKey("trace")))
+                .body("$", not(org.hamcrest.Matchers.hasKey("stackTrace")));
     }
 }

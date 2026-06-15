@@ -1,5 +1,8 @@
 package com.msb.ecom.api_gateway.routes;
 
+import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
+import com.msb.ecom.common.web.error.ApiError;
+import com.msb.ecom.common.web.error.ApiErrorEnvelope;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -7,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.function.*;
 
 import java.net.URI;
+import java.util.List;
 
 import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
 import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
@@ -79,9 +83,18 @@ public class Routes {
         public RouterFunction<ServerResponse> fallbackRoute() {
                 return route("fallbackRoute")
                                 .GET("/fallbackRoute", request -> ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE)
-                                                .body("Service is temporarily unavailable. Please try again later."))
+                                                .body(serviceUnavailable(request)))
                                 .POST("/fallbackRoute", request -> ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE)
-                                                .body("Service is temporarily unavailable. Please try again later."))
+                                                .body(serviceUnavailable(request)))
                                 .build();
+        }
+
+        private ApiErrorEnvelope serviceUnavailable(ServerRequest request) {
+                String correlationId = CorrelationIdFilter.current(request.servletRequest());
+                return new ApiErrorEnvelope(new ApiError(
+                                "SERVICE_UNAVAILABLE",
+                                "Service is temporarily unavailable. Please try again later.",
+                                List.of(),
+                                correlationId));
         }
 }

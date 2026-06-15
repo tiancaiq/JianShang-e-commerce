@@ -14,7 +14,6 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import io.restassured.RestAssured;
 
 import java.time.Instant;
-import java.util.Map;
 
 import static org.hamcrest.Matchers.*;
 
@@ -91,7 +90,54 @@ class ApiGatewayApplicationTests {
 				.get("/actuator/health")
 				.then()
 				.statusCode(200)
+				.header("X-Correlation-Id", matchesPattern("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"))
 				.body("status", notNullValue());
+	}
+
+	@Test
+	void shouldReturnStandardFallbackErrorEnvelope() {
+		RestAssured.given()
+				.header("X-Correlation-Id", "fallback-request-123")
+				.when()
+				.get("/fallbackRoute")
+				.then()
+				.statusCode(503)
+				.header("X-Correlation-Id", equalTo("fallback-request-123"))
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"))
+				.body("error.correlationId", equalTo("fallback-request-123"));
+	}
+
+	@Test
+	void shouldPreserveValidCorrelationId() {
+		RestAssured.given()
+				.header("X-Correlation-Id", "client-request-123")
+				.when()
+				.get("/actuator/health")
+				.then()
+				.statusCode(200)
+				.header("X-Correlation-Id", equalTo("client-request-123"));
+	}
+
+	@Test
+	void shouldReplaceInvalidAndOversizedCorrelationIds() {
+		RestAssured.given()
+				.header("X-Correlation-Id", "unsafe value")
+				.when()
+				.get("/actuator/health")
+				.then()
+				.statusCode(200)
+				.header("X-Correlation-Id", not(equalTo("unsafe value")))
+				.header("X-Correlation-Id", matchesPattern("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"));
+
+		String oversized = "a".repeat(129);
+		RestAssured.given()
+				.header("X-Correlation-Id", oversized)
+				.when()
+				.get("/actuator/health")
+				.then()
+				.statusCode(200)
+				.header("X-Correlation-Id", not(equalTo(oversized)))
+				.header("X-Correlation-Id", matchesPattern("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"));
 	}
 
 	@Test

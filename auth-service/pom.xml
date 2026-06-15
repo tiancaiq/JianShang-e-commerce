@@ -13,6 +13,11 @@
 	<description>Authentication Service with cookie-based session management</description>
 
 	<dependencies>
+		<dependency>
+			<groupId>com.msb.ecom</groupId>
+			<artifactId>common-web</artifactId>
+			<version>${project.version}</version>
+		</dependency>
 		<!-- Web -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

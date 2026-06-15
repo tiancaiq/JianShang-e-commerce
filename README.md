@@ -66,10 +66,24 @@ The system consists of the following microservices:
 
 ### Prerequisites
 
-- Java 21+
-- Node.js 20+ & npm
+- Java 21
+- Node.js 20+ and npm
 - Docker & Docker Compose
-- Maven
+- Maven is provided by the repository wrapper
+
+Windows PowerShell users should run `npm.cmd` if local execution policy blocks
+`npm.ps1`.
+
+Verify the local toolchain:
+
+```powershell
+java -version
+.\mvnw.cmd -version
+node --version
+npm.cmd --version
+docker compose version
+docker compose config --quiet
+```
 
 ### Installation
 
@@ -98,18 +112,39 @@ The system consists of the following microservices:
    If not using `run.sh`, you can run each service individually:
 
    ```bash
-   cd product-service && mvn spring-boot:run
-   cd order-service && mvn spring-boot:run
+   cd product-service && ../mvnw spring-boot:run
+   cd order-service && ../mvnw spring-boot:run
    # ... repeat for other services
    ```
 
 4. **Run Frontend**
    ```bash
    cd frontend
-   npm install
-   npm start
+   npm ci
+   npm run start
    ```
    Access the app at `http://localhost:4200`.
+
+### Verification
+
+Backend:
+
+```powershell
+.\mvnw.cmd -DskipTests package
+.\mvnw.cmd test
+```
+
+Frontend:
+
+```powershell
+Set-Location frontend
+npm.cmd ci
+npm.cmd run build
+npm.cmd test -- --watch=false --browsers=ChromeHeadless
+```
+
+See [Phase 1 Toolchain and Build Baseline](docs/phase1-baseline.md) for the
+latest verified results and known baseline warnings.
 
 ## 🤝 Contributing
 

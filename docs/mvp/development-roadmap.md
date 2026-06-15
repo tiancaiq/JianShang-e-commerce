@@ -220,6 +220,7 @@ Tasks:
 Deliverable:
 
 - Shared technical API contract.
+- Usage reference: `docs/p1-07-common-web-reference.md`.
 
 Tests:
 
@@ -241,6 +242,7 @@ Tasks:
 Deliverable:
 
 - Configuration and secret-management guide.
+- Guide location: `docs/p1-08-runtime-configuration.md`.
 
 Tests:
 
@@ -262,6 +264,7 @@ Deliverable:
 
 - Frontend workspace migration plan or empty buildable shells only if required
   to validate the workspace structure.
+- Migration plan location: `docs/p1-09-frontend-workspace-plan.md`.
 
 Tests:
 
@@ -281,6 +284,7 @@ Tasks:
 Deliverable:
 
 - Pull-request quality checks.
+- CI baseline guide: `docs/p1-10-ci-baseline.md`.
 
 Tests:
 
@@ -299,6 +303,7 @@ Tasks:
 Deliverable:
 
 - Documented, automated architecture guardrails.
+- Guardrails guide: `docs/p1-11-architecture-guardrails.md`.
 
 Tests:
 
@@ -316,6 +321,10 @@ Report:
 - CI checks added
 - Files intentionally left unchanged
 - Risks blocking the first feature slice
+
+Report location:
+
+- `docs/phase1-verification-report.md`
 
 Phase 1 completion:
 

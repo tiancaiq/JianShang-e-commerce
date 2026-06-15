@@ -13,6 +13,11 @@
 	<description>API Gateway with Circuit Breaker and Load Balancing</description>
 
 	<dependencies>
+		<dependency>
+			<groupId>com.msb.ecom</groupId>
+			<artifactId>common-web</artifactId>
+			<version>${project.version}</version>
+		</dependency>
 		<!-- Spring Cloud Gateway MVC -->
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>

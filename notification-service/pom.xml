@@ -13,6 +13,11 @@
 	<description>Notification Service - Kafka Consumer &amp; Email</description>
 
 	<dependencies>
+		<dependency>
+			<groupId>com.msb.ecom</groupId>
+			<artifactId>common-web</artifactId>
+			<version>${project.version}</version>
+		</dependency>
 		<!-- Kafka -->
 		<dependency>
 			<groupId>org.springframework.kafka</groupId>

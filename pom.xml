@@ -16,6 +16,9 @@
 	<description>Microservices E-commerce Application</description>
 	
 	<modules>
+		<module>common-core</module>
+		<module>common-web</module>
+		<module>common-testing</module>
 		<module>product-service</module>
 		<module>order-service</module>
 		<module>inventory-service</module>
@@ -31,6 +34,7 @@
 		<testcontainers.version>1.21.4</testcontainers.version>
 		<docker-java.version>3.7.0</docker-java.version>
 		<lombok.version>1.18.42</lombok.version>
+		<archunit.version>1.4.1</archunit.version>
 	</properties>
 
 	<dependencyManagement>
