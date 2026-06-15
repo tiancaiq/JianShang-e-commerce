@@ -1,20 +1,53 @@
-# MVP Requirements
+# Product Requirements and Release Scope
 
 ## 1. Purpose
 
-This document defines the approved minimum viable product for MSB E-Commerce.
-It is the product-scope authority for MVP implementation.
+This document defines the approved product requirements and release placement
+for MSB E-Commerce. `development-roadmap.md` is the implementation-order
+authority.
 
 The platform supports two transaction models:
 
 1. **Individual trade**: a buyer and an individual seller negotiate price,
    payment, and delivery themselves. The platform records the agreement but
    does not process payment or shipping.
-2. **Business order**: a buyer purchases from a verified business through the
-   platform cart, checkout, payment, inventory, and shipping workflow.
+2. **Business order**: beginning in V2, a buyer purchases from a verified
+   business through platform cart, checkout, payment, inventory, and shipping.
 
 These models may share users, listings, search, chat, reviews, notifications,
 and moderation, but they must not share checkout state machines.
+
+## 1.1 Release Classification
+
+### MVP
+
+- Foundation
+- Authentication and user accounts
+- Individual seller profile
+- Business seller profile and basic store profile
+- Listings and media
+- Search and public storefront
+- Basic text chat between buyer and individual seller
+- Basic admin approval/moderation for businesses and listings
+
+### V2
+
+- Cart
+- Inventory
+- Checkout and payment
+- Orders and shipping
+- Notifications
+
+### V3
+
+- Individual trade completion verification and completed-sales reputation
+- Reviews and reputation
+- Advanced admin and trust operations
+- AI assistant
+- Advanced analytics
+
+Requirements remain documented for design continuity, but only requirements
+classified as MVP may be scheduled before MVP is complete.
 
 ## 2. MVP Applications
 
@@ -32,12 +65,13 @@ Responsibilities:
 - Display business and individual seller types clearly
 - Manage buyer accounts
 - Create individual listings
-- Chat and negotiate individual trades
-- Buy business listings through platform checkout
-- Track trades and business orders
-- Submit reviews and reports
-- Receive notifications
-- Use a limited shopping assistant
+- Use basic text chat to negotiate individual deals
+
+Deferred:
+
+- Business checkout and order tracking: V2
+- Trade completion reputation and reviews: V3
+- AI shopping assistant: V3
 
 ### 2.2 Business seller application
 
@@ -50,12 +84,12 @@ Responsibilities:
 
 - Complete business onboarding
 - Manage store profile and policies
-- Manage staff permissions
-- Manage listings and inventory
-- Fulfill business orders
-- View payment, fee, and payout status
-- Respond to customer messages
-- View basic store metrics
+- Manage basic store listings
+
+Deferred:
+
+- Inventory, fulfillment, payments, and notifications: V2
+- Advanced staff operations and analytics: V3
 
 ### 2.3 Admin application
 
@@ -71,11 +105,10 @@ Audience:
 Responsibilities:
 
 - Review businesses and listings
-- Investigate reports and support cases
-- Suspend or restore accounts within role permissions
-- Inspect business orders and payment status
-- Inspect individual trade records without promising payment recovery
-- Review audit records and failed operations
+
+Deferred to V3:
+
+- Advanced reports, support cases, suspensions, finance, and operations
 
 ## 3. Roles
 
@@ -154,6 +187,8 @@ Acceptance criteria:
 
 #### IAM-05 Manage addresses
 
+Release: V2.
+
 Acceptance criteria:
 
 - User can add, update, delete, and choose a default address.
@@ -210,6 +245,8 @@ Depends on: `BUS-01`.
 
 #### BUS-03 Process verification callback
 
+Release: V3. MVP uses manual admin review of submitted business information.
+
 Acceptance criteria:
 
 - Provider webhook signatures are verified.
@@ -225,9 +262,9 @@ Acceptance criteria:
 - Authorized reviewer may approve, reject, or request more information.
 - A reason is required.
 - Approval activates the business and owner membership.
-- Decision is audited and notifies the applicant.
+- Decision is audited and visible when the applicant checks application status.
 
-Depends on: `BUS-03`, `ADM-01`, `NOT-01`.
+Depends on: `BUS-02`, `ADM-01`.
 
 #### BUS-05 Manage store profile
 
@@ -242,6 +279,8 @@ Depends on: `BUS-04`.
 
 #### BUS-06 Manage store policies
 
+Release: V3.
+
 Acceptance criteria:
 
 - Business can define shipping, cancellation, and return policy text.
@@ -251,6 +290,8 @@ Acceptance criteria:
 Depends on: `BUS-04`.
 
 #### BUS-07 Manage business staff
+
+Release: V3.
 
 Acceptance criteria:
 
@@ -349,9 +390,9 @@ Acceptance criteria:
 - Moderator can approve, reject, or request changes.
 - Approval sets listing to `ACTIVE`.
 - Decision reason and actor are audited.
-- Seller is notified.
+- Decision is visible in the seller listing-management view.
 
-Depends on: `LST-08`, `NOT-01`.
+Depends on: `LST-08`.
 
 #### LST-10 Pause or close listing
 
@@ -360,7 +401,7 @@ Acceptance criteria:
 - Owner can pause an active listing.
 - Individual seller can mark a listing sold only through trade completion or
   an explicit off-platform close action.
-- Listing with an active individual trade cannot be offered to another buyer.
+- Listing with an active individual trade cannot be assigned to another buyer.
 
 #### LST-11 View listing details
 
@@ -369,7 +410,8 @@ Acceptance criteria:
 - Guest can view only active, approved listings.
 - Response clearly identifies `INDIVIDUAL` or `BUSINESS`.
 - Individual listing displays off-platform payment disclosure.
-- Business listing displays platform checkout availability.
+- Business listing identifies the business storefront. Platform checkout is
+  added in V2.
 
 ### 4.5 Search
 
@@ -401,7 +443,7 @@ Acceptance criteria:
 - User can view an active business profile and its active listings.
 - Suspended business storefronts are unavailable.
 
-### 4.6 Chat, offers, and individual trades
+### 4.6 Chat and individual trades
 
 #### CHT-01 Start listing conversation
 
@@ -421,11 +463,13 @@ Acceptance criteria:
 - Only conversation participants can read or send.
 - Message length and rate limits apply.
 - Message history is ordered and cursor-paginated.
-- New message triggers notification.
+- Conversation list exposes unread state.
 
-Depends on: `CHT-01`, `NOT-01`.
+Depends on: `CHT-01`.
 
 #### CHT-03 Block or report participant
+
+Release: V3.
 
 Acceptance criteria:
 
@@ -435,38 +479,31 @@ Acceptance criteria:
 
 Depends on: `CHT-02`, `ADM-03`.
 
-#### OFF-01 Submit offer
+#### TRD-01 Seller creates trade from conversation
+
+Release: V3.
 
 Acceptance criteria:
 
-- Buyer submits amount and optional delivery note within a conversation.
-- Only active individual listings accept offers.
-- Offer captures listing and buyer identity.
-
-Depends on: `CHT-01`.
-
-#### OFF-02 Respond to offer
-
-Acceptance criteria:
-
-- Recipient may accept, reject, or counter an open offer.
-- Each response creates immutable offer history.
-- Only one accepted offer may exist per listing.
-
-Depends on: `OFF-01`.
-
-#### TRD-01 Create trade from accepted offer
-
-Acceptance criteria:
-
-- Offer acceptance atomically creates a trade and reserves the listing.
-- Other open offers close as `LISTING_UNAVAILABLE`.
-- Trade stores agreed amount and delivery note.
+- Buyer and seller negotiate informally through text chat; the platform does
+  not provide structured offer, counteroffer, or offer-acceptance actions.
+- Only the listing owner can choose "Deal with this buyer".
+- Seller starts the action from an existing conversation, so the buyer is
+  derived from that conversation and cannot be replaced in the request.
+- Trade creation atomically records that buyer and reserves the listing.
+- Other conversations remain readable but cannot create another trade while
+  the listing is reserved.
+- Trade may store a seller-entered private deal note, but it is not treated as
+  verified price, payment, or delivery evidence.
 - Platform displays that payment remains off-platform.
+- Seller cannot create a trade with themselves, a blocked user, or a buyer
+  outside the selected listing conversation.
 
-Depends on: `OFF-02`.
+Depends on: `CHT-01`, `CHT-02`.
 
 #### TRD-02 Cancel individual trade
+
+Release: V3.
 
 Acceptance criteria:
 
@@ -478,16 +515,34 @@ Depends on: `TRD-01`.
 
 #### TRD-03 Confirm individual trade completion
 
+Release: V3.
+
 Acceptance criteria:
 
-- Each participant may confirm completion independently.
-- Trade becomes `COMPLETED` after both confirm.
-- Seller can request admin review when confirmations conflict.
-- Completion marks listing `SOLD`.
+- Seller initiates completion for the buyer already recorded on the trade
+  created from the selected conversation; seller cannot enter or select a
+  different buyer identity.
+- Seller sees only the buyer's public display name and a masked verified
+  confirmation destination, such as `j***@mail.com` or `***-***-1234`.
+- Seller confirms that the item was delivered to that buyer.
+- Platform records seller confirmation and sends a single-use, expiring
+  confirmation link or code to the buyer's verified email or phone.
+- Full buyer email, phone, and address are never disclosed to the seller by
+  this flow.
+- Buyer must authenticate and confirm the matching trade. Possession of the
+  link or code alone is insufficient.
+- Repeated seller requests are rate-limited and invalidate older unused
+  challenges without creating duplicate confirmations.
+- Trade becomes `COMPLETED` only after both seller and buyer confirmations.
+- Completion atomically marks the listing `SOLD` and increments the seller's
+  public completed-sales count exactly once.
+- A buyer rejection, expired challenge, or disputed handoff does not increment
+  the completed-sales count.
+- Seller can request admin review when completion is disputed.
 
 Depends on: `TRD-01`.
 
-### 4.7 Business cart and inventory
+### 4.7 Business cart and inventory (V2)
 
 #### CRT-01 View cart
 
@@ -560,7 +615,7 @@ Acceptance criteria:
 - Committed quantity reduces on-hand stock.
 - Commit after release fails safely and triggers recovery review.
 
-### 4.8 Business checkout, payment, and order
+### 4.8 Business checkout, payment, and order (V2)
 
 #### CHK-01 Create checkout session
 
@@ -647,7 +702,7 @@ Acceptance criteria:
 - Cancellation updates payment/refund and inventory through explicit states.
 - Duplicate requests are harmless.
 
-### 4.9 Shipping and fulfillment
+### 4.9 Shipping and fulfillment (V2)
 
 #### SHP-01 Accept order for fulfillment
 
@@ -682,7 +737,7 @@ Acceptance criteria:
 - Shipment timeline is append-only.
 - Delivery updates order status when all shipments are delivered.
 
-### 4.10 Reviews and reputation
+### 4.10 Reviews and reputation (V3)
 
 #### REV-01 Submit business review
 
@@ -707,6 +762,11 @@ Acceptance criteria:
 - Product, business seller, and individual seller ratings are separate.
 - Removed reviews do not contribute.
 - Aggregate updates are eventually consistent.
+- Individual seller public reputation includes `completedSalesCount`.
+- `completedSalesCount` is the number of distinct completed individual trades,
+  not listing closes, seller-only confirmations, cancelled trades, or business
+  orders.
+- The count can be rebuilt from completed trade records.
 
 #### REV-04 Report review
 
@@ -715,7 +775,7 @@ Acceptance criteria:
 - Signed-in user may report a review once per reason.
 - Report enters moderation queue.
 
-### 4.11 Notifications
+### 4.11 Notifications (V2)
 
 #### NOT-01 Create in-app notification
 
@@ -747,6 +807,8 @@ Acceptance criteria:
 - Security, payment, and legal notifications cannot be disabled when required.
 
 ### 4.12 Administration, moderation, and support
+
+`ADM-01` and `ADM-02` are MVP. `ADM-03` through `ADM-06` are V3.
 
 #### ADM-01 Admin shell and authorization
 
@@ -795,7 +857,7 @@ Acceptance criteria:
   delivery.
 - Retrying an operation requires permission and is idempotent.
 
-### 4.13 AI assistants
+### 4.13 AI assistants (V3)
 
 AI is not allowed to become a dependency of checkout, payment, inventory,
 moderation decisions, or authentication.
@@ -858,7 +920,7 @@ Initial service objectives:
 - TLS for all external traffic
 - Passwords hashed with an approved adaptive algorithm
 - Least-privilege role and business authorization
-- Rate limiting for authentication, chat, offers, and AI
+- Rate limiting for authentication, chat, trade creation, and AI
 - Secrets kept outside source control
 - Payment details handled by the provider
 - Sensitive actions recorded in immutable audit logs
@@ -894,6 +956,13 @@ Initial service objectives:
 The following are explicitly out of MVP:
 
 - Platform payment or shipping for individual trades
+- Individual trade completion verification and public sales reputation
+- Business cart, inventory, checkout, payment, orders, and shipping
+- User notification center and notification preferences
+- Reviews and ratings
+- Advanced reports, disputes, suspensions, support, and finance operations
+- AI assistants
+- Advanced analytics
 - Escrow or buyer protection for individual trades
 - Auctions
 - Subscriptions
@@ -911,11 +980,12 @@ The following are explicitly out of MVP:
 
 MVP is complete only when:
 
-- All approved requirements have passing acceptance tests.
-- Individual listing-to-completed-trade flow works without platform payment.
-- Business listing-to-delivered-order flow works with idempotent payment.
-- Inventory concurrency tests prove no overselling at supported load.
-- Admins can review businesses, listings, reports, and failed operations.
+- All MVP-classified requirements have passing acceptance tests.
+- Users can register, sign in, and manage basic accounts.
+- Individual and business sellers can establish the approved basic profiles.
+- Sellers can create moderated listings with media.
+- Guests can search listings and view public storefronts.
+- Buyer and individual seller can exchange basic text chat messages.
+- Admins can approve/reject businesses and listings.
 - Security and tenant-isolation tests pass.
-- Backup restoration and payment/order reconciliation are exercised.
-- AI can be disabled without breaking any core marketplace flow.
+- No V2 or V3 user-facing feature is required for MVP completion.

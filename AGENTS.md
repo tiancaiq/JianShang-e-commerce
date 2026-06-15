@@ -15,17 +15,47 @@ The approved MVP specification is:
 When older README or tutorial documents conflict with these files, the MVP
 documents take precedence.
 
+## Current Implementation Boundary
+
+Only Phase 0 and Phase 1 setup tasks in
+`docs/mvp/development-roadmap.md` are currently approved.
+
+Do not implement application features yet. This includes registration, login,
+seller profiles, listings, media flows, search, storefronts, chat, moderation,
+cart, inventory, payment, orders, notifications, reviews, AI, and analytics.
+
+After Phase 1 verification, stop and request/await approval for the first MVP
+feature slice.
+
+Release placement:
+
+- MVP: foundation, accounts, seller profiles, listings/media,
+  search/storefront, basic chat, basic business/listing moderation
+- V2: cart, inventory, checkout/payment, orders/shipping, notifications
+- V3: trade completion/reputation, reviews, advanced trust/admin, AI,
+  analytics
+
 ## Product Invariants
 
 1. Individual listings create **trades**, not platform orders.
 2. Individual buyers and sellers arrange payment and delivery themselves.
 3. The platform must not claim to verify or protect off-platform payment.
-4. Business listings use cart, inventory reservation, platform payment, order,
-   and shipping.
+4. Beginning in V2, business listings use cart, inventory reservation,
+   platform payment, order, and shipping.
 5. Buyer, individual seller, business staff, and admin access share one user
    identity with scoped roles.
 6. Business access always checks `businessId` membership and permission.
 7. AI is optional and cannot bypass authorization, validation, or confirmation.
+8. In the V3 trade-completion flow, individual sellers never receive a buyer's
+   exact address.
+9. Seller completion can target only the buyer already bound to the accepted
+   trade created from a listing conversation; show only masked verified
+   email/phone metadata.
+10. An individual sale counts publicly only after seller initiation and
+    authenticated buyer confirmation, and it increments exactly once.
+11. Individual deal negotiation is free-text chat. Do not add structured offer,
+    counteroffer, or offer-acceptance workflows unless the product scope is
+    explicitly changed.
 
 Do not merge the individual trade and business order state machines.
 
@@ -56,15 +86,36 @@ inseparable and the reason is documented.
 - Java 21 and Spring Boot remain the backend baseline.
 - Angular is the MVP frontend framework.
 - MySQL is the default transactional database for new MVP data.
-- Redis stores carts, rate limits, and other temporary state.
-- Kafka carries durable domain events.
+- Redis will store V2 carts, rate limits, and other temporary state.
+- Kafka will carry durable domain events when an approved slice needs them.
 - OpenSearch is a derived listing-search index.
 - S3-compatible object storage holds listing media.
-- OpenAI access occurs only through the isolated agent service.
+- V3 OpenAI access occurs only through the isolated agent service.
+- Stable technical code is shared through small Maven and Angular libraries,
+  not a runtime common service.
 
 Avoid adding PostgreSQL, MongoDB, RabbitMQ, Kubernetes, or another frontend
 framework to new MVP paths without an approved architecture decision.
 Existing technology may remain while a documented migration is in progress.
+
+## Shared Library Rules
+
+Approved backend shared modules:
+
+- `common-core`
+- `common-web`
+- `common-testing`
+
+Allowed shared content includes money/value types, pagination primitives, API
+errors, correlation handling, and testing utilities.
+
+`common-security` and `common-events` are deferred until an approved feature
+requires them. Do not create empty speculative shared modules.
+
+Do not put JPA entities, repositories, migrations, controllers, service
+business logic, or domain aggregates in shared modules. Do not make every
+service depend on every common module. Environment variables and secrets do
+not belong in shared constants.
 
 ## Service Ownership
 
@@ -99,8 +150,8 @@ ownership, reliability, or release reasons.
 - Store money as decimal plus currency.
 - Keep status values stable and explicit.
 - Add indexes for actual query and queue patterns.
-- Keep immutable history for offers, order state, payments, moderation, and
-  audit actions.
+- Keep immutable history for trade state, order state, payments, moderation,
+  and audit actions.
 - Use address, price, listing, and policy snapshots for orders.
 - Never store raw card data, passwords, access tokens, or external bank
   credentials.
@@ -116,6 +167,9 @@ ownership, reliability, or release reasons.
 - Redact secrets, tokens, payment details, and unnecessary PII from logs.
 - Treat chat and uploaded media as untrusted input.
 - Do not expose exact individual meeting/home locations publicly.
+- Do not accept buyer email, phone, address, or replacement buyer ID in a
+  seller completion request; derive the buyer from the trade.
+- Store completion challenges hashed, single-use, expiring, and rate-limited.
 
 ## AI Rules
 
@@ -141,11 +195,12 @@ Minimum per slice:
 
 Additional mandatory tests:
 
-- Concurrent inventory reservation and offer acceptance
-- Payment webhook replay and payment/order recovery
-- Listing visibility after moderation/suspension
-- Chat participant and admin evidence authorization
-- AI tool authorization and prompt-injection resistance
+- During Phase 1: build baseline, shared-module architecture rules,
+  correlation/error plumbing, configuration validation, and CI behavior
+- Later MVP: listing visibility, chat participant authorization, and basic
+  moderation authorization
+- V2: concurrent inventory reservation and payment recovery
+- V3: trade-completion idempotency and AI tool authorization
 
 Use Testcontainers for database, Redis, and Kafka integration where practical.
 

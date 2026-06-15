@@ -1,4 +1,22 @@
-# MVP Architecture
+# Product Architecture
+
+## 0. Release Boundary
+
+Current MVP architecture includes:
+
+- Gateway and identity/account foundation
+- Individual/business seller and basic store profiles
+- Listings, media, search, and public storefront
+- Basic text chat
+- Basic business/listing moderation
+
+Deferred components:
+
+- V2: cart, inventory, checkout/payment, orders/shipping, notifications
+- V3: trade completion/reputation, reviews, advanced trust/admin, AI, analytics
+
+Deferred components remain in this document as target architecture. They must
+not be implemented during Phase 1 setup.
 
 ## 1. Architectural Principles
 
@@ -45,6 +63,56 @@ api.example.com       API gateway
 The admin portal is separately deployed, protected by stricter access policy,
 and never linked from public navigation.
 
+## 2.1 Shared Code Libraries
+
+Use build-time libraries, not a runtime `common-service`.
+
+Backend Maven modules:
+
+```text
+common/
+  common-core/
+  common-web/
+  common-security/
+  common-events/
+  common-testing/
+```
+
+Responsibilities:
+
+| Module | Allowed content |
+|---|---|
+| `common-core` | Money/currency value types, time/ID utilities, pagination primitives |
+| `common-web` | Error envelope, correlation-ID filters, API validation helpers |
+| `common-security` | Authenticated principal and reusable authorization interfaces |
+| `common-events` | Event envelope, outbox interfaces, consumer deduplication primitives |
+| `common-testing` | Test fixtures, container helpers, API assertions |
+
+Frontend Angular libraries:
+
+```text
+frontend/libs/
+  auth/
+  api-client/
+  models/
+  ui/
+  validation/
+  observability/
+```
+
+Shared libraries must not contain:
+
+- JPA entities or repositories
+- Service-specific controllers or business services
+- Listing, trade, inventory, payment, or order aggregates
+- Database migrations
+- Service-specific configuration values
+- A generic client that permits direct access to another service's database
+
+Each service imports only the modules it needs. Shared libraries are versioned
+with the monorepo and tested independently. Environment values and secrets use
+runtime configuration or AWS configuration services, not Java constants.
+
 ## 3. Logical System View
 
 ```mermaid
@@ -56,11 +124,11 @@ flowchart LR
 
     Gateway --> Identity["Identity and User"]
     Gateway --> Listing["Listing and Business"]
-    Gateway --> Trade["Chat, Offer and Trade"]
-    Gateway --> Commerce["Cart, Inventory and Order"]
-    Gateway --> Payment["Payment"]
-    Gateway --> Review["Review and Moderation"]
-    Gateway --> Agent["Agent Service"]
+    Gateway --> Trade["Chat and Individual Trade"]
+    Gateway -. V2 .-> Commerce["Cart, Inventory and Order"]
+    Gateway -. V2 .-> Payment["Payment"]
+    Gateway --> Review["Basic Moderation"]
+    Gateway -. V3 .-> Agent["Agent Service"]
 
     Listing --> MySQL[("MySQL")]
     Trade --> MySQL
@@ -91,6 +159,9 @@ flowchart LR
 The repository already contains several services. MVP implementation should
 evolve them incrementally instead of creating every logical domain as an
 independent service on day one.
+
+The shared Maven modules above are dependencies, not deployable services. A
+runtime service is created only when it owns business data or behavior.
 
 ### 4.1 API Gateway
 
@@ -155,14 +226,14 @@ Responsibilities:
 
 - Individual listing conversations
 - Messages
-- Offers and counters
+- Seller selection of a buyer from a listing conversation
 - Individual trade state
 - Trade confirmations
 
 Realtime delivery may use WebSocket/SSE. Persistent state remains in MySQL.
 Redis may coordinate connections and presence.
 
-### 4.5 Commerce service
+### 4.5 Commerce service (V2)
 
 Evolution path: coordinate `inventory-service` and `order-service`.
 
@@ -180,7 +251,7 @@ Inventory ownership remains in `inventory-service`. Order state remains in
 `order-service`. Cross-service flow uses explicit orchestration and idempotent
 commands; no service writes another service's tables.
 
-### 4.6 Payment service
+### 4.6 Payment service (V2)
 
 Existing module: `payment-service`.
 
@@ -195,7 +266,7 @@ Responsibilities:
 
 The payment service never receives raw card data.
 
-### 4.7 Notification service
+### 4.7 Notification service (V2)
 
 Existing module: `notification-service`.
 
@@ -216,13 +287,10 @@ separate service.
 Responsibilities:
 
 - Moderation cases
-- Reports
-- Account/business suspensions
-- Support cases
-- Operations queue
-- Audit search
+- MVP: business and listing approval decisions
+- V3: reports, suspensions, support cases, operations queue, and audit search
 
-### 4.9 Agent service
+### 4.9 Agent service (V3)
 
 New isolated service added after underlying APIs are stable.
 
@@ -240,7 +308,7 @@ database credentials.
 
 ## 5. Core Workflow Architecture
 
-### 5.1 Individual trade
+### 5.1 Individual trade completion (V3)
 
 ```mermaid
 sequenceDiagram
@@ -253,24 +321,32 @@ sequenceDiagram
     Buyer->>Web: Open individual listing
     Web->>Listing: GET listing
     Buyer->>Trade: Start conversation
-    Buyer->>Trade: Submit offer
-    Trade->>Notify: Offer submitted event
-    Note over Trade: Seller accepts or counters
-    Trade->>Trade: Atomically create trade
+    Buyer->>Trade: Negotiate through text chat
+    Note over Trade: Seller chooses "Deal with this buyer"
+    Trade->>Trade: Create trade from conversation buyer
     Trade->>Listing: Reserve listing
     Note over Buyer,Trade: Payment and delivery occur off-platform
-    Buyer->>Trade: Confirm completion
-    Note over Trade: Seller also confirms
+    Note over Trade: Seller confirms handoff to the buyer bound to the trade
+    Trade->>Notify: Send buyer a single-use email/SMS challenge
+    Buyer->>Trade: Authenticate and confirm matching trade
     Trade->>Listing: Mark sold
+    Trade->>Trade: Increment seller completed-sales count once
     Trade->>Notify: Trade completed event
 ```
 
-Consistency rule: accepted offer, trade creation, and listing reservation must
-behave as one business operation. Prefer a single database transaction if the
-tables are temporarily co-located. If deployed separately, use an orchestrated
-saga with a compensating trade cancellation.
+Consistency rule: selecting the conversation buyer, creating the trade, and
+reserving the listing must behave as one business operation. Prefer a single
+database transaction if the tables are temporarily co-located. If deployed
+separately, use an orchestrated saga with a compensating trade cancellation.
 
-### 5.2 Business purchase
+Completion rule: seller initiation addresses the buyer identity already stored
+on the trade. The API never accepts a replacement buyer email, phone, or user
+ID. The seller sees only masked contact-channel metadata. A challenge is sent
+to the buyer's verified account contact, but buyer authentication is still
+required. Final trade completion, listing sale, and the seller's public
+completed-sales increment must be idempotent and logically atomic.
+
+### 5.2 Business purchase (V2)
 
 ```mermaid
 sequenceDiagram
@@ -338,7 +414,7 @@ Do not use Redis as the only store for:
 Use for durable domain events:
 
 - Listing activated/updated/deactivated
-- Offer and trade updates
+- Chat and individual trade updates
 - Payment succeeded/failed
 - Order confirmed/cancelled/shipped/delivered
 - Review published/removed
@@ -398,7 +474,7 @@ AI:
 - Tool arguments validated against schema
 - User/business/admin context propagated
 - Write actions require explicit user confirmation
-- MVP support tools are read-only
+- V3 support tools begin read-only
 - Full prompt/tool/result audit with sensitive-data redaction
 
 ## 9. Scalability Path
@@ -430,7 +506,7 @@ Do not add database sharding before load tests show it is required.
 
 ## 11. Deployment
 
-MVP production preference:
+Production target preference:
 
 - AWS CloudFront and WAF
 - Application Load Balancer
@@ -443,15 +519,15 @@ MVP production preference:
 - Secrets Manager
 - OpenTelemetry-compatible tracing and CloudWatch/managed metrics
 
-Kubernetes is not required for MVP.
+Kubernetes is not required for the planned releases.
 
 ## 12. Architecture Decisions Still Required
 
 Resolve before related implementation:
 
 1. Identity provider: managed OIDC provider or corrected internal auth service.
-2. Payment provider supporting business marketplace payouts.
-3. Shipping provider or manual tracking-only MVP.
+2. V2 payment provider supporting business marketplace payouts.
+3. V2 shipping provider or manual tracking.
 4. Managed Kafka versus existing Kafka deployment.
 5. Realtime chat transport: WebSocket or SSE plus HTTP commands.
 

@@ -1,341 +1,361 @@
-# MVP Development Roadmap
+# Product Development Roadmap
 
-## 1. Delivery Rules
+## 1. Release Scope
 
-- Implement one numbered slice at a time.
-- A slice must include migration, backend, frontend, authorization,
-  observability, and tests where applicable.
-- Do not start a dependent slice until its prerequisite acceptance tests pass.
-- Keep feature flags for incomplete user-facing workflows.
-- Payment and inventory slices require idempotency and failure tests before UI
-  exposure.
-- AI work starts only after the APIs it calls are stable.
+### MVP
 
-## 2. Definition of Done for Every Slice
+- Foundation
+- Authentication and user accounts
+- Individual seller profile
+- Business seller profile and basic store profile
+- Listings and media
+- Search and public storefront
+- Basic buyer/seller chat
+- Basic admin moderation for businesses and listings
 
-A slice is done when:
+### V2
 
-1. Requirement ID and acceptance criteria are linked in the change.
-2. Database migration is forward-safe and reviewed.
-3. API contract and OpenAPI definition agree.
-4. Unit and integration tests pass.
-5. Authorization and tenant-isolation tests pass.
-6. Structured logs and key metrics exist.
-7. User-visible errors are handled in the relevant application.
-8. No secret, token, payment detail, or unnecessary PII is logged.
-9. Documentation is updated if the implemented behavior changes the contract.
+- Business cart
+- Inventory
+- Checkout and payment
+- Orders and shipping
+- Notifications
 
-## 3. Phase 0: Foundation
+### V3
 
-### FND-01 Establish test baseline
+- Reviews and reputation
+- Advanced admin and trust operations
+- AI assistant
+- Advanced analytics
 
-- Run and repair existing module tests.
-- Record current API behavior.
-- Add root commands for backend and frontend verification.
+Individual trade completion verification and public completed-sales count are
+retained as approved product design, but implementation is deferred until the
+basic MVP chat and listing experience has been validated.
 
-### FND-02 Choose and document identity flow
+## 2. Current Work Boundary
 
-- Remove ambiguity between session auth, custom JWT, and Keycloak.
-- Document token validation and refresh behavior.
-- No feature implementation in this slice.
+Only Phase 0 and Phase 1 setup tasks are approved for implementation.
 
-### FND-03 Standardize API errors and correlation IDs
+Do not implement registration, login, seller profiles, listings, search, chat,
+moderation, cart, payment, or any other application feature during setup.
 
-- Add standard error envelope.
-- Generate/propagate correlation IDs.
-- Add frontend error parsing.
+At the end of Phase 1, stop and review the repository before creating feature
+implementation tasks.
 
-### FND-04 Add migration and database conventions
+## 3. Phase 0: Documentation Baseline
 
-- Confirm MySQL ID representation, UTC, charset, and Flyway rules.
-- Create schema ownership map.
+Phase 0 is intentionally small.
 
-### FND-05 Add outbox and event envelope library
+### P0-01 Confirm release boundaries
 
-- Define reusable outbox record and publisher behavior.
-- Define event envelope and consumer deduplication helper.
+- Treat this roadmap as the release authority.
+- Label requirements, APIs, and database sections as MVP, V2, or V3.
+- Do not delete deferred contracts; they remain planning references.
 
-### FND-06 Establish Angular multi-app workspace plan
+### P0-02 Record current repository state
 
-- Preserve existing marketplace behavior.
-- Add marketplace, seller portal, and admin portal build targets.
-- Add shared auth, API client, models, and UI libraries.
+- Record modules, build tools, Java/Node versions, and existing infrastructure.
+- Record current uncommitted files without modifying or reverting them.
+- Record which existing tests currently pass or fail.
 
-### FND-07 Add CI quality gates
+### P0-03 Create implementation issue template
 
-- Backend compile/tests.
-- Frontend lint/test/build.
-- Migration validation.
-- Dependency and secret scanning.
+The template must require:
 
-## 4. Phase 1: Identity and Accounts
+- Requirement ID
+- Release (`MVP`, `V2`, or `V3`)
+- Scope and non-goals
+- API/database impact
+- Authorization impact
+- Tests and acceptance criteria
 
-Implement in order:
-
-1. `IAM-01` registration and email verification.
-2. `IAM-02` login, refresh, and logout.
-3. `IAM-03` password recovery.
-4. `IAM-04` profile view/edit.
-5. `IAM-05` address book.
-6. `IAM-06` role and tenant authorization.
-7. Admin authentication hardening and `ADM-01`.
-
-Exit criteria:
+Phase 0 completion:
 
-- Marketplace login works.
-- Seller/admin applications can share authentication.
-- Cross-user, cross-business, and admin access tests pass.
+- Documentation has one release classification.
+- Existing code behavior has not been changed.
 
-## 5. Phase 2: Seller Identities
-
-### Individual seller
-
-1. `IND-01` activation and public profile.
-
-### Business onboarding
-
-2. `BUS-01` application draft.
-3. `BUS-02` submit application.
-4. `BUS-03` verification callback.
-5. Admin application queue read view.
-6. `BUS-04` approve/reject/request information.
-7. `BUS-05` store profile.
-8. `BUS-06` versioned policies.
-9. `BUS-07` staff invitations and roles.
-
-Exit criteria:
-
-- Individual seller can be activated from marketplace account.
-- Approved business owner can enter seller portal.
-- Staff are constrained to their business and assigned permissions.
-
-## 6. Phase 3: Listings and Media
-
-Implement small slices:
-
-1. `LST-01` category read API and marketplace category UI.
-2. Admin category seed/management tooling required for test data.
-3. `LST-02` signed upload request.
-4. `LST-03` upload confirmation and scan state.
-5. `LST-04` individual listing draft API.
-6. Individual listing create form.
-7. `LST-05` business listing draft API.
-8. Business listing create form.
-9. `LST-06` listing edit with optimistic locking.
-10. `LST-07` attach, remove, and order images.
-11. `LST-08` submit for review.
-12. `ADM-02` moderation queue claim.
-13. `LST-09` listing decision and notification.
-14. `LST-10` pause, close, and relist.
-15. `LST-11` public listing detail and seller-type disclosure.
-
-Exit criteria:
-
-- Both seller types can create moderated listings.
-- Only active approved listings are public.
-- Individual and business listing behavior is visibly distinct.
-
-## 7. Phase 4: Search and Storefront
-
-1. Create listing event projector.
-2. `SRC-01` activate/update/deactivate indexing.
-3. `SRC-02` keyword search.
-4. Add category filter.
-5. Add seller-type filter.
-6. Add condition and price filters.
-7. Add approximate location filter for individual listings.
-8. Add cursor pagination and result cards.
-9. `SRC-03` public business storefront.
-10. Add index rebuild and failed-index operations command.
-
-Exit criteria:
-
-- Search excludes unavailable listings.
-- Index can be rebuilt.
-- Search load test meets agreed baseline.
-
-## 8. Phase 5: Individual Chat and Trades
-
-1. `CHT-01` create/list conversations.
-2. Conversation marketplace UI.
-3. `CHT-02` HTTP message send/history.
-4. Add realtime message delivery.
-5. Add unread count/read state.
-6. `CHT-03` block user.
-7. `CHT-03` report conversation.
-8. `OFF-01` submit offer.
-9. Render offer card in chat.
-10. `OFF-02` reject and withdraw.
-11. `OFF-02` counteroffer.
-12. `OFF-02` accept offer with concurrency protection.
-13. `TRD-01` create trade and reserve listing.
-14. Trade detail page and off-platform disclosure.
-15. `TRD-02` cancellation.
-16. `TRD-03` buyer completion confirmation.
-17. `TRD-03` seller completion confirmation and mark sold.
-
-Exit criteria:
-
-- One individual listing cannot create two active trades.
-- Payment/delivery responsibility is clear at every trade step.
-- Chat access and evidence access are authorization-tested.
-
-## 9. Phase 6: Business Cart and Inventory
-
-1. `INV-01` inventory item creation from business listing.
-2. Inventory adjustment API and movement history.
-3. Seller portal inventory page.
-4. Low-stock display.
-5. `CRT-01` Redis cart read.
-6. `CRT-02` add item.
-7. `CRT-03` update/remove item.
-8. Marketplace cart UI.
-9. `CRT-04` authoritative cart validation.
-10. `INV-02` reservation API.
-11. Concurrent reservation test for one hot listing.
-12. `INV-03` expiration worker.
-13. `INV-04` commit reservation.
-
-Exit criteria:
-
-- Cart accepts business listings only.
-- Price changes are surfaced.
-- Supported concurrency cannot oversell inventory.
-
-## 10. Phase 7: Checkout and Payment
-
-1. `CHK-01` create checkout and immutable snapshots.
-2. Checkout address page.
-3. `CHK-02` subtotal and shipping calculation.
-4. Add tax adapter interface and MVP implementation.
-5. Checkout review page.
-6. Select payment provider and build adapter.
-7. `PAY-01` create payment intent.
-8. Provider-hosted payment UI integration.
-9. `PAY-02` signed webhook validation.
-10. Webhook replay protection.
-11. `ORD-01` create confirmed order.
-12. Commit inventory after payment.
-13. Publish order outbox events.
-14. Checkout success/pending/failure pages.
-15. `PAY-03` reconciliation job.
-16. Admin payment/order mismatch queue.
-
-Exit criteria:
-
-- Client cannot control price.
-- Duplicate submit/webhook cannot duplicate charge or order.
-- Payment success without order is automatically recovered or queued.
-
-## 11. Phase 8: Orders and Fulfillment
-
-1. `ORD-02` buyer order list.
-2. Buyer order detail.
-3. `ORD-03` business order queue.
-4. Business order detail.
-5. `SHP-01` accept fulfillment.
-6. `SHP-02` create shipment.
-7. `SHP-03` mark shipped.
-8. Buyer tracking timeline.
-9. `SHP-04` carrier webhook or manual delivery state adapter.
-10. Partial-shipment support.
-11. `ORD-04` cancellation request.
-12. Cancellation eligibility and inventory/refund orchestration.
-
-Exit criteria:
-
-- Buyer and business see correct scoped order views.
-- State transitions reject invalid or duplicate commands.
-- Shipment updates are idempotent.
-
-## 12. Phase 9: Notifications
-
-Implement notification infrastructure early where dependencies require
-`NOT-01`, then complete channels here:
-
-1. In-app event consumer and deduplication.
-2. `NOT-02` notification list/read UI.
-3. Versioned email templates.
-4. `NOT-03` email delivery and retry.
-5. Dead-letter operations view.
-6. `NOT-04` preferences API and page.
-7. End-to-end notification tests for listing, trade, payment, and shipping.
-
-## 13. Phase 10: Reviews and Reputation
-
-1. `REV-01` business order eligibility and review create.
-2. Product review display.
-3. Business seller review display.
-4. `REV-02` individual trade review.
-5. Individual reputation display.
-6. `REV-03` aggregate projector and rebuild.
-7. `REV-04` report review.
-8. Moderator remove/restore review.
-
-## 14. Phase 11: Admin and Trust Operations
-
-1. Admin dashboard counts.
-2. `ADM-03` generic reports queue.
-3. Listing report detail.
-4. Chat report detail with audited evidence access.
-5. Individual trade report detail.
-6. Business order support detail.
-7. `ADM-04` suspend user.
-8. Restore user.
-9. Suspend/restore business.
-10. `ADM-05` support cases and internal notes.
-11. User-visible support responses.
-12. `ADM-06` failed event and reconciliation operations.
-13. Audit log search with bounded filters.
-
-## 15. Phase 12: Limited AI
-
-1. Agent service skeleton, authentication, budget, and audit.
-2. `AI-01` `searchListings` tool.
-3. `getListing` and compare response.
-4. `AI-02` trade-message draft with safety policy.
-5. `AI-03` listing-content draft.
-6. `AI-04` read-only assigned support-case summary.
-7. Prompt-injection and unauthorized-tool tests.
-8. Cost, latency, and tool error dashboards.
-9. Global AI disable switch.
-
-## 16. Phase 13: Launch Readiness
-
-1. End-to-end individual trade test.
-2. End-to-end business purchase test.
-3. Security and tenant isolation review.
-4. Search load test.
-5. Cart and reservation load test.
-6. Checkout/payment resilience test.
-7. Chat connection and message-rate test.
-8. Backup restoration exercise.
-9. Event replay and index rebuild exercise.
-10. Observability dashboards and alerts.
-11. Accessibility review of critical flows.
-12. Incident and rollback runbooks.
-
-## 17. Milestones
-
-### Milestone A: Sellable listings
-
-Phases 0 through 4. Sellers can onboard and publish moderated listings.
-
-### Milestone B: Individual marketplace
-
-Phase 5 plus required notifications and moderation. Individuals can negotiate
-and record completed trades.
-
-### Milestone C: Business commerce
-
-Phases 6 through 9. Businesses can receive paid orders and fulfill them.
-
-### Milestone D: Trust and operations
-
-Phases 10 and 11. Reviews, reports, support, suspensions, and recovery are
-operational.
-
-### Milestone E: AI-assisted MVP
-
-Phases 12 and 13. Limited AI is available, and the platform has passed launch
-readiness checks.
+## 4. Phase 1: Engineering Setup
+
+Phase 1 creates only the development foundation required for later features.
+
+### P1-01 Verify local toolchain
+
+Tasks:
+
+- Confirm Java 21 and Maven wrapper execution.
+- Confirm supported Node.js and npm versions.
+- Confirm Docker Compose availability.
+- Document exact setup and verification commands.
+
+Deliverable:
+
+- Updated development setup instructions.
+
+Tests:
+
+- Maven version command succeeds.
+- Frontend dependency/tool version commands succeed.
+- Docker Compose configuration parses.
+
+### P1-02 Establish backend build baseline
+
+Tasks:
+
+- Build all existing Maven modules without changing product behavior.
+- Identify failing modules or tests.
+- Add a documented root verification command.
+- Keep existing service boundaries unchanged.
+
+Deliverable:
+
+- Reproducible backend build/test baseline.
+
+Tests:
+
+- Root Maven compile succeeds, or known failures are documented with evidence.
+- Existing passing tests remain passing.
+
+### P1-03 Establish frontend build baseline
+
+Tasks:
+
+- Install dependencies using the existing lockfile.
+- Run the current Angular test/build commands.
+- Document current warnings and failures.
+- Do not create marketplace, seller, or admin feature pages.
+
+Deliverable:
+
+- Reproducible frontend build/test baseline.
+
+Tests:
+
+- Angular build succeeds, or known failures are documented.
+- Existing frontend tests remain passing.
+
+### P1-04 Decide one authentication architecture
+
+Tasks:
+
+- Compare the repository's custom JWT/session and Keycloak paths.
+- Select one authentication approach for later feature work.
+- Document access token, refresh, logout, and service validation behavior.
+- Document admin authentication hardening expectations.
+- Do not implement registration or login.
+
+Deliverable:
+
+- Authentication architecture decision record.
+
+Tests:
+
+- Documentation review only; no application behavior change.
+
+### P1-05 Define MySQL ownership and migration conventions
+
+Tasks:
+
+- Map each current and planned domain to its owning service/schema.
+- Confirm ID representation, UTC timestamps, `utf8mb4`, InnoDB, and money
+  representation.
+- Define Flyway naming and backward-compatible migration rules.
+- Do not create feature tables.
+
+Deliverable:
+
+- Database convention and ownership record.
+
+Tests:
+
+- Existing migrations validate.
+- No Hibernate schema auto-update is introduced.
+
+### P1-06 Create minimal backend shared modules
+
+Create only:
+
+```text
+common-core
+common-web
+common-testing
+```
+
+Initial allowed content:
+
+- `common-core`: identifiers, money/currency value type, clock abstraction
+- `common-web`: error envelope and correlation-ID primitives
+- `common-testing`: shared test assertions and Testcontainers helpers
+
+Do not create `common-security` or `common-events` until authentication and
+event work actually need them.
+
+Do not add:
+
+- JPA entities
+- Repositories
+- Business services
+- Feature DTOs
+- Feature constants
+- Database migrations
+
+Deliverable:
+
+- Small Maven modules referenced only where immediately useful.
+
+Tests:
+
+- Each shared module builds independently.
+- Architecture test prevents JPA entities and Spring business services inside
+  shared modules.
+
+### P1-07 Standardize API error and correlation contracts
+
+Tasks:
+
+- Define the error envelope in `common-web`.
+- Generate or accept a safe correlation ID at the gateway.
+- Propagate the ID to service logs and responses.
+- Do not change feature endpoint behavior beyond error/correlation plumbing.
+
+Deliverable:
+
+- Shared technical API contract.
+
+Tests:
+
+- Missing correlation ID is generated.
+- Valid client correlation ID is propagated.
+- Invalid/oversized correlation ID is replaced.
+- Error responses contain no stack trace or secret.
+
+### P1-08 Define runtime configuration rules
+
+Tasks:
+
+- Separate local defaults from secrets.
+- Document environment variable naming.
+- Remove no secrets during this task unless replacement configuration is ready.
+- Define AWS Secrets Manager usage for production.
+- Do not create a runtime common/config service.
+
+Deliverable:
+
+- Configuration and secret-management guide.
+
+Tests:
+
+- Repository secret scan runs.
+- Required local variables are represented in `.env.example`.
+
+### P1-09 Prepare Angular workspace structure
+
+Tasks:
+
+- Document the target three-app workspace:
+  `marketplace`, `seller-portal`, and `admin-portal`.
+- Identify reusable `auth`, `api-client`, `models`, `ui`, `validation`, and
+  `observability` libraries.
+- Preserve the existing frontend entry point during setup.
+- Do not create feature pages or migrate existing features yet.
+
+Deliverable:
+
+- Frontend workspace migration plan or empty buildable shells only if required
+  to validate the workspace structure.
+
+Tests:
+
+- Existing frontend still builds.
+- Any created shell builds without application features.
+
+### P1-10 Add CI baseline
+
+Tasks:
+
+- Add backend compile/test job.
+- Add frontend build/test job.
+- Add migration validation.
+- Add dependency and secret scanning.
+- Do not add deployment automation.
+
+Deliverable:
+
+- Pull-request quality checks.
+
+Tests:
+
+- CI configuration validates.
+- A controlled test failure causes the relevant job to fail.
+
+### P1-11 Add code quality and architecture checks
+
+Tasks:
+
+- Apply existing Java and Angular formatting/lint conventions.
+- Add checks preventing service-to-service database access.
+- Add checks preventing business code in common modules.
+- Define package ownership conventions.
+
+Deliverable:
+
+- Documented, automated architecture guardrails.
+
+Tests:
+
+- Example violations are detected by the checks.
+
+### P1-12 Produce Phase 1 verification report
+
+Report:
+
+- Commands run and outcomes
+- Existing failures still unresolved
+- Authentication decision
+- Database ownership decision
+- Shared modules created
+- CI checks added
+- Files intentionally left unchanged
+- Risks blocking the first feature slice
+
+Phase 1 completion:
+
+- Backend and frontend baselines are reproducible.
+- Authentication and database conventions are decided.
+- Minimal shared technical modules build.
+- Error and correlation contracts exist.
+- CI baseline runs.
+- No application feature has been implemented.
+
+## 5. Future MVP Planning
+
+After Phase 1 approval, create small implementation tasks for these areas only:
+
+1. Authentication and accounts
+2. Individual and business seller profiles
+3. Listings and media
+4. Search and storefront
+5. Basic buyer/seller chat
+6. Basic business/listing admin moderation
+
+Do not create V2 or V3 implementation tasks until MVP usage validates the need.
+
+## 6. Deferred Release Summaries
+
+### V2
+
+Business commerce:
+
+- Cart
+- Inventory
+- Checkout/payment
+- Orders/shipping
+- Notifications
+
+### V3
+
+Trust, intelligence, and growth:
+
+- Reviews/reputation
+- Advanced admin/trust operations
+- AI assistant
+- Advanced analytics

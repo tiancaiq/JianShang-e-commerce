@@ -1,4 +1,22 @@
-# MVP Database Design
+# Product Database Design
+
+## 0. Release Boundary
+
+MVP schemas:
+
+- Identity/accounts
+- Individual and business seller profiles
+- Basic store
+- Categories, listings, and media
+- Basic conversations/messages
+- Basic business/listing moderation
+
+Deferred schemas:
+
+- V2: cart, inventory, checkout, orders, payments, shipping, notifications
+- V3: trades/completion reputation, reviews, advanced moderation/support
+
+Phase 1 setup must define conventions only. It must not create feature tables.
 
 ## 1. Database Policy
 
@@ -223,7 +241,7 @@ status, public derivative URL, and lifecycle status.
 
 Append-only status change with actor, reason, and correlation ID.
 
-## 5. Chat, Offer, and Trade Schema
+## 5. Chat and Individual Trade Schema
 
 ### `conversations`
 
@@ -245,7 +263,7 @@ Participant state including last-read message and blocked time.
 | `id` | Ordered opaque ID |
 | `conversation_id` | Parent |
 | `sender_user_id` | Participant |
-| `message_type` | `TEXT`, `OFFER_EVENT`, `SYSTEM` |
+| `message_type` | `TEXT`, `TRADE_EVENT`, `SYSTEM` |
 | `body` | Nullable by type |
 | `moderation_state` | Safety state |
 | `created_at` | Ordering |
@@ -255,36 +273,79 @@ Indexes:
 - `(conversation_id, created_at, id)`
 - `(sender_user_id, created_at)` for abuse investigation
 
-### `offers`
-
-Stores conversation, listing, proposer, recipient, current amount/currency,
-status, expiry, and version.
-
-### `offer_events`
-
-Append-only history of submitted, countered, accepted, rejected, withdrawn, or
-closed actions. Stores amount and delivery note at each step.
-
 ### `trades`
+
+Release: V3.
 
 | Column | Notes |
 |---|---|
 | `id` | Primary key |
-| `listing_id` | Unique accepted listing |
-| `accepted_offer_id` | Unique |
+| `listing_id` | Unique active/completed trade per listing |
+| `conversation_id` | Conversation used to select buyer |
 | `buyer_user_id` | Participant |
 | `seller_user_id` | Participant |
-| `agreed_amount`, `currency` | Informational agreement |
-| `delivery_note` | Agreed note |
+| `deal_note` | Optional seller-entered private note |
 | `status` | `AGREED`, `RESERVED`, `COMPLETED`, `CANCELLED`, `REPORTED` |
 | `buyer_confirmed_at` | Nullable |
 | `seller_confirmed_at` | Nullable |
+| `completion_request_id` | Nullable current challenge reference |
 | `cancelled_by`, `cancel_reason` | Nullable |
 | version and timestamps | UTC |
 
 The table stores no external payment credentials or proof that money moved.
+The buyer is derived from `conversation_id` when the seller creates the trade.
+Chat text is not parsed into authoritative price, payment, or delivery terms.
 
-## 6. Cart, Inventory, Checkout, and Order Schema
+### `trade_completion_requests`
+
+Stores:
+
+- trade ID and buyer user ID
+- delivery channel: `EMAIL` or `SMS`
+- masked destination snapshot for display/audit
+- hashed single-use challenge token or code
+- expiry, consumed, invalidated, and attempt timestamps
+- request count and delivery status
+
+Rules:
+
+- The buyer user ID is copied from the trade, never accepted from seller input.
+- Raw challenge values are not stored.
+- Raw email/phone destinations are resolved from the identity service at send
+  time and are not copied into the trade schema.
+- Only one current usable challenge exists per trade.
+- Challenges expire and are invalid after successful confirmation.
+
+Indexes:
+
+- Unique active/current request per trade, enforced by transaction/application
+  invariant
+- Unique challenge hash
+- `(status, expires_at)` for cleanup
+
+### `individual_seller_reputation`
+
+Derived public projection:
+
+| Column | Notes |
+|---|---|
+| `seller_user_id` | Primary key |
+| `completed_sales_count` | Non-negative count |
+| `rating_count` | Published eligible reviews |
+| `rating_average` | Derived average |
+| `last_rebuilt_at` | Projection maintenance |
+| version and timestamps | UTC |
+
+`completed_sales_count` increments only when a distinct trade first transitions
+to `COMPLETED`. The operation must deduplicate by trade ID and support rebuild
+from `trades`.
+
+### `individual_seller_reputation_events`
+
+Projection ledger with unique `(seller_user_id, trade_id, event_type)`. This
+prevents duplicate increments when completion events are retried.
+
+## 6. Cart, Inventory, Checkout, and Order Schema (V2)
 
 ### Redis cart
 
@@ -416,7 +477,7 @@ Maps partial shipment quantities to order items.
 
 Append-only carrier status events with provider event ID.
 
-## 7. Payment Schema
+## 7. Payment Schema (V2)
 
 ### `payments`
 
@@ -440,10 +501,16 @@ approver where required, and idempotency key.
 
 ### `payout_projections`
 
-MVP read model for expected/paid business amounts and platform fees. Provider
+V2 read model for expected/paid business amounts and platform fees. Provider
 remains authoritative.
 
 ## 8. Reviews, Moderation, and Notifications
+
+Release placement:
+
+- MVP: basic moderation cases and decisions for businesses/listings
+- V2: notifications
+- V3: reviews, reports, suspensions, and support cases
 
 ### `reviews`
 
@@ -566,18 +633,17 @@ Create small migrations in this order:
 8. Media and listing images.
 9. Listing status history and outbox.
 10. Conversations and messages.
-11. Offers and offer events.
-12. Trades.
-13. Inventory items and movements.
-14. Reservations.
-15. Checkout sessions and snapshots.
-16. Orders and business orders.
-17. Payments and payment events.
-18. Shipments.
-19. Reviews and aggregates.
-20. Moderation, reports, and support.
-21. Notifications and delivery attempts.
-22. Shared idempotency, processed-event, and audit support as owned per schema.
+11. Trades, completion requests, and individual seller reputation.
+12. Inventory items and movements.
+13. Reservations.
+14. Checkout sessions and snapshots.
+15. Orders and business orders.
+16. Payments and payment events.
+17. Shipments.
+18. Reviews and aggregates.
+19. Moderation, reports, and support.
+20. Notifications and delivery attempts.
+21. Shared idempotency, processed-event, and audit support as owned per schema.
 
 Each migration must be backward compatible with the application version that
 precedes it. Destructive cleanup is a separate, later migration.

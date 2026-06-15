@@ -1,4 +1,18 @@
-# MVP API Contract
+# Product API Contract
+
+## 0. Release Boundary
+
+MVP contracts cover identity/accounts, seller/store profiles, listings/media,
+search/storefront, basic text chat, and basic business/listing moderation.
+
+V2 contracts cover cart, inventory, checkout/payment, orders/shipping, and
+notifications.
+
+V3 contracts cover individual trade completion/reputation, reviews, advanced
+admin/trust operations, and AI.
+
+During Phase 1 setup, no feature endpoint in this document should be
+implemented.
 
 ## 1. Conventions
 
@@ -37,6 +51,11 @@ Money:
 ```
 
 Timestamps use ISO 8601 UTC.
+
+The standard money, pagination, error, correlation, authenticated-principal,
+and event-envelope types should be supplied by the corresponding shared
+backend/frontend libraries. Shared types define transport conventions only;
+they do not expose service-owned domain entities.
 
 ## 2. Standard Envelopes
 
@@ -309,40 +328,39 @@ POST   /reports
 
 Report request identifies subject type/ID, reason, and permitted evidence IDs.
 
-## 8. Offers and Individual Trades
+## 8. Individual Trades (V3)
 
-### Offers (`OFF-01`, `OFF-02`)
-
-```text
-POST /conversations/{conversationId}/offers
-POST /offers/{offerId}/accept
-POST /offers/{offerId}/reject
-POST /offers/{offerId}/counter
-POST /offers/{offerId}/withdraw
-GET  /offers/{offerId}
-```
-
-Offer request:
-
-```json
-{
-  "amount": {"amount": "225.00", "currency": "USD"},
-  "deliveryNote": "Meet at an agreed public location"
-}
-```
-
-Accept and counter require expected offer version. Acceptance returns the new
-trade reference.
+Buyer and seller negotiate only through free-text chat. There are no structured
+offer, counteroffer, or offer-acceptance endpoints in MVP.
 
 ### Trades (`TRD-01` through `TRD-03`)
 
 ```text
+POST /conversations/{conversationId}/trade
 GET  /trades
 GET  /trades/{tradeId}
 POST /trades/{tradeId}/cancel
-POST /trades/{tradeId}/confirm-completion
+POST /trades/{tradeId}/completion-requests
+POST /trades/{tradeId}/buyer-confirmation
 POST /trades/{tradeId}/report
 ```
+
+#### Seller creates trade from conversation
+
+`POST /conversations/{conversationId}/trade`
+
+Authorization: authenticated listing owner.
+
+Request:
+
+```json
+{"dealNote": "Optional private note"}
+```
+
+The request does not accept buyer ID, email, phone, price, or address. The
+service derives the buyer and listing from the conversation. It creates one
+trade and reserves the listing atomically. A concurrent request for another
+conversation returns `409 LISTING_ALREADY_RESERVED`.
 
 Every response contains:
 
@@ -355,7 +373,77 @@ Every response contains:
 
 No endpoint records bank/card credentials or claims external payment success.
 
-## 9. Cart and Inventory
+#### Seller initiates completion
+
+`POST /trades/{tradeId}/completion-requests`
+
+Authorization: authenticated seller recorded on the trade.
+
+Request:
+
+```json
+{"channel": "EMAIL"}
+```
+
+The request does not accept buyer ID, email, phone, or address. The service
+derives the buyer from the trade and verifies that the selected channel is
+available and verified.
+
+Response:
+
+```json
+{
+  "data": {
+    "tradeId": "id",
+    "sellerConfirmedAt": "timestamp",
+    "buyerConfirmationStatus": "PENDING",
+    "deliveryChannel": "EMAIL",
+    "maskedDestination": "j***@mail.com",
+    "expiresAt": "timestamp"
+  }
+}
+```
+
+Repeated requests are idempotent within a short window and rate-limited.
+Creating a new challenge invalidates prior unused challenges.
+
+#### Buyer confirms completion
+
+`POST /trades/{tradeId}/buyer-confirmation`
+
+Authorization: authenticated buyer recorded on the trade.
+
+Request:
+
+```json
+{"challenge": "single-use-link-token-or-code"}
+```
+
+The service validates the challenge hash, expiry, current request, authenticated
+buyer, and trade state. Success transitions the trade to `COMPLETED`, marks the
+listing `SOLD`, and increments public seller completed-sales count exactly once.
+
+Example completed response:
+
+```json
+{
+  "data": {
+    "tradeId": "id",
+    "status": "COMPLETED",
+    "completedAt": "timestamp",
+    "seller": {
+      "userId": "id",
+      "displayName": "Seller name",
+      "completedSalesCount": 12
+    }
+  }
+}
+```
+
+The confirmation link may open the marketplace confirmation page, but the
+buyer must sign in before the API accepts it.
+
+## 9. Cart and Inventory (V2)
 
 ### Cart (`CRT-01` through `CRT-04`)
 
@@ -396,7 +484,7 @@ GET  /internal/inventory/reservations/{id}
 
 Service authentication and `Idempotency-Key` are mandatory.
 
-## 10. Checkout, Payment, and Orders
+## 10. Checkout, Payment, and Orders (V2)
 
 ### Checkout (`CHK-01`, `CHK-02`)
 
@@ -444,7 +532,7 @@ POST /admin/operations/payment-order-mismatches/{id}/retry
 
 Retry requires `FINANCE_ADMIN` or a narrower configured permission.
 
-## 11. Fulfillment and Shipping
+## 11. Fulfillment and Shipping (V2)
 
 ```text
 POST /businesses/{businessId}/orders/{businessOrderId}/accept
@@ -457,7 +545,7 @@ POST /webhooks/shipping
 Shipment create request includes carrier, tracking number, and item quantities.
 State-changing commands require idempotency.
 
-## 12. Reviews
+## 12. Reviews (V3)
 
 ```text
 POST  /order-items/{orderItemId}/reviews
@@ -472,7 +560,20 @@ POST  /reviews/{reviewId}/report
 The server derives reviewer and eligibility from authentication and the
 referenced transaction.
 
-## 13. Notifications
+Individual reputation response includes:
+
+```json
+{
+  "data": {
+    "userId": "id",
+    "completedSalesCount": 12,
+    "ratingCount": 10,
+    "ratingAverage": "4.80"
+  }
+}
+```
+
+## 13. Notifications (V2)
 
 ```text
 GET   /notifications?cursor=&limit=
@@ -483,6 +584,10 @@ PATCH /notification-preferences
 ```
 
 ## 14. Administration and Support
+
+MVP includes only business application and listing moderation endpoints.
+User/business suspensions, reports, support cases, and operations queues are
+V3.
 
 ```text
 GET  /admin/users
@@ -508,7 +613,7 @@ GET  /admin/audit-logs
 
 Admin list endpoints require bounded filters and cursor pagination.
 
-## 15. Agent APIs and Tools
+## 15. Agent APIs and Tools (V3)
 
 User-facing agent endpoint:
 
@@ -568,9 +673,6 @@ listing.activated
 listing.updated
 listing.deactivated
 message.created
-offer.submitted
-offer.countered
-offer.accepted
 trade.created
 trade.cancelled
 trade.completed
