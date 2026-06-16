@@ -20,7 +20,7 @@ Workflow:
 | `architecture` | Run source-based package and boundary guardrails | `python tools/architecture_checks.py` |
 | `frontend` | Install, build, and test Angular | `npm ci`, `npm run build`, `npm test -- --watch=false --browsers=ChromeHeadless` |
 | `migrations` | Validate services that own Flyway migrations | `./mvnw -B -pl auth-service,order-service,inventory-service,payment-service -am test` |
-| `dependencies` | Resolve backend dependencies and scan frontend dependencies | `./mvnw dependency:resolve`, `npm audit --audit-level=critical`, dependency review |
+| `dependencies` | Resolve backend dependencies and scan frontend dependencies | `./mvnw -DskipTests test-compile`, `npm audit --audit-level=critical`, dependency review |
 | `secrets` | Scan for high-confidence committed secret patterns | `grep` based secret scan |
 
 ## Dependency Scan Boundary
