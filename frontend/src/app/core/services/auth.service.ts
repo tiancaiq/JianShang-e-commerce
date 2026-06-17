@@ -1,73 +1,147 @@
-import { Injectable, signal, computed, Inject, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { DOCUMENT, isPlatformBrowser } from '@angular/common';
+import { Inject, Injectable, PLATFORM_ID, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap } from 'rxjs';
-import { UserResponse, LoginRequest, SignupRequest } from '../models/auth.model';
+import { Observable, catchError, finalize, map, of, shareReplay, switchMap } from 'rxjs';
+import {
+  ApiDataResponse,
+  AuthState,
+  CsrfSummary,
+  CurrentUser,
+  SessionResponse,
+} from '../models/auth.model';
 import { environment } from '../../../environments/environment.development';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly authUrl = environment.authServiceUrl;
-  private readonly currentUser = signal<UserResponse | null>(null);
+  private readonly gatewayUrl = environment.apiGatewayUrl;
+  private readonly currentUser = signal<CurrentUser | null>(null);
+  private readonly csrfToken = signal<CsrfSummary | null>(null);
   private readonly isLoading = signal(false);
+  private readonly initialized = signal(false);
+  private sessionRequest: Observable<AuthState> | null = null;
 
   readonly user = this.currentUser.asReadonly();
+  readonly csrf = this.csrfToken.asReadonly();
   readonly loading = this.isLoading.asReadonly();
   readonly isAuthenticated = computed(() => this.currentUser() !== null);
 
   constructor(
     private http: HttpClient,
-    @Inject(PLATFORM_ID) private platformId: Object
-  ) {
-    this.loadUserFromStorage();
-  }
+    @Inject(PLATFORM_ID) private platformId: Object,
+    @Inject(DOCUMENT) private document: Document
+  ) {}
 
-  private loadUserFromStorage(): void {
-    if (isPlatformBrowser(this.platformId)) {
-      const token = localStorage.getItem('token');
-      const userStr = localStorage.getItem('user');
-      if (token && userStr) {
-        this.currentUser.set(JSON.parse(userStr));
-      }
+  ensureSession(): Observable<AuthState> {
+    if (this.initialized()) {
+      return of(this.snapshot());
     }
-  }
 
-  getToken(): string | null {
-    if (isPlatformBrowser(this.platformId)) {
-      return localStorage.getItem('token');
+    if (!this.sessionRequest) {
+      this.sessionRequest = this.loadSession();
     }
-    return null;
+
+    return this.sessionRequest;
   }
 
-  signup(request: SignupRequest): Observable<UserResponse> {
-    return this.http.post<UserResponse>(`${this.authUrl}/signup`, request).pipe(
-      tap(user => this.handleAuthSuccess(user))
-    );
+  refreshSession(): Observable<AuthState> {
+    this.sessionRequest = this.loadSession();
+    return this.sessionRequest;
   }
 
-  login(request: LoginRequest): Observable<UserResponse> {
-    return this.http.post<UserResponse>(`${this.authUrl}/login`, request).pipe(
-      tap(user => this.handleAuthSuccess(user))
-    );
+  setCurrentUser(user: CurrentUser): void {
+    this.currentUser.set(user);
+    this.initialized.set(true);
+  }
+
+  login(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
+
+    this.document.defaultView?.location.assign(this.url('/api/v1/auth/login'));
   }
 
   logout(): void {
     this.clearUser();
-  }
 
-  private handleAuthSuccess(user: UserResponse): void {
-    this.currentUser.set(user);
-    if (isPlatformBrowser(this.platformId)) {
-      localStorage.setItem('token', user.token);
-      localStorage.setItem('user', JSON.stringify(user));
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
     }
+
+    const form = this.document.createElement('form');
+    form.method = 'post';
+    form.action = this.url('/api/v1/auth/logout');
+    form.style.display = 'none';
+
+    const csrf = this.csrfToken();
+    if (csrf) {
+      const csrfInput = this.document.createElement('input');
+      csrfInput.type = 'hidden';
+      csrfInput.name = csrf.parameterName;
+      csrfInput.value = csrf.token;
+      form.appendChild(csrfInput);
+    }
+
+    this.document.body.appendChild(form);
+    form.submit();
   }
 
   clearUser(): void {
     this.currentUser.set(null);
-    if (isPlatformBrowser(this.platformId)) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+    this.initialized.set(true);
+  }
+
+  private loadSession(): Observable<AuthState> {
+    this.isLoading.set(true);
+
+    return this.http.get<SessionResponse>(this.url('/api/v1/auth/session'), { withCredentials: true }).pipe(
+      switchMap(session => {
+        this.csrfToken.set(session.csrf);
+
+        if (!session.authenticated) {
+          this.currentUser.set(null);
+          return of(this.snapshot());
+        }
+
+        return this.http.get<ApiDataResponse<CurrentUser>>(this.url('/api/v1/users/me'), {
+          withCredentials: true,
+        }).pipe(
+          map(response => {
+            this.currentUser.set(response.data);
+            return this.snapshot();
+          }),
+          catchError(() => {
+            this.currentUser.set(null);
+            return of(this.snapshot());
+          })
+        );
+      }),
+      catchError(() => {
+        this.csrfToken.set(null);
+        this.currentUser.set(null);
+        return of(this.snapshot());
+      }),
+      finalize(() => {
+        this.initialized.set(true);
+        this.isLoading.set(false);
+        this.sessionRequest = null;
+      }),
+      shareReplay({ bufferSize: 1, refCount: false })
+    );
+  }
+
+  private snapshot(): AuthState {
+    const user = this.currentUser();
+    return {
+      authenticated: user !== null,
+      user,
+    };
+  }
+
+  private url(path: string): string {
+    if (!this.gatewayUrl) {
+      return path;
     }
+    return `${this.gatewayUrl}${path}`;
   }
 }

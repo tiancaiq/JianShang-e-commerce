@@ -28,11 +28,16 @@ Content type:
 application/json
 ```
 
-Authentication:
+Service authentication:
 
 ```text
 Authorization: Bearer <access-token>
 ```
+
+First-party browser authentication follows ADR-0001: the gateway BFF owns the
+OIDC login session, browser JavaScript receives no access or refresh token,
+and state-changing browser requests send the CSRF token returned by
+`GET /api/v1/auth/session`.
 
 Required headers where applicable:
 
@@ -118,24 +123,122 @@ Response `201`: user ID, status, verification required.
 
 Request: `{"token": "single-use-token"}`.
 
-### `POST /auth/login` (`IAM-02`)
+### `GET /auth/login` (`IAM-02`)
 
-Request: email and password.
+Starts the gateway BFF OIDC login redirect. The gateway, not browser
+JavaScript, exchanges the authorization code and stores OAuth tokens
+server-side.
 
-Response: access token metadata and safe user summary. Refresh token delivery
-must follow the selected auth design, preferably secure HTTP-only cookie.
+Query: `client=marketplace|seller-portal|admin-portal`.
 
-### `POST /auth/refresh`, `POST /auth/logout` (`IAM-02`)
+The endpoint does not accept credentials and does not return access or refresh
+tokens.
 
-Refresh rotates the session. Logout is idempotent.
+### `GET /auth/session` (`IAM-02`)
 
-### `POST /auth/password-recovery`, `POST /auth/password-reset` (`IAM-03`)
+Returns authenticated state, a safe Keycloak subject/user summary when signed
+in, and CSRF metadata for browser mutations. It never returns access tokens,
+refresh tokens, ID tokens, or token type metadata.
 
-Recovery always returns `202`.
+### `POST /auth/logout` (`IAM-02`)
 
-### `GET /users/me`, `PATCH /users/me` (`IAM-04`)
+Invalidates the gateway browser session and delegates OIDC logout/revocation
+to Keycloak when supported. Logout is idempotent and requires CSRF protection
+for browser callers.
 
-Patch supports display name, phone, and avatar only.
+### `GET /users/me` (`IAM-03`)
+
+Creates or returns the application-owned identity user mapped to the
+authenticated Keycloak `sub`.
+
+Authorization: authenticated Keycloak subject, relayed by the gateway BFF or
+validated directly by the service as a resource server.
+
+Request: no body. The service ignores client-submitted user IDs, subject
+headers, role headers, email headers, and status fields.
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "01J...",
+    "keycloakSub": "provider-subject",
+    "email": "user@example.com",
+    "emailVerified": true,
+    "displayName": "Alex",
+    "phone": null,
+    "phoneVerified": false,
+    "avatarUrl": null,
+    "status": "ACTIVE",
+    "version": 0,
+    "createdAt": "2026-06-16T03:15:00Z",
+    "updatedAt": "2026-06-16T03:15:00Z"
+  }
+}
+```
+
+The response never returns passwords, OAuth access tokens, refresh tokens,
+ID tokens, MFA secrets, or Keycloak session data.
+
+### `POST /auth/password-recovery`, `POST /auth/password-reset`
+
+Deferred to Keycloak-managed account recovery. Not implemented by the
+application service in IAM-03.
+
+### `PATCH /users/me` (`IAM-06`)
+
+Patch supports display name, phone, and avatar only. The request must be made
+as the authenticated user; client-supplied user IDs, subjects, roles, account
+status, email, and verification flags are ignored or rejected.
+
+Headers:
+
+```text
+If-Match: 0
+```
+
+`If-Match` is the current `version` from `GET /users/me`. A stale value returns
+`409 VERSION_CONFLICT`.
+
+Request:
+
+```json
+{
+  "displayName": "Alex",
+  "phone": "+19495551234",
+  "avatarUrl": "https://example.com/avatar.png"
+}
+```
+
+Rules:
+
+- `displayName`: nullable, trimmed, max 200 characters, blank rejected.
+- `phone`: nullable, E.164 format only, verification remains false until a
+  later verification flow.
+- `avatarUrl`: nullable, `http` or `https` URL only, max 2048 characters.
+- Email changes are deferred to a later reverification flow.
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "01J...",
+    "keycloakSub": "provider-subject",
+    "email": "user@example.com",
+    "emailVerified": true,
+    "displayName": "Alex",
+    "phone": "+19495551234",
+    "phoneVerified": false,
+    "avatarUrl": "https://example.com/avatar.png",
+    "status": "ACTIVE",
+    "version": 1,
+    "createdAt": "2026-06-16T03:15:00Z",
+    "updatedAt": "2026-06-16T03:20:00Z"
+  }
+}
+```
 
 ### Address APIs (`IAM-05`)
 
@@ -161,11 +264,64 @@ Request:
 }
 ```
 
-Response `201`: active individual seller profile.
+Rules:
+
+- Requires an authenticated user.
+- Creates one active individual seller profile for the current user.
+- Grants the local `INDIVIDUAL_SELLER` role.
+- Stores only public city and region; exact address, meeting location,
+  replacement user ID, status, and role fields are rejected.
+- `termsVersion` must match the current individual-selling terms.
+- The UI must disclose that individual payment and delivery are arranged
+  off-platform and are not verified or protected by the platform.
+
+Response `201`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "userId": "01JY...",
+    "publicCity": "Irvine",
+    "publicRegion": "CA",
+    "status": "ACTIVE",
+    "completedSalesCount": 0,
+    "termsVersion": "2026-01",
+    "version": 0,
+    "createdAt": "2026-06-16T12:00:00Z",
+    "updatedAt": "2026-06-16T12:00:00Z"
+  }
+}
+```
+
+Duplicate activation returns `409 INDIVIDUAL_SELLER_ALREADY_ACTIVE`.
 
 ### `GET /individual-seller/me`
 
-Returns profile and reputation summary.
+Returns the authenticated user's individual seller profile and reputation
+summary.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "userId": "01JY...",
+    "publicCity": "Irvine",
+    "publicRegion": "CA",
+    "status": "ACTIVE",
+    "completedSalesCount": 0,
+    "termsVersion": "2026-01",
+    "version": 0,
+    "createdAt": "2026-06-16T12:00:00Z",
+    "updatedAt": "2026-06-16T12:00:00Z"
+  }
+}
+```
+
+Authenticated users without an individual seller profile receive
+`404 INDIVIDUAL_SELLER_NOT_FOUND`. Unauthenticated requests receive `401`.
 
 ## 5. Business and Store
 
@@ -179,7 +335,131 @@ POST  /business-applications/{id}/submit        BUS-02
 POST  /webhooks/business-verification           BUS-03
 ```
 
+`POST /business-applications` creates a draft application owned by the
+authenticated applicant. The applicant is the proposed business owner.
+
+Request:
+
+```json
+{
+  "legalName": "Acme Trading LLC",
+  "businessType": "LLC",
+  "country": "US",
+  "contactEmail": "owner@example.com",
+  "contactPhone": "+19495551234",
+  "publicCity": "Irvine",
+  "publicRegion": "CA",
+  "websiteUrl": "https://example.com",
+  "description": "Local marketplace seller"
+}
+```
+
+Response `201`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "applicantUserId": "01JY...",
+    "legalName": "Acme Trading LLC",
+    "businessType": "LLC",
+    "country": "US",
+    "contactEmail": "owner@example.com",
+    "contactPhone": "+19495551234",
+    "publicCity": "Irvine",
+    "publicRegion": "CA",
+    "websiteUrl": "https://example.com",
+    "description": "Local marketplace seller",
+    "status": "DRAFT",
+    "submittedAt": null,
+    "version": 0,
+    "createdAt": "2026-06-16T12:00:00Z",
+    "updatedAt": "2026-06-16T12:00:00Z"
+  }
+}
+```
+
+Rules:
+
+- Requires an authenticated user.
+- Client cannot supply applicant user, status, submitted time, approval state,
+  reviewer, business ID, membership, or verification result fields.
+- Only one draft business application per applicant is allowed.
+- `GET /business-applications/{id}` returns only applications owned by the
+  authenticated applicant; otherwise return `404 BUSINESS_APPLICATION_NOT_FOUND`.
+- `PATCH /business-applications/{id}` updates only owned `DRAFT`
+  applications and requires `If-Match` with the current version.
+- Stale updates return `409 VERSION_CONFLICT`.
+
 Submit requires expected application version.
+
+`POST /business-applications/{id}/submit` (`BUS-02`) submits an owned draft
+application for verification/review.
+
+Headers:
+
+```text
+If-Match: 0
+```
+
+Rules:
+
+- Requires an authenticated applicant.
+- The application must belong to the authenticated applicant.
+- The application must currently be `DRAFT`.
+- Required draft fields are revalidated before submit.
+- On success, status becomes `PENDING_VERIFICATION` and `submittedAt` is set.
+- Stale versions return `409 VERSION_CONFLICT`.
+- Non-owned IDs return `404 BUSINESS_APPLICATION_NOT_FOUND`.
+- Admin decision, business creation, owner membership, and external
+  verification callbacks are handled by BUS-03/BUS-04; store creation remains
+  deferred.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "status": "PENDING_VERIFICATION",
+    "submittedAt": "2026-06-16T13:00:00Z",
+    "version": 1
+  }
+}
+```
+
+`POST /webhooks/business-verification` (`BUS-03`) accepts signed verification
+provider callbacks. MVP may still use manual review, but this endpoint records
+provider outcomes when configured.
+
+Headers:
+
+```text
+X-MSB-Signature: sha256=<hex hmac sha256 over raw request body>
+```
+
+Request:
+
+```json
+{
+  "eventId": "provider-event-001",
+  "applicationId": "01JY...",
+  "outcome": "UNDER_REVIEW|VERIFICATION_FAILED",
+  "reason": "Provider accepted packet"
+}
+```
+
+Rules:
+
+- Does not use browser/session authentication.
+- Requires a valid HMAC signature using the configured webhook secret.
+- `eventId` is unique; duplicate callbacks return the current application
+  without applying a second effect.
+- For `PENDING_VERIFICATION` applications, `UNDER_REVIEW` or
+  `VERIFICATION_FAILED` is applied.
+- Every accepted provider callback is appended to
+  `business_verification_events`.
+- Invalid signatures return `403 FORBIDDEN`.
 
 ### Admin decision (`BUS-04`)
 
@@ -191,6 +471,37 @@ Request:
 
 ```json
 {"decision": "APPROVE|REJECT|REQUEST_INFORMATION", "reason": "text"}
+```
+
+Rules:
+
+- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- `reason` is required for every decision.
+- The application must be `PENDING_VERIFICATION` or `UNDER_REVIEW`.
+- `APPROVE` changes application status to `APPROVED`, creates an active
+  `businesses` row, and creates an active `OWNER` membership for the applicant.
+- `REJECT` changes application status to `REJECTED`.
+- `REQUEST_INFORMATION` changes application status to
+  `INFORMATION_REQUESTED`.
+- The reviewer, decision reason, decision time, and approved business ID when
+  applicable are visible through `GET /business-applications/{id}` for the
+  applicant.
+- Every admin decision is appended to `business_verification_events`.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "status": "APPROVED",
+    "reviewerUserId": "01JY...",
+    "approvedBusinessId": "01JY...",
+    "decisionReason": "Business information verified",
+    "decidedAt": "2026-06-16T14:00:00Z",
+    "version": 2
+  }
+}
 ```
 
 ### Store APIs (`BUS-05`, `BUS-06`)

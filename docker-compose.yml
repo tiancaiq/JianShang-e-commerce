@@ -22,10 +22,10 @@ services:
       - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysql}
+      MYSQL_DATABASE: ${IDENTITY_DB_NAME:-identity}
     volumes:
       - mysql_data:/var/lib/mysql
-      # You can mount init scripts here if needed
-      # - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
 
   # Identity Provider
   # Using Postgres for Keycloak persistence
@@ -42,7 +42,7 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:24.0.1
     container_name: keycloak
-    command: start-dev
+    command: start-dev --import-realm
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_DB:-keycloak}
@@ -50,23 +50,15 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-password}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8181}:8080"
+    volumes:
+      - ./infra/keycloak/realm-msb-local.json:/opt/keycloak/data/import/realm-msb-local.json:ro
     depends_on:
       - postgres-keycloak
-
-  # Auth Service Database
-  postgres-auth:
-    image: postgres:15
-    container_name: postgres-auth
-    environment:
-      POSTGRES_DB: ${AUTH_DB_NAME:-auth_service}
-      POSTGRES_USER: ${AUTH_DB_USER:-auth}
-      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-password}
-    volumes:
-      - postgres_auth_data:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
 
   # Kafka Ecosystem
   zookeeper:
@@ -168,5 +160,4 @@ volumes:
   mongo_data:
   mysql_data:
   postgres_keycloak_data:
-  postgres_auth_data:
   elasticsearch_data:

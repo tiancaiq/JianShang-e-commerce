@@ -13,6 +13,7 @@ import java.net.URI;
 import java.util.List;
 
 import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
+import static org.springframework.cloud.gateway.server.mvc.filter.TokenRelayFilterFunctions.tokenRelay;
 import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
 import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
 
@@ -38,6 +39,7 @@ public class Routes {
         public RouterFunction<ServerResponse> productServiceRoute() {
                 return route("product_service")
                                 .route(RequestPredicates.path("/api/product/**"), http(productServiceUrl))
+                                .filter(tokenRelay())
                                 .filter(circuitBreaker("productServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
@@ -47,6 +49,7 @@ public class Routes {
         public RouterFunction<ServerResponse> orderServiceRoute() {
                 return route("order_service")
                                 .route(RequestPredicates.path("/api/order/**"), http(orderServiceUrl))
+                                .filter(tokenRelay())
                                 .filter(circuitBreaker("orderServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
@@ -56,6 +59,7 @@ public class Routes {
         public RouterFunction<ServerResponse> inventoryServiceRoute() {
                 return route("inventory_service")
                                 .route(RequestPredicates.path("/api/inventory/**"), http(inventoryServiceUrl))
+                                .filter(tokenRelay())
                                 .filter(circuitBreaker("inventoryServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
@@ -65,6 +69,7 @@ public class Routes {
         public RouterFunction<ServerResponse> paymentServiceRoute() {
                 return route("payment_service")
                                 .route(RequestPredicates.path("/api/payment/**"), http(paymentServiceUrl))
+                                .filter(tokenRelay())
                                 .filter(circuitBreaker("paymentServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
@@ -73,8 +78,23 @@ public class Routes {
         @Bean
         public RouterFunction<ServerResponse> authServiceRoute() {
                 return route("auth_service")
-                                .route(RequestPredicates.path("/auth/**"), http(authServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/users/**")
+                                                .or(RequestPredicates.path("/api/v1/individual-seller/**"))
+                                                .or(RequestPredicates.path("/api/v1/business-applications/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/business-applications/**")),
+                                                http(authServiceUrl))
+                                .filter(tokenRelay())
                                 .filter(circuitBreaker("authServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        public RouterFunction<ServerResponse> authWebhookRoute() {
+                return route("auth_webhook_service")
+                                .route(RequestPredicates.path("/api/v1/webhooks/business-verification"),
+                                                http(authServiceUrl))
+                                .filter(circuitBreaker("authWebhookServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
         }
