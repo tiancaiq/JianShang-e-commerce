@@ -17,7 +17,7 @@ import { AuthService } from '../../core/services/auth.service';
               {{ getUserInitial() }}
             </div>
             <div class="user-info">
-              <span class="user-name">{{ authService.user()?.username || authService.user()?.email }}</span>
+              <span class="user-name">{{ authService.user()?.displayName || authService.user()?.email }}</span>
               <span class="user-email">{{ authService.user()?.email }}</span>
             </div>
             <button class="logout-btn" (click)="handleLogout()" title="Logout">
@@ -123,12 +123,11 @@ export class NavbarComponent {
   getUserInitial(): string {
     const user = this.authService.user();
     if (!user) return '?';
-    const name = user.username || user.email;
+    const name = user.displayName || user.email || '?';
     return name.charAt(0).toUpperCase();
   }
 
   handleLogout() {
     this.authService.logout();
-    this.router.navigate(['/login']);
   }
 }

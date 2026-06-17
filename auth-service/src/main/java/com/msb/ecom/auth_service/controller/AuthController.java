@@ -1,31 +1,58 @@
 package com.msb.ecom.auth_service.controller;
 
-import com.msb.ecom.auth_service.dto.LoginRequest;
-import com.msb.ecom.auth_service.dto.SignupRequest;
-import com.msb.ecom.auth_service.dto.UserResponse;
+import com.msb.ecom.auth_service.dto.ApiDataResponse;
+import com.msb.ecom.auth_service.dto.CurrentUserResponse;
+import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
 import com.msb.ecom.auth_service.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
 
-    @PostMapping("/signup")
-    public ResponseEntity<UserResponse> signup(@Valid @RequestBody SignupRequest request) {
-        UserResponse user = authService.signup(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(user);
+    @GetMapping("/me")
+    public ApiDataResponse<CurrentUserResponse> me(@AuthenticationPrincipal Jwt jwt) {
+        if (jwt == null) {
+            throw new IllegalStateException("Authentication is required");
+        }
+        return new ApiDataResponse<>(authService.ensureCurrentUser(jwt));
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<UserResponse> login(@Valid @RequestBody LoginRequest request) {
-        UserResponse user = authService.login(request);
-        return ResponseEntity.ok(user);
+    @PatchMapping("/me")
+    public ApiDataResponse<CurrentUserResponse> updateMe(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody UpdateCurrentUserRequest request) {
+        if (jwt == null) {
+            throw new IllegalStateException("Authentication is required");
+        }
+        return new ApiDataResponse<>(authService.updateCurrentUser(jwt, request, parseVersion(ifMatch)));
+    }
+
+    private Long parseVersion(String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new IllegalArgumentException("If-Match must contain the current profile version");
+        }
+        String value = ifMatch.trim();
+        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
+            value = value.substring(1, value.length() - 1);
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("If-Match must contain the current profile version");
+        }
     }
 }

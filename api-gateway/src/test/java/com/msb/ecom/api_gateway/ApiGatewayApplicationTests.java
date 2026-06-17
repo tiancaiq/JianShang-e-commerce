@@ -4,22 +4,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 
 import org.mockito.Mockito;
 import org.mockito.ArgumentMatchers;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.test.context.ActiveProfiles;
 import io.restassured.RestAssured;
 
 import java.time.Instant;
 
 import static org.hamcrest.Matchers.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-		"spring.security.oauth2.resourceserver.jwt.secret=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437"
-})
+@ActiveProfiles("test")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ApiGatewayApplicationTests {
 
 	@LocalServerPort
@@ -41,6 +41,8 @@ class ApiGatewayApplicationTests {
 						.issuedAt(Instant.now())
 						.expiresAt(Instant.now().plusSeconds(3600))
 						.build());
+		Mockito.when(jwtDecoder.decode("invalid-token"))
+				.thenThrow(new BadJwtException("invalid token"));
 	}
 
 	@Test
@@ -50,8 +52,8 @@ class ApiGatewayApplicationTests {
 				.when()
 				.get("/api/product")
 				.then()
-				.statusCode(anyOf(equalTo(503), equalTo(401)));
-		// 401 if auth kicks in before routing, 503 if circuit breaker handles it
+				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
+		// 401/302 if authentication starts before routing, 503 if circuit breaker handles it.
 	}
 
 	@Test
@@ -70,7 +72,7 @@ class ApiGatewayApplicationTests {
 				.when()
 				.post("/api/order")
 				.then()
-				.statusCode(anyOf(equalTo(503), equalTo(401)));
+				.statusCode(anyOf(equalTo(401), equalTo(403)));
 	}
 
 	@Test
@@ -79,7 +81,7 @@ class ApiGatewayApplicationTests {
 				.when()
 				.get("/api/inventory?skuCode=iphone_15&quantity=1")
 				.then()
-				.statusCode(anyOf(equalTo(503), equalTo(401)));
+				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
 	}
 
 	@Test
@@ -156,6 +158,47 @@ class ApiGatewayApplicationTests {
 				.when()
 				.post("/api/payment")
 				.then()
-				.statusCode(anyOf(equalTo(503), equalTo(401)));
+				.statusCode(anyOf(equalTo(401), equalTo(403)));
+	}
+
+	@Test
+	void shouldProtectIdentityUserRoute() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/users/me")
+				.then()
+				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
+	}
+
+	@Test
+	void protectedIdentityRouteRejectsInvalidBearerToken() {
+		RestAssured.given()
+				.header("Authorization", "Bearer invalid-token")
+				.when()
+				.get("/api/v1/users/me")
+				.then()
+				.statusCode(401);
+	}
+
+	@Test
+	void validBearerTokenPassesGatewayAuthenticationBeforeRouting() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/users/me")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void spoofedIdentityHeadersDoNotAuthenticateGatewayRequest() {
+		RestAssured.given()
+				.header("X-User-Id", "spoofed-user")
+				.header("X-Keycloak-Sub", "spoofed-subject")
+				.when()
+				.get("/api/v1/users/me")
+				.then()
+				.statusCode(anyOf(equalTo(302), equalTo(401)));
 	}
 }

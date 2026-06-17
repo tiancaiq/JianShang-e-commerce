@@ -40,28 +40,45 @@ small Flyway migrations.
 
 ### `users`
 
+Application-owned identity user mapped to an immutable Keycloak subject.
+Keycloak owns credentials, email verification actions, password recovery, MFA,
+login sessions, and OAuth tokens.
+
 | Column | Notes |
 |---|---|
-| `id` | Primary key |
-| `email_normalized` | Unique |
-| `email_display` | Original display form |
-| `password_hash` | Never returned |
-| `display_name` | Public name |
-| `phone` | Nullable, encrypted or protected |
-| `avatar_url` | Nullable |
-| `status` | `PENDING_VERIFICATION`, `ACTIVE`, `SUSPENDED`, `CLOSED` |
-| `email_verified_at` | Nullable |
+| `id` | `CHAR(26)` ULID primary key |
+| `keycloak_sub` | Unique immutable Keycloak `sub` |
+| `email` | Nullable projection from Keycloak, not the identity key |
+| `email_verified` | Projection from Keycloak |
+| `display_name` | Nullable app-owned profile value, initially projected from Keycloak |
+| `phone` | Nullable app-owned profile value |
+| `phone_verified` | App verification state, false until a later verification flow |
+| `avatar_url` | Nullable app-owned profile value |
+| `status` | `ACTIVE`, `SUSPENDED`, `CLOSED` |
 | `version` | Optimistic locking |
 | timestamps | UTC |
 
 Indexes:
 
-- Unique `email_normalized`
+- Unique `keycloak_sub`
+- `email`
 - `status`
+
+Do not store passwords, password-reset tokens, Keycloak access tokens,
+Keycloak refresh tokens, ID tokens, MFA secrets, or Keycloak login sessions in
+application tables.
+
+After IAM-06, profile edits can update only `display_name`, `phone`, and
+`avatar_url`. Keycloak remains authoritative for credentials, email, and
+`email_verified`; users cannot self-edit roles, account status, internal IDs,
+or verification flags.
 
 ### `roles`
 
 Seeded role names and descriptions.
+
+IND-01 seeds `BUYER` and `INDIVIDUAL_SELLER`. Business staff roles remain
+business-scoped and are not stored here.
 
 ### `user_roles`
 
@@ -76,19 +93,11 @@ Unique: `(user_id, role_id)`.
 
 Business staff roles are stored in business membership tables, not here.
 
-### `refresh_sessions`
+### Credential, session, verification, and recovery data
 
-Stores hashed refresh token identifier, user, expiry, rotation chain,
-revocation time, device label, and last-used metadata.
-
-Indexes:
-
-- Unique token hash
-- `(user_id, revoked_at, expires_at)`
-
-### `verification_tokens`
-
-Stores hashed token, user, purpose, expiry, and consumption time.
+Owned by Keycloak after ADR-0001. Application services do not create
+`refresh_sessions`, password recovery, MFA, or verification-token tables in
+IAM-03.
 
 ### `addresses`
 
@@ -96,6 +105,27 @@ User-owned address book. Do not reference this table from orders; copy address
 data into `order_addresses`.
 
 ## 3. Seller and Business Schema
+
+### `individual_seller_profiles`
+
+Created by `IND-01` when an authenticated buyer accepts individual-selling
+terms.
+
+| Column | Notes |
+|---|---|
+| `id` | Profile ID |
+| `user_id` | Unique user owner |
+| `public_city` | Public location only |
+| `public_region` | Public location only |
+| `terms_version` | Accepted terms version |
+| `status` | `ACTIVE`, `SUSPENDED`, `CLOSED` |
+| `completed_sales_count` | Public reputation count, starts at `0` |
+| `version` | Optimistic locking |
+| `created_at`, `updated_at` | UTC timestamps |
+
+The table must not store exact address, meeting location, payment credentials,
+delivery address, or buyer contact data. Activation also grants the local
+`INDIVIDUAL_SELLER` role in `user_roles`.
 
 ### `individual_seller_profiles`
 
@@ -114,6 +144,33 @@ data into `order_addresses`.
 Stores applicant, legal name, business type, country, contact data, provider
 verification reference, application status, submitted time, and version.
 
+BUS-01 creates only `DRAFT` rows. The authenticated applicant is stored as
+`applicant_user_id` and is the proposed business owner. The draft stores legal
+name, business type, country, public city/region, contact email, optional
+E.164 phone, optional website URL, optional description, status, timestamps,
+and version. Approval, business creation, memberships, stores, verification
+provider references, and submitted timestamps are deferred to later BUS slices.
+
+BUS-02 moves owned draft rows from `DRAFT` to `PENDING_VERIFICATION` and sets
+`submitted_at`. No `businesses`, `business_memberships`, or store rows are
+created until a later admin decision slice.
+
+BUS-03 records signed provider callbacks in `business_verification_events`.
+Accepted callbacks can move submitted applications to `UNDER_REVIEW` or
+`VERIFICATION_FAILED`. Provider event IDs are unique so duplicate callbacks do
+not apply duplicate state changes.
+
+BUS-04 stores admin decision metadata on the application:
+
+- `reviewer_user_id`
+- `approved_business_id`
+- `decision_reason`
+- `decided_at`
+
+Approval creates one active `businesses` row and one active `OWNER`
+`business_memberships` row for the applicant. Rejection and information
+requests do not create a business.
+
 Indexes:
 
 - `(applicant_user_id, status)`
@@ -122,6 +179,14 @@ Indexes:
 ### `businesses`
 
 Stores approved legal business identity and status.
+
+BUS-04 creates rows with:
+
+- approved application ID
+- legal name, business type, and country copied from the application
+- status `ACTIVE`
+- approving admin user and approval time
+- version and timestamps
 
 ### `business_memberships`
 
@@ -135,6 +200,9 @@ Stores approved legal business identity and status.
 | timestamps | UTC |
 
 Unique: `(business_id, user_id)`.
+
+BUS-04 creates the initial applicant membership as role `OWNER`, status
+`ACTIVE`. Later staff invitation and permission management belong to BUS-07.
 
 ### `business_invitations`
 
@@ -162,6 +230,16 @@ Unique: `(store_id, policy_type, version_number)`.
 ### `business_verification_events`
 
 Append-only provider and admin verification history.
+
+Important columns:
+
+- provider event ID, unique when present
+- application ID
+- source `PROVIDER` or `ADMIN`
+- event type, outcome, reason
+- payload hash for provider callbacks
+- actor user ID for admin decisions
+- created time
 
 ## 4. Catalog and Listing Schema
 

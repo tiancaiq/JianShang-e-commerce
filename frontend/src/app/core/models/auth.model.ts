@@ -1,20 +1,33 @@
-export interface UserResponse {
-  id: number;
-  email: string;
-  username: string | null;
-  createdAt: string;
+import { CurrentUser } from './user.model';
+export type { CurrentUser } from './user.model';
+
+export interface CsrfSummary {
+  headerName: string;
+  parameterName: string;
   token: string;
 }
 
-export interface LoginRequest {
-  email: string;
-  password: string;
+export interface SessionUser {
+  subject: string;
+  email: string | null;
+  displayName: string | null;
+  roles: string[];
+  expiresAt: string | null;
 }
 
-export interface SignupRequest {
-  email: string;
-  username?: string;
-  password: string;
+export interface SessionResponse {
+  authenticated: boolean;
+  user: SessionUser | null;
+  csrf: CsrfSummary | null;
+}
+
+export interface ApiDataResponse<T> {
+  data: T;
+}
+
+export interface AuthState {
+  authenticated: boolean;
+  user: CurrentUser | null;
 }
 
 export interface ApiError {

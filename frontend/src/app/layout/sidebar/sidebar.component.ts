@@ -210,6 +210,21 @@ export class SidebarComponent {
       route: '/inventory',
       icon: '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v7h-2l-1-2H8l-1 2H5V5z" clip-rule="evenodd"/></svg>',
     },
+    {
+      label: 'Become Seller',
+      route: '/seller/activate',
+      icon: '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a2 2 0 012-2h10a2 2 0 012 2v3H3V4z"/><path fill-rule="evenodd" d="M3 9h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V9zm4 2a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>',
+    },
+    {
+      label: 'Business Apply',
+      route: '/business/apply',
+      icon: '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 00-2 2v12h16V5a2 2 0 00-2-2H4zm2 4h3v3H6V7zm5 0h3v3h-3V7zM6 12h3v3H6v-3zm5 0h3v3h-3v-3z"/></svg>',
+    },
+    {
+      label: 'Profile',
+      route: '/profile',
+      icon: '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a4 4 0 100 8 4 4 0 000-8zM3 18a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>',
+    },
   ];
 
   toggleCollapse() {
