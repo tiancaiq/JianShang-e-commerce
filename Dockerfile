@@ -5,6 +5,6 @@ WORKDIR /app
 COPY . .
 
 RUN chmod +x mvnw
-RUN ./mvnw clean package -DskipTests
+RUN ./mvnw clean package -DskipTests -pl api-gateway -am
 
-CMD ["java","-jar","auth-service/target/auth-service-0.0.1-SNAPSHOT.jar"]
+CMD ["java","-jar","api-gateway/target/api-gateway-0.0.1-SNAPSHOT.jar"]
