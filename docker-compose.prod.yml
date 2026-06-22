@@ -11,15 +11,25 @@ services:
       dockerfile: Dockerfile
     container_name: product-service
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8091:8091"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_DB_USERNAME:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_DB_PASSWORD:-password}
       MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-product-service}
       MONGO_PORT: 27017
       SPRING_DATA_MONGODB_URI: mongodb://${MONGO_DB_USERNAME:-root}:${MONGO_DB_PASSWORD:-password}@mongo:27017/${MONGO_DB_NAME:-product-service}?authSource=admin
+      CATALOG_DB_HOST: mysql
+      CATALOG_DB_PORT: 3306
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+      CATALOG_DB_USERNAME: ${CATALOG_DB_USERNAME:-root}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      AUTH_SERVICE_URL: http://auth-service:8085
     depends_on:
       - mongo
+      - mysql
+      - keycloak
+      - auth-service
     restart: unless-stopped
 
   # ── Order Service (MySQL + Kafka) ──────────────────────────
@@ -101,7 +111,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${IDENTITY_DB_NAME:-identity}?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
       SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
       SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
-      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
     depends_on:
       - mysql
       - keycloak
@@ -116,18 +126,16 @@ services:
     ports:
       - "9000:9000"
     environment:
-      PRODUCT_SERVICE_URL: http://product-service:8080
+      PRODUCT_SERVICE_URL: http://product-service:8091
       ORDER_SERVICE_URL: http://order-service:8081
       INVENTORY_SERVICE_URL: http://inventory-service:8082
       PAYMENT_SERVICE_URL: http://payment-service:8084
       AUTH_SERVICE_URL: http://auth-service:8085
+      KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://host.docker.internal:8181/realms/msb-local}
       JWT_SECRET: ${JWT_SECRET:-5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437}
     depends_on:
       - product-service
-      - order-service
-      - inventory-service
-      - payment-service
-      - notification-service
       - auth-service
       - keycloak
     restart: unless-stopped

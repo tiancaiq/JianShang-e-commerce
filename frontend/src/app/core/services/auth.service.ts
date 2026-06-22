@@ -7,6 +7,7 @@ import {
   AuthState,
   CsrfSummary,
   CurrentUser,
+  SessionUser,
   SessionResponse,
 } from '../models/auth.model';
 import { environment } from '../../../environments/environment.development';
@@ -103,6 +104,9 @@ export class AuthService {
           return of(this.snapshot());
         }
 
+        const sessionUser = this.currentUserFromSession(session.user);
+        this.currentUser.set(sessionUser);
+
         return this.http.get<ApiDataResponse<CurrentUser>>(this.url('/api/v1/users/me'), {
           withCredentials: true,
         }).pipe(
@@ -111,7 +115,7 @@ export class AuthService {
             return this.snapshot();
           }),
           catchError(() => {
-            this.currentUser.set(null);
+            this.currentUser.set(sessionUser);
             return of(this.snapshot());
           })
         );
@@ -135,6 +139,28 @@ export class AuthService {
     return {
       authenticated: user !== null,
       user,
+    };
+  }
+
+  private currentUserFromSession(user: SessionUser | null): CurrentUser | null {
+    if (!user) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    return {
+      id: user.subject,
+      keycloakSub: user.subject,
+      email: user.email,
+      emailVerified: false,
+      displayName: user.displayName,
+      phone: null,
+      phoneVerified: false,
+      avatarUrl: null,
+      status: 'ACTIVE',
+      version: 0,
+      createdAt: now,
+      updatedAt: now,
     };
   }
 
