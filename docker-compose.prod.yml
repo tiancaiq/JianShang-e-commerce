@@ -98,12 +98,13 @@ services:
     ports:
       - "127.0.0.1:8085:8085"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-auth:5432/${AUTH_DB_NAME:-auth_service}
-      SPRING_DATASOURCE_USERNAME: ${AUTH_DB_USER:-auth}
-      SPRING_DATASOURCE_PASSWORD: ${AUTH_DB_PASSWORD:-password}
-      JWT_SECRET: ${JWT_SECRET:-5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${IDENTITY_DB_NAME:-identity}?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
     depends_on:
-      - postgres-auth
+      - mysql
+      - keycloak
     restart: unless-stopped
 
   # ── API Gateway (routes to all services) ───────────────────

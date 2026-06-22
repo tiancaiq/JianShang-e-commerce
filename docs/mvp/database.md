@@ -264,6 +264,11 @@ JSON here stores configuration, not transactional state.
 
 Shared listing table:
 
+LIST-00 creates this table as a schema foundation only. It stores owner IDs but
+does not foreign-key to identity/business tables owned by another service.
+Later listing command handlers must validate individual seller status or
+business membership through service APIs before inserting or changing rows.
+
 | Column | Notes |
 |---|---|
 | `id` | Primary key |

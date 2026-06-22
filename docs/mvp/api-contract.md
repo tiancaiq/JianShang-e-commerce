@@ -548,8 +548,7 @@ context. Response contains signed URL and required headers.
 ### Listing create (`LST-04`, `LST-05`)
 
 ```text
-POST /listings/individual
-POST /businesses/{businessId}/listings
+POST /listings
 ```
 
 Individual request:
@@ -570,8 +569,10 @@ Individual request:
 }
 ```
 
-Business request adds SKU, quantity, shipping policy version, and return policy
-version; it omits negotiation and meeting fields.
+LIST-01 uses the unified draft endpoint above with `sellerType` set to
+`INDIVIDUAL` or `BUSINESS`. Business requests add `businessId`, SKU, and
+quantity; they omit negotiation and meeting fields. Publishing, image
+attachment, moderation submission, and public browsing remain separate slices.
 
 ### Listing management (`LST-06` through `LST-10`)
 

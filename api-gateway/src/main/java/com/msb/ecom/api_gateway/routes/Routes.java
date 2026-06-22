@@ -38,9 +38,23 @@ public class Routes {
         @Bean
         public RouterFunction<ServerResponse> productServiceRoute() {
                 return route("product_service")
-                                .route(RequestPredicates.path("/api/product/**"), http(productServiceUrl))
+                                .route(RequestPredicates.path("/api/product/**")
+                                                .or(RequestPredicates.path("/api/v1/listings"))
+                                                .or(RequestPredicates.path("/api/v1/listings/**")),
+                                                http(productServiceUrl))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("productServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
+                return route("public_category_service")
+                                .route(RequestPredicates.path("/api/v1/categories")
+                                                .or(RequestPredicates.path("/api/v1/categories/**")),
+                                                http(productServiceUrl))
+                                .filter(circuitBreaker("publicCategoryServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
         }
@@ -80,6 +94,7 @@ public class Routes {
                 return route("auth_service")
                                 .route(RequestPredicates.path("/api/v1/users/**")
                                                 .or(RequestPredicates.path("/api/v1/individual-seller/**"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/membership/me"))
                                                 .or(RequestPredicates.path("/api/v1/business-applications/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/business-applications/**")),
                                                 http(authServiceUrl))
