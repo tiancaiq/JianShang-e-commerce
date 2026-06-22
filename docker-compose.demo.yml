@@ -1,0 +1,148 @@
+services:
+  mongo:
+    image: mongo:7.0.5
+    container_name: msb-demo-mongo
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_DB_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_DB_PASSWORD:-demo-change-me-mongo}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-product-service}
+    volumes:
+      - demo_mongo_data:/data/db
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.3.0
+    container_name: msb-demo-mysql
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}
+      MYSQL_DATABASE: ${IDENTITY_DB_NAME:-identity}
+    volumes:
+      - demo_mysql_data:/var/lib/mysql
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+
+  postgres-keycloak:
+    image: postgres:15
+    container_name: msb-demo-postgres-keycloak
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-keycloak}
+      POSTGRES_USER: ${POSTGRES_USER:-keycloak}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demo-change-me-keycloak-db}
+    volumes:
+      - demo_postgres_keycloak_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: msb-demo-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_DB:-keycloak}
+      KC_DB_USERNAME: ${POSTGRES_USER:-keycloak}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-demo-change-me-keycloak-db}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-demo-change-me-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8181}:8080"
+    volumes:
+      - ./infra/keycloak/realm-msb-local.json:/opt/keycloak/data/import/realm-msb-local.json:ro
+    depends_on:
+      - postgres-keycloak
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: msb-demo-auth-service
+    ports:
+      - "127.0.0.1:${AUTH_SERVICE_PORT:-8085}:8085"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${IDENTITY_DB_NAME:-identity}?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      BUSINESS_VERIFICATION_WEBHOOK_SECRET: ${BUSINESS_VERIFICATION_WEBHOOK_SECRET:-demo-change-me-business-webhook}
+    depends_on:
+      - mysql
+      - keycloak
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: msb-demo-product-service
+    ports:
+      - "127.0.0.1:${PRODUCT_SERVICE_PORT:-8091}:8091"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://${MONGO_DB_USERNAME:-root}:${MONGO_DB_PASSWORD:-demo-change-me-mongo}@mongo:27017/${MONGO_DB_NAME:-product-service}?authSource=admin
+      CATALOG_DB_HOST: mysql
+      CATALOG_DB_PORT: 3306
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+      CATALOG_DB_USERNAME: ${CATALOG_DB_USERNAME:-root}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      AUTH_SERVICE_URL: http://auth-service:8085
+    depends_on:
+      - mongo
+      - mysql
+      - keycloak
+      - auth-service
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: msb-demo-api-gateway
+    ports:
+      - "${API_GATEWAY_PORT:-9000}:9000"
+    environment:
+      PRODUCT_SERVICE_URL: http://product-service:8091
+      AUTH_SERVICE_URL: http://auth-service:8085
+      ORDER_SERVICE_URL: http://order-service-disabled:8081
+      INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
+      PAYMENT_SERVICE_URL: http://payment-service-disabled:8084
+      KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://host.docker.internal:8181/realms/msb-local}
+      KEYCLOAK_MARKETPLACE_CLIENT_ID: ${KEYCLOAK_MARKETPLACE_CLIENT_ID:-msb-marketplace}
+      KEYCLOAK_MARKETPLACE_CLIENT_SECRET: ${KEYCLOAK_MARKETPLACE_CLIENT_SECRET:-local-dev-only-change-me-marketplace}
+      KEYCLOAK_SELLER_PORTAL_CLIENT_ID: ${KEYCLOAK_SELLER_PORTAL_CLIENT_ID:-msb-seller-portal}
+      KEYCLOAK_SELLER_PORTAL_CLIENT_SECRET: ${KEYCLOAK_SELLER_PORTAL_CLIENT_SECRET:-local-dev-only-change-me-seller-portal}
+      KEYCLOAK_ADMIN_PORTAL_CLIENT_ID: ${KEYCLOAK_ADMIN_PORTAL_CLIENT_ID:-msb-admin-portal}
+      KEYCLOAK_ADMIN_PORTAL_CLIENT_SECRET: ${KEYCLOAK_ADMIN_PORTAL_CLIENT_SECRET:-local-dev-only-change-me-admin-portal}
+      GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+      GATEWAY_LOGOUT_REDIRECT_URI: ${GATEWAY_LOGOUT_REDIRECT_URI:-http://localhost:4200/}
+      GATEWAY_SESSION_COOKIE_SECURE: ${GATEWAY_SESSION_COOKIE_SECURE:-false}
+      GATEWAY_SESSION_TIMEOUT: ${GATEWAY_SESSION_TIMEOUT:-30m}
+      JWT_SECRET: ${JWT_SECRET:-demo-change-me-at-least-32-bytes-long}
+    depends_on:
+      - product-service
+      - auth-service
+      - keycloak
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: msb-demo-frontend
+    ports:
+      - "${FRONTEND_PORT:-4200}:4200"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+volumes:
+  demo_mongo_data:
+  demo_mysql_data:
+  demo_postgres_keycloak_data:
