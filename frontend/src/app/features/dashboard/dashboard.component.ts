@@ -54,9 +54,9 @@ import { OrderResponse } from '../../core/models/order.model';
       <div class="section">
         <h3 class="section-title">Quick Actions</h3>
         <div class="actions-grid">
-          <a routerLink="/products/new" class="action-card hover-glow">
+          <a routerLink="/listings/new" class="action-card hover-glow">
             <span class="action-icon">+</span>
-            <span>New Product</span>
+            <span>New Listing</span>
           </a>
           <a routerLink="/orders/new" class="action-card hover-glow">
             <span class="action-icon">+</span>

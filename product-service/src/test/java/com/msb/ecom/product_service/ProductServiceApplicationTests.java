@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.containers.MySQLContainer;
 
 import java.math.BigDecimal;
 
@@ -19,6 +20,12 @@ class ProductServiceApplicationTests {
 
 	@ServiceConnection
 	static MongoDBContainer mongoDBContainer = new MongoDBContainer("mongo:7.0.7");
+
+	@ServiceConnection
+	static MySQLContainer<?> mysqlContainer = new MySQLContainer<>("mysql:8.4")
+			.withDatabaseName("catalog")
+			.withUsername("catalog")
+			.withPassword("catalog");
 
 	@LocalServerPort
 	private Integer port;
@@ -31,6 +38,7 @@ class ProductServiceApplicationTests {
 
 	static {
 		mongoDBContainer.start();
+		mysqlContainer.start();
 	}
 
 	@Test

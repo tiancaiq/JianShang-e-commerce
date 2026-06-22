@@ -57,6 +57,16 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldExposePublicCategoriesWithoutLogin() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/categories")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldReturnFallbackWhenOrderServiceDown() {
 		String orderJson = """
 				{
