@@ -1,0 +1,29 @@
+package com.msb.ecom.product_service.listing.dto;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+public record ListingDraftResponse(
+        String id,
+        String sellerType,
+        String individualSellerUserId,
+        String businessId,
+        String categoryId,
+        String title,
+        String description,
+        String condition,
+        String conditionNotes,
+        BigDecimal priceAmount,
+        String currency,
+        boolean negotiable,
+        String sku,
+        int quantity,
+        String publicCity,
+        String publicRegion,
+        String status,
+        String moderationStatus,
+        long version,
+        Instant createdAt,
+        Instant updatedAt
+) {
+}
