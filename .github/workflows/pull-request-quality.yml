@@ -165,7 +165,7 @@ jobs:
       - name: Resolve Maven dependencies
         run: |
           chmod +x ./mvnw
-          ./mvnw -B -DskipTests dependency:resolve
+          ./mvnw -B -DskipTests test-compile
 
       - name: Install frontend dependencies
         working-directory: frontend
