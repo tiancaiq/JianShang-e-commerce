@@ -41,6 +41,8 @@ services:
     container_name: msb-demo-keycloak
     command: start-dev --import-realm
     environment:
+      KC_HOSTNAME: auth.bigjianshang.xyz
+      KC_PROXY_HEADERS: xforwarded
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_DB:-keycloak}
       KC_DB_USERNAME: ${POSTGRES_USER:-keycloak}
@@ -105,8 +107,9 @@ services:
       dockerfile: Dockerfile
     container_name: msb-demo-api-gateway
     ports:
-      - "${API_GATEWAY_PORT:-9000}:9000"
+      - "127.0.0.1:${API_GATEWAY_PORT:-9000}:9000"
     environment:
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
       PRODUCT_SERVICE_URL: http://product-service:8091
       AUTH_SERVICE_URL: http://auth-service:8085
       ORDER_SERVICE_URL: http://order-service-disabled:8081
@@ -137,7 +140,7 @@ services:
       dockerfile: Dockerfile
     container_name: msb-demo-frontend
     ports:
-      - "${FRONTEND_PORT:-4200}:4200"
+      - "127.0.0.1:${FRONTEND_PORT:-4200}:4200"
     depends_on:
       - api-gateway
     restart: unless-stopped

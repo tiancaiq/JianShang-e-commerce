@@ -10,7 +10,7 @@ import {
   SessionUser,
   SessionResponse,
 } from '../models/auth.model';
-import { environment } from '../../../environments/environment.development';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {

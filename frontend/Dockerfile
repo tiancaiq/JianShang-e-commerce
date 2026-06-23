@@ -17,6 +17,8 @@ RUN rm -rf ./*
 
 # Copy Angular build output (browser bundle)
 COPY --from=builder /app/dist/frontend/browser ./
+RUN if [ -f index.csr.html ]; then cp index.csr.html index.html; fi \
+    && rm -rf dashboard orders products inventory login profile payments
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
