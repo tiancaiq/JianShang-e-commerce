@@ -51,7 +51,7 @@ describe('UserProfileService', () => {
       expect(response.data).toEqual(user);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/users/me');
+    const request = httpMock.expectOne('/api/v1/users/me');
     expect(request.request.method).toBe('GET');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
@@ -69,7 +69,7 @@ describe('UserProfileService', () => {
       expect(response.data).toEqual(user);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/users/me');
+    const request = httpMock.expectOne('/api/v1/users/me');
     expect(request.request.method).toBe('PATCH');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.get('If-Match')).toBe('3');

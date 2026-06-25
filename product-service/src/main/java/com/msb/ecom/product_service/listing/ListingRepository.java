@@ -3,6 +3,7 @@ package com.msb.ecom.product_service.listing;
 import com.msb.ecom.product_service.listing.dto.CategoryAttributeResponse;
 import com.msb.ecom.product_service.listing.dto.CategoryResponse;
 import com.msb.ecom.product_service.listing.dto.ListingDraftResponse;
+import com.msb.ecom.product_service.listing.dto.ListingMediaResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Repository
@@ -99,6 +101,89 @@ public class ListingRepository {
         return findById(draft.id());
     }
 
+    public Optional<ListingOwnerSnapshot> findOwnerSnapshot(String listingId) {
+        List<ListingOwnerSnapshot> matches = jdbcTemplate.query("""
+                        select id, seller_type, individual_seller_user_id, business_id, status
+                        from listings
+                        where id = ?
+                        """,
+                (rs, rowNum) -> new ListingOwnerSnapshot(
+                        rs.getString("id"),
+                        ListingSellerType.valueOf(rs.getString("seller_type")),
+                        rs.getString("individual_seller_user_id"),
+                        rs.getString("business_id"),
+                        rs.getString("status")),
+                listingId);
+        return matches.stream().findFirst();
+    }
+
+    public ListingMediaResponse insertMedia(ListingMediaInsert media) {
+        jdbcTemplate.update("""
+                insert into listing_media_objects (
+                    id, listing_id, seller_type, individual_seller_user_id, business_id,
+                    object_bucket, object_key, original_file_name, content_type, size_bytes,
+                    checksum_sha256, upload_status, moderation_status, version, created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        'PENDING_UPLOAD', 'NOT_SUBMITTED', 0, ?, ?)
+                """,
+                media.id(),
+                media.listingId(),
+                media.sellerType().name(),
+                media.individualSellerUserId(),
+                media.businessId(),
+                media.objectBucket(),
+                media.objectKey(),
+                media.originalFileName(),
+                media.contentType(),
+                media.sizeBytes(),
+                media.checksumSha256(),
+                Timestamp.from(media.now()),
+                Timestamp.from(media.now()));
+
+        return findMediaById(media.listingId(), media.id()).orElseThrow(ListingMediaNotFoundException::new);
+    }
+
+    public Optional<ListingMediaResponse> findMediaById(String listingId, String mediaId) {
+        List<ListingMediaResponse> matches = jdbcTemplate.query("""
+                        select id, listing_id, seller_type, individual_seller_user_id, business_id,
+                               object_bucket, object_key, original_file_name, content_type, size_bytes,
+                               checksum_sha256, upload_status, moderation_status, version, created_at, updated_at
+                        from listing_media_objects
+                        where listing_id = ? and id = ?
+                        """,
+                (rs, rowNum) -> mediaResponse(rs),
+                listingId,
+                mediaId);
+        return matches.stream().findFirst();
+    }
+
+    public ListingMediaResponse confirmMedia(
+            String listingId,
+            String mediaId,
+            long sizeBytes,
+            String checksumSha256,
+            Timestamp now) {
+        int updated = jdbcTemplate.update("""
+                update listing_media_objects
+                set size_bytes = ?,
+                    checksum_sha256 = ?,
+                    upload_status = 'UPLOADED',
+                    version = version + 1,
+                    updated_at = ?
+                where listing_id = ? and id = ? and upload_status = 'PENDING_UPLOAD'
+                """,
+                sizeBytes,
+                checksumSha256,
+                now,
+                listingId,
+                mediaId);
+        if (updated == 0) {
+            throw new ListingMediaNotFoundException();
+        }
+        return findMediaById(listingId, mediaId).orElseThrow(ListingMediaNotFoundException::new);
+    }
+
     private ListingDraftResponse findById(String listingId) {
         return jdbcTemplate.queryForObject("""
                 select id, seller_type, individual_seller_user_id, business_id, category_id,
@@ -133,9 +218,40 @@ public class ListingRepository {
                 listingId);
     }
 
+    private ListingMediaResponse mediaResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new ListingMediaResponse(
+                rs.getString("id"),
+                rs.getString("listing_id"),
+                rs.getString("seller_type"),
+                rs.getString("individual_seller_user_id"),
+                rs.getString("business_id"),
+                rs.getString("object_bucket"),
+                rs.getString("object_key"),
+                rs.getString("original_file_name"),
+                rs.getString("content_type"),
+                rs.getLong("size_bytes"),
+                rs.getString("checksum_sha256"),
+                rs.getString("upload_status"),
+                rs.getString("moderation_status"),
+                "LOCAL_DEMO",
+                "local-demo://" + rs.getString("object_bucket") + "/" + rs.getString("object_key"),
+                rs.getLong("version"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant());
+    }
+
     private record CategoryAttributeResponseWithCategory(
             String categoryId,
             CategoryAttributeResponse attribute
+    ) {
+    }
+
+    public record ListingOwnerSnapshot(
+            String id,
+            ListingSellerType sellerType,
+            String individualSellerUserId,
+            String businessId,
+            String status
     ) {
     }
 }

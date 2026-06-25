@@ -37,9 +37,9 @@ describe('authInterceptor', () => {
   });
 
   it('sends gateway requests with cookies and without bearer tokens', () => {
-    http.get('http://localhost:9000/api/v1/users/me').subscribe();
+    http.get('/api/v1/users/me').subscribe();
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/users/me');
+    const request = httpMock.expectOne('/api/v1/users/me');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
     expect(request.request.headers.has('X-CSRF-TOKEN')).toBeFalse();
@@ -47,9 +47,9 @@ describe('authInterceptor', () => {
   });
 
   it('adds the BFF CSRF header to state-changing gateway requests', () => {
-    http.post('http://localhost:9000/api/v1/example', {}).subscribe();
+    http.post('/api/v1/example', {}).subscribe();
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/example');
+    const request = httpMock.expectOne('/api/v1/example');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.get('X-CSRF-TOKEN')).toBe('csrf-token');
     expect(request.request.headers.has('Authorization')).toBeFalse();

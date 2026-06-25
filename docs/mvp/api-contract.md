@@ -534,16 +534,17 @@ GET /categories/{categoryId}
 GET /categories/{categoryId}/attributes
 ```
 
-### Media (`LST-02`, `LST-03`)
+### Media (`LIST-02`, `LIST-03`)
 
 ```text
-POST /media/upload-requests
-POST /media/{mediaId}/confirm
-GET  /media/{mediaId}/status
+POST /listings/{listingId}/media/upload-request
+POST /listings/{listingId}/media/{mediaId}/confirm
 ```
 
-Upload request contains file name, content type, size, checksum, and owner
-context. Response contains signed URL and required headers.
+LIST-02 scopes media to an existing draft listing. Upload request contains file
+name, content type, size, and optional checksum. Response contains local demo
+upload metadata, object key, upload status, moderation status, and version.
+LIST-03 will attach confirmed media to ordered listing images.
 
 ### Listing create (`LST-04`, `LST-05`)
 

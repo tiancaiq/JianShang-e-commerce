@@ -66,7 +66,7 @@ describe('BusinessApplicationService', () => {
       expect(response.data).toEqual(application);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/business-applications');
+    const request = httpMock.expectOne('/api/v1/business-applications');
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
@@ -89,7 +89,7 @@ describe('BusinessApplicationService', () => {
       expect(response.data).toEqual(application);
     });
 
-    const request = httpMock.expectOne(`http://localhost:9000/api/v1/business-applications/${application.id}`);
+    const request = httpMock.expectOne(`/api/v1/business-applications/${application.id}`);
     expect(request.request.method).toBe('PATCH');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.get('If-Match')).toBe('0');
@@ -102,7 +102,7 @@ describe('BusinessApplicationService', () => {
       expect(response.data).toEqual(application);
     });
 
-    const request = httpMock.expectOne(`http://localhost:9000/api/v1/business-applications/${application.id}/submit`);
+    const request = httpMock.expectOne(`/api/v1/business-applications/${application.id}/submit`);
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.get('If-Match')).toBe('0');
@@ -120,7 +120,7 @@ describe('BusinessApplicationService', () => {
     });
 
     const request = httpMock.expectOne(
-      `http://localhost:9000/api/v1/admin/business-applications/${application.id}/decision`
+      `/api/v1/admin/business-applications/${application.id}/decision`
     );
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();

@@ -63,6 +63,18 @@ api.example.com       API gateway
 The admin portal is separately deployed, protected by stricter access policy,
 and never linked from public navigation.
 
+MVP application responsibilities:
+
+| Application | MVP responsibility | Deferred |
+|---|---|---|
+| Marketplace user site | Guest browsing, search, listing detail, buyer account flows, individual seller listing/chat flows | Business checkout, buyer orders, reviews, AI |
+| Business seller portal | Business onboarding status, basic store profile, basic business listing management | Inventory, order management, fulfillment, payments, staff management, analytics |
+| Admin portal | Business application review and listing moderation | Reports, disputes, suspensions, support operations, finance operations |
+
+Guests must be able to browse approved public listings without authentication.
+Authentication is required for profile management, selling, business portal
+access, chat, and admin actions.
+
 ## 2.1 Shared Code Libraries
 
 Use build-time libraries, not a runtime `common-service`.
@@ -209,6 +221,10 @@ Initial responsibilities:
 - Listing moderation submission
 - Search event publication
 
+The marketplace service must expose public read paths for approved listings
+and storefronts. These reads are safe for guests and must not expose draft,
+rejected, suspended, or private seller data.
+
 MySQL is the target source of truth. MongoDB may remain temporarily during
 migration, but new MVP contracts must not depend on MongoDB-only behavior.
 
@@ -250,6 +266,9 @@ Responsibilities:
 Inventory ownership remains in `inventory-service`. Order state remains in
 `order-service`. Cross-service flow uses explicit orchestration and idempotent
 commands; no service writes another service's tables.
+
+These capabilities are intentionally outside the MVP business seller portal.
+MVP merchants manage business profile and basic listings only.
 
 ### 4.6 Payment service (V2)
 

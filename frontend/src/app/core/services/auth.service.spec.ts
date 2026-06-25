@@ -32,7 +32,7 @@ describe('AuthService', () => {
     const setItemSpy = spyOn(localStorage, 'setItem').and.callThrough();
 
     const statePromise = firstValueFrom(service.ensureSession());
-    const sessionRequest = httpMock.expectOne('http://localhost:9000/api/v1/auth/session');
+    const sessionRequest = httpMock.expectOne('/api/v1/auth/session');
 
     expect(sessionRequest.request.method).toBe('GET');
     expect(sessionRequest.request.withCredentials).toBeTrue();
@@ -48,7 +48,7 @@ describe('AuthService', () => {
     });
 
     expect(await statePromise).toEqual({ authenticated: false, user: null });
-    httpMock.expectNone('http://localhost:9000/api/v1/users/me');
+    httpMock.expectNone('/api/v1/users/me');
     expect(getItemSpy).not.toHaveBeenCalled();
     expect(setItemSpy).not.toHaveBeenCalled();
   });
@@ -56,7 +56,7 @@ describe('AuthService', () => {
   it('loads the identity user when the gateway session is authenticated', async () => {
     const statePromise = firstValueFrom(service.ensureSession());
 
-    httpMock.expectOne('http://localhost:9000/api/v1/auth/session').flush({
+    httpMock.expectOne('/api/v1/auth/session').flush({
       authenticated: true,
       user: {
         subject: 'keycloak-sub-1',
@@ -72,7 +72,7 @@ describe('AuthService', () => {
       },
     });
 
-    const userRequest = httpMock.expectOne('http://localhost:9000/api/v1/users/me');
+    const userRequest = httpMock.expectOne('/api/v1/users/me');
     expect(userRequest.request.method).toBe('GET');
     expect(userRequest.request.withCredentials).toBeTrue();
     userRequest.flush({
@@ -109,12 +109,12 @@ describe('AuthService', () => {
 
     serviceWithFakeDocument.login();
 
-    expect(assign).toHaveBeenCalledOnceWith('http://localhost:9000/api/v1/auth/login');
+    expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login');
   });
 
   it('posts logout through the gateway with the current CSRF parameter', async () => {
     const statePromise = firstValueFrom(service.ensureSession());
-    httpMock.expectOne('http://localhost:9000/api/v1/auth/session').flush({
+    httpMock.expectOne('/api/v1/auth/session').flush({
       authenticated: false,
       user: null,
       csrf: {
@@ -130,7 +130,7 @@ describe('AuthService', () => {
     service.logout();
 
     const form = Array.from(document.forms).find(candidate =>
-      candidate.action === 'http://localhost:9000/api/v1/auth/logout'
+      candidate.getAttribute('action') === '/api/v1/auth/logout'
     );
     expect(form).toBeTruthy();
     expect(form?.method).toBe('post');

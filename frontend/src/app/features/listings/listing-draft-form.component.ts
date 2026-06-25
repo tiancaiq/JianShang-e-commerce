@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { Category, ListingCondition, ListingSellerType } from '../../core/models/listing.model';
+import { Category, ListingCondition, ListingMedia, ListingSellerType } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 
@@ -122,6 +122,37 @@ import { ToastService } from '../../core/services/toast.service';
 
         @if (savedId()) {
           <div class="success-message">Draft saved: {{ savedId() }}</div>
+
+          <section class="media-panel" aria-label="Listing media">
+            <label class="field">
+              <span>Listing image</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                [disabled]="uploadingMedia()"
+                (change)="handleMediaSelected($event)"
+              />
+            </label>
+
+            @if (mediaError()) {
+              <div class="error-message">{{ mediaError() }}</div>
+            }
+
+            @if (mediaMessage()) {
+              <div class="success-message">{{ mediaMessage() }}</div>
+            }
+
+            @if (mediaItems().length > 0) {
+              <ul class="media-list">
+                @for (media of mediaItems(); track media.id) {
+                  <li>
+                    <span>{{ media.originalFileName || media.objectKey }}</span>
+                    <strong>{{ media.uploadStatus }}</strong>
+                  </li>
+                }
+              </ul>
+            }
+          </section>
         }
 
         <div class="actions">
@@ -231,6 +262,47 @@ import { ToastService } from '../../core/services/toast.service';
       border: 1px solid rgba(34, 197, 94, 0.2);
     }
 
+    .media-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      border-top: 1px solid var(--color-border);
+      padding-top: 1rem;
+    }
+
+    .media-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .media-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: center;
+      min-height: 40px;
+      padding: 0.625rem 0.75rem;
+      background: var(--color-bg-tertiary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      font-size: 0.8125rem;
+    }
+
+    .media-list span {
+      overflow-wrap: anywhere;
+      color: var(--color-text-secondary);
+    }
+
+    .media-list strong {
+      flex: 0 0 auto;
+      color: var(--color-success);
+      font-size: 0.75rem;
+    }
+
     .actions {
       display: flex;
       justify-content: flex-end;
@@ -276,6 +348,9 @@ import { ToastService } from '../../core/services/toast.service';
   `]
 })
 export class ListingDraftFormComponent implements OnInit {
+  private static readonly MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+  private static readonly ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
   private listingService = inject(ListingService);
   private toastService = inject(ToastService);
   router = inject(Router);
@@ -285,6 +360,10 @@ export class ListingDraftFormComponent implements OnInit {
   saving = signal(false);
   errorMsg = signal('');
   savedId = signal('');
+  uploadingMedia = signal(false);
+  mediaError = signal('');
+  mediaMessage = signal('');
+  mediaItems = signal<ListingMedia[]>([]);
 
   sellerType: ListingSellerType = 'INDIVIDUAL';
   businessId = '';
@@ -330,6 +409,9 @@ export class ListingDraftFormComponent implements OnInit {
     this.saving.set(true);
     this.errorMsg.set('');
     this.savedId.set('');
+    this.mediaError.set('');
+    this.mediaMessage.set('');
+    this.mediaItems.set([]);
 
     this.listingService.createDraft({
       sellerType: this.sellerType,
@@ -362,6 +444,61 @@ export class ListingDraftFormComponent implements OnInit {
           return;
         }
         this.errorMsg.set(error.error?.error?.message || 'Listing draft could not be saved.');
+      },
+    });
+  }
+
+  handleMediaSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.item(0);
+    input.value = '';
+
+    if (!file) {
+      return;
+    }
+    if (!this.savedId()) {
+      this.mediaError.set('Save the draft before adding an image.');
+      return;
+    }
+    if (!ListingDraftFormComponent.ALLOWED_IMAGE_TYPES.has(file.type)) {
+      this.mediaError.set('Use a JPEG, PNG, or WebP image.');
+      return;
+    }
+    if (file.size <= 0 || file.size > ListingDraftFormComponent.MAX_IMAGE_SIZE_BYTES) {
+      this.mediaError.set('Image must be 10 MB or less.');
+      return;
+    }
+
+    this.uploadingMedia.set(true);
+    this.mediaError.set('');
+    this.mediaMessage.set('');
+
+    this.listingService.requestMediaUpload(this.savedId(), {
+      contentType: file.type,
+      fileName: file.name,
+      sizeBytes: file.size,
+    }).subscribe({
+      next: media => this.confirmMedia(file, media),
+      error: error => {
+        this.uploadingMedia.set(false);
+        this.mediaError.set(error.error?.error?.message || 'Image upload could not be requested.');
+      },
+    });
+  }
+
+  private confirmMedia(file: File, media: ListingMedia): void {
+    this.listingService.confirmMediaUpload(this.savedId(), media.id, {
+      sizeBytes: file.size,
+    }).subscribe({
+      next: confirmed => {
+        this.uploadingMedia.set(false);
+        this.mediaItems.update(items => [confirmed, ...items]);
+        this.mediaMessage.set('Image metadata saved.');
+        this.toastService.success('Listing image saved.');
+      },
+      error: error => {
+        this.uploadingMedia.set(false);
+        this.mediaError.set(error.error?.error?.message || 'Image upload could not be confirmed.');
       },
     });
   }

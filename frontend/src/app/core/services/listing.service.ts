@@ -6,6 +6,9 @@ import {
   Category,
   CreateListingDraftRequest,
   ListingDraft,
+  ListingMedia,
+  ListingMediaConfirmRequest,
+  ListingMediaUploadRequest,
 } from '../models/listing.model';
 
 @Injectable({ providedIn: 'root' })
@@ -22,6 +25,18 @@ export class ListingService {
 
   createDraft(request: CreateListingDraftRequest): Observable<ListingDraft> {
     return this.http.post<ListingDraft>(`${this.baseUrl}/listings`, request, {
+      withCredentials: true,
+    });
+  }
+
+  requestMediaUpload(listingId: string, request: ListingMediaUploadRequest): Observable<ListingMedia> {
+    return this.http.post<ListingMedia>(`${this.baseUrl}/listings/${listingId}/media/upload-request`, request, {
+      withCredentials: true,
+    });
+  }
+
+  confirmMediaUpload(listingId: string, mediaId: string, request: ListingMediaConfirmRequest): Observable<ListingMedia> {
+    return this.http.post<ListingMedia>(`${this.baseUrl}/listings/${listingId}/media/${mediaId}/confirm`, request, {
       withCredentials: true,
     });
   }

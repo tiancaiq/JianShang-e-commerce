@@ -1,0 +1,25 @@
+# Local development override: run app containers locally, but use the demo VM's
+# MySQL through an SSH tunnel on the host machine.
+#
+# Start the tunnel from Windows before using this file:
+#   ssh -i "C:\Users\b\Downloads\msb-demo.pem.pem" -L 3307:127.0.0.1:3306 ubuntu@18.191.207.104
+#
+# Then start the local demo stack with:
+#   docker compose --env-file .env.demo -f docker-compose.demo.yml -f docker-compose.vm-db.yml up -d --build
+#
+# This file intentionally uses VM_MYSQL_ROOT_PASSWORD so you do not have to
+# change the normal local MYSQL_ROOT_PASSWORD value in .env.demo.
+
+services:
+  auth-service:
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:${VM_MYSQL_TUNNEL_PORT:-3307}/${IDENTITY_DB_NAME:-identity}?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
+      SPRING_DATASOURCE_PASSWORD: ${VM_IDENTITY_DB_PASSWORD:-${VM_MYSQL_ROOT_PASSWORD}}
+
+  product-service:
+    environment:
+      CATALOG_DB_HOST: host.docker.internal
+      CATALOG_DB_PORT: ${VM_MYSQL_TUNNEL_PORT:-3307}
+      CATALOG_DB_USERNAME: ${CATALOG_DB_USERNAME:-root}
+      CATALOG_DB_PASSWORD: ${VM_CATALOG_DB_PASSWORD:-${VM_MYSQL_ROOT_PASSWORD}}
