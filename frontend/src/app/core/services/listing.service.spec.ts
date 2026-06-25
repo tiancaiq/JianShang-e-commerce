@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ListingService } from './listing.service';
-import { Category, ListingDraft } from '../models/listing.model';
+import { Category, ListingDraft, ListingMedia } from '../models/listing.model';
 
 describe('ListingService', () => {
   let service: ListingService;
@@ -42,6 +42,27 @@ describe('ListingService', () => {
     updatedAt: '2026-06-16T12:00:00Z',
   };
 
+  const media: ListingMedia = {
+    id: '01M00000000000000000000001',
+    listingId: draft.id,
+    sellerType: 'INDIVIDUAL',
+    individualSellerUserId: draft.individualSellerUserId,
+    businessId: null,
+    objectBucket: 'listing-media-local',
+    objectKey: 'listings/01L00000000000000000000001/01M00000000000000000000001/bike.png',
+    originalFileName: 'bike.png',
+    contentType: 'image/png',
+    sizeBytes: 1024,
+    checksumSha256: null,
+    uploadStatus: 'PENDING_UPLOAD',
+    moderationStatus: 'NOT_SUBMITTED',
+    uploadMethod: 'LOCAL_DEMO',
+    uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/01M00000000000000000000001/bike.png',
+    version: 0,
+    createdAt: '2026-06-16T12:01:00Z',
+    updatedAt: '2026-06-16T12:01:00Z',
+  };
+
   beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [
@@ -64,7 +85,7 @@ describe('ListingService', () => {
       expect(response).toEqual(categories);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/categories');
+    const request = httpMock.expectOne('/api/v1/categories');
     expect(request.request.method).toBe('GET');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
@@ -85,7 +106,7 @@ describe('ListingService', () => {
       expect(response).toEqual(draft);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/listings');
+    const request = httpMock.expectOne('/api/v1/listings');
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
@@ -95,5 +116,47 @@ describe('ListingService', () => {
       quantity: 1,
     }));
     request.flush(draft);
+  });
+
+  it('requests listing media upload through the gateway without browser tokens', () => {
+    service.requestMediaUpload(draft.id, {
+      contentType: 'image/png',
+      fileName: 'bike.png',
+      sizeBytes: 1024,
+    }).subscribe(response => {
+      expect(response).toEqual(media);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/listings/${draft.id}/media/upload-request`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toEqual({
+      contentType: 'image/png',
+      fileName: 'bike.png',
+      sizeBytes: 1024,
+    });
+    request.flush(media);
+  });
+
+  it('confirms listing media upload through the gateway without browser tokens', () => {
+    const confirmed = {
+      ...media,
+      uploadStatus: 'UPLOADED' as const,
+      version: 1,
+    };
+
+    service.confirmMediaUpload(draft.id, media.id, {
+      sizeBytes: 1024,
+    }).subscribe(response => {
+      expect(response).toEqual(confirmed);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/listings/${draft.id}/media/${media.id}/confirm`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toEqual({ sizeBytes: 1024 });
+    request.flush(confirmed);
   });
 });

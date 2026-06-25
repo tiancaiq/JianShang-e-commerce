@@ -2,7 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { Category, ListingDraft } from '../../core/models/listing.model';
+import { Category, ListingDraft, ListingMedia } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 import { ListingDraftFormComponent } from './listing-draft-form.component';
@@ -47,13 +47,45 @@ describe('ListingDraftFormComponent', () => {
     updatedAt: '2026-06-16T12:00:00Z',
   };
 
+  const media: ListingMedia = {
+    id: '01M00000000000000000000001',
+    listingId: draft.id,
+    sellerType: 'INDIVIDUAL',
+    individualSellerUserId: draft.individualSellerUserId,
+    businessId: null,
+    objectBucket: 'listing-media-local',
+    objectKey: 'listings/01L00000000000000000000001/01M00000000000000000000001/bike.png',
+    originalFileName: 'bike.png',
+    contentType: 'image/png',
+    sizeBytes: 1024,
+    checksumSha256: null,
+    uploadStatus: 'PENDING_UPLOAD',
+    moderationStatus: 'NOT_SUBMITTED',
+    uploadMethod: 'LOCAL_DEMO',
+    uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/01M00000000000000000000001/bike.png',
+    version: 0,
+    createdAt: '2026-06-16T12:01:00Z',
+    updatedAt: '2026-06-16T12:01:00Z',
+  };
+
   beforeEach(async () => {
-    listingService = jasmine.createSpyObj<ListingService>('ListingService', ['getCategories', 'createDraft']);
+    listingService = jasmine.createSpyObj<ListingService>('ListingService', [
+      'getCategories',
+      'createDraft',
+      'requestMediaUpload',
+      'confirmMediaUpload',
+    ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
     listingService.getCategories.and.returnValue(of([category]));
     listingService.createDraft.and.returnValue(of(draft));
+    listingService.requestMediaUpload.and.returnValue(of(media));
+    listingService.confirmMediaUpload.and.returnValue(of({
+      ...media,
+      uploadStatus: 'UPLOADED' as const,
+      version: 1,
+    }));
 
     await TestBed.configureTestingModule({
       imports: [ListingDraftFormComponent],
@@ -151,6 +183,38 @@ describe('ListingDraftFormComponent', () => {
     expect(component.errorMsg()).toBe('Title is required.');
   });
 
+  it('requests and confirms image metadata after the draft is saved', () => {
+    fixture.detectChanges();
+    component.savedId.set(draft.id);
+
+    component.handleMediaSelected(fileInputEvent(new File(['x'], 'bike.png', { type: 'image/png' })));
+
+    expect(listingService.requestMediaUpload).toHaveBeenCalledOnceWith(draft.id, {
+      contentType: 'image/png',
+      fileName: 'bike.png',
+      sizeBytes: 1,
+    });
+    expect(listingService.confirmMediaUpload).toHaveBeenCalledOnceWith(draft.id, media.id, {
+      sizeBytes: 1,
+    });
+    expect(component.mediaItems()[0]).toEqual(jasmine.objectContaining({
+      id: media.id,
+      uploadStatus: 'UPLOADED',
+    }));
+    expect(component.mediaMessage()).toBe('Image metadata saved.');
+    expect(toastService.success).toHaveBeenCalledWith('Listing image saved.');
+  });
+
+  it('rejects unsupported image types before calling the API', () => {
+    fixture.detectChanges();
+    component.savedId.set(draft.id);
+
+    component.handleMediaSelected(fileInputEvent(new File(['x'], 'bike.gif', { type: 'image/gif' })));
+
+    expect(component.mediaError()).toBe('Use a JPEG, PNG, or WebP image.');
+    expect(listingService.requestMediaUpload).not.toHaveBeenCalled();
+  });
+
   function fillCommonFields(): void {
     component.categoryId = category.id;
     component.title = ' Used bicycle ';
@@ -158,5 +222,16 @@ describe('ListingDraftFormComponent', () => {
     component.condition = 'GOOD';
     component.price = 250;
     component.currency = 'usd';
+  }
+
+  function fileInputEvent(file: File): Event {
+    return {
+      target: {
+        files: {
+          item: () => file,
+        },
+        value: '',
+      },
+    } as unknown as Event;
   }
 });

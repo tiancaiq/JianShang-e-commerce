@@ -37,4 +37,40 @@ public class ListingExceptionHandler {
                         List.of(),
                         CorrelationIdFilter.current(request))));
     }
+
+    @ExceptionHandler(ListingNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleListingNotFound(
+            ListingNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "LISTING_NOT_FOUND",
+                        "Listing was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(ListingMediaNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleListingMediaNotFound(
+            ListingMediaNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "LISTING_MEDIA_NOT_FOUND",
+                        "Listing media was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleInvalidListingRequest(
+            IllegalArgumentException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "LISTING_INVALID_REQUEST",
+                        exception.getMessage(),
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
 }

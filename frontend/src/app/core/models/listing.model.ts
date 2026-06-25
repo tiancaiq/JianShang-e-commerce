@@ -1,5 +1,7 @@
 export type ListingSellerType = 'INDIVIDUAL' | 'BUSINESS';
 export type ListingCondition = 'NEW' | 'OPEN_BOX' | 'LIKE_NEW' | 'GOOD' | 'FAIR' | 'FOR_PARTS';
+export type ListingMediaUploadStatus = 'PENDING_UPLOAD' | 'UPLOADED' | 'FAILED';
+export type ListingMediaModerationStatus = 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface Category {
   id: string;
@@ -61,6 +63,39 @@ export interface ListingDraft {
   publicRegion: string | null;
   status: string;
   moderationStatus: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListingMediaUploadRequest {
+  contentType: string;
+  fileName?: string | null;
+  sizeBytes: number;
+  checksumSha256?: string | null;
+}
+
+export interface ListingMediaConfirmRequest {
+  sizeBytes: number;
+  checksumSha256?: string | null;
+}
+
+export interface ListingMedia {
+  id: string;
+  listingId: string;
+  sellerType: ListingSellerType;
+  individualSellerUserId: string | null;
+  businessId: string | null;
+  objectBucket: string;
+  objectKey: string;
+  originalFileName: string | null;
+  contentType: string;
+  sizeBytes: number;
+  checksumSha256: string | null;
+  uploadStatus: ListingMediaUploadStatus;
+  moderationStatus: ListingMediaModerationStatus;
+  uploadMethod: string;
+  uploadUrl: string;
   version: number;
   createdAt: string;
   updatedAt: string;

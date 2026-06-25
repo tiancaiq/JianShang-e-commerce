@@ -17,23 +17,35 @@ documents take precedence.
 
 ## Current Implementation Boundary
 
-Only Phase 0 and Phase 1 setup tasks in
-`docs/mvp/development-roadmap.md` are currently approved.
+Phase 0 and Phase 1 setup tasks in `docs/mvp/development-roadmap.md` are
+complete. MVP feature work is now active and must still be implemented one
+small roadmap slice at a time.
 
-Do not implement application features yet. This includes registration, login,
-seller profiles, listings, media flows, search, storefronts, chat, moderation,
-cart, inventory, payment, orders, notifications, reviews, AI, and analytics.
+Before implementing a slice, read the current roadmap entry and related MVP
+documents. Do not assume an older README, tutorial note, or stale plan is the
+active source of truth.
 
-After Phase 1 verification, stop and request/await approval for the first MVP
-feature slice.
+The three MVP product surfaces are:
+
+- Public marketplace site: guests can browse/search/view approved goods
+  without login; signed-in users can manage profile, sell individual items,
+  and chat.
+- Business seller portal: approved merchants manage store profile and basic
+  listings in MVP.
+- Admin portal: platform staff manage business approval and listing
+  moderation in MVP.
 
 Release placement:
 
-- MVP: foundation, accounts, seller profiles, listings/media,
+- MVP: foundation, accounts, seller profiles, listings/media, guest browsing,
   search/storefront, basic chat, basic business/listing moderation
 - V2: cart, inventory, checkout/payment, orders/shipping, notifications
 - V3: trade completion/reputation, reviews, advanced trust/admin, AI,
   analytics
+
+Do not implement V2 or V3 features while working on MVP slices. In particular,
+business inventory, cart, checkout, payment, orders, shipping, and
+notifications remain V2 even though the business seller portal exists in MVP.
 
 ## Product Invariants
 
@@ -80,6 +92,13 @@ For each slice:
 
 Do not implement multiple roadmap slices in one change unless they are
 inseparable and the reason is documented.
+
+For new or changed functions/methods, add a concise purpose comment when the
+function participates in a business flow, authorization decision, integration
+adapter, state transition, or non-obvious technical rule. Keep comments useful:
+explain what the function is responsible for or why the rule exists, not a
+line-by-line restatement of obvious code. Trivial getters/setters, framework
+boilerplate, and self-explanatory test setup do not need noise comments.
 
 ## Repository Direction
 

@@ -315,10 +315,14 @@ definition. Unique `(listing_id, attribute_definition_id)`.
 
 Stores listing, media object, display order, alt text, and moderation status.
 
-### `media_objects`
+### `listing_media_objects`
 
-Stores owner context, private object key, media type, size, checksum, scan
-status, public derivative URL, and lifecycle status.
+LIST-02 table for draft listing media metadata. Stores listing owner snapshot,
+private object bucket/key, original file name, content type, size, checksum,
+upload status, moderation status, optimistic version, and timestamps.
+
+LIST-03 can use this table when attaching confirmed media to ordered listing
+images.
 
 ### `listing_status_history`
 

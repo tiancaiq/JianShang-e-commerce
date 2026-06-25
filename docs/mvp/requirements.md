@@ -26,7 +26,7 @@ and moderation, but they must not share checkout state machines.
 - Individual seller profile
 - Business seller profile and basic store profile
 - Listings and media
-- Search and public storefront
+- Guest browsing, search, listing detail, and public storefront
 - Basic text chat between buyer and individual seller
 - Basic admin approval/moderation for businesses and listings
 
@@ -51,6 +51,17 @@ classified as MVP may be scheduled before MVP is complete.
 
 ## 2. MVP Applications
 
+The product has three user-facing surfaces:
+
+1. **Public user marketplace site** for guests, buyers, and individual sellers.
+2. **Business seller portal** for approved merchants to manage their store and
+   basic listings.
+3. **Admin portal** for platform staff to manage marketplace approval and
+   moderation.
+
+The MVP must make these surfaces visible as separate product areas, but it
+does not need the full V2 commerce back office yet.
+
 ### 2.1 Marketplace application
 
 Audience:
@@ -61,11 +72,12 @@ Audience:
 
 Responsibilities:
 
-- Browse and search approved listings
+- Let guests browse, search, and view approved listings without signing in
 - Display business and individual seller types clearly
 - Manage buyer accounts
 - Create individual listings
-- Use basic text chat to negotiate individual deals
+- Let signed-in buyers and individual sellers use basic text chat to
+  negotiate individual deals
 
 Deferred:
 
@@ -83,12 +95,14 @@ Audience:
 Responsibilities:
 
 - Complete business onboarding
-- Manage store profile and policies
-- Manage basic store listings
+- Manage basic store profile
+- Manage basic business listings
 
 Deferred:
 
-- Inventory, fulfillment, payments, and notifications: V2
+- Inventory, cart, checkout, payment, orders, shipping, fulfillment, and
+  notifications: V2
+- Store policy versioning: V3
 - Advanced staff operations and analytics: V3
 
 ### 2.3 Admin application
@@ -104,7 +118,8 @@ Audience:
 
 Responsibilities:
 
-- Review businesses and listings
+- Review and decide business applications
+- Review and moderate listing submissions
 
 Deferred to V3:
 
@@ -274,6 +289,8 @@ Acceptance criteria:
   customer contact data.
 - Store slug is unique.
 - Suspended businesses cannot publish listings.
+- Inventory, orders, payments, shipping, and fulfillment are not managed in
+  the MVP store profile flow.
 
 Depends on: `BUS-04`.
 

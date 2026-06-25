@@ -48,7 +48,7 @@ describe('IndividualSellerService', () => {
       expect(response.data).toEqual(profile);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/individual-seller/activation');
+    const request = httpMock.expectOne('/api/v1/individual-seller/activation');
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
@@ -65,7 +65,7 @@ describe('IndividualSellerService', () => {
       expect(response.data).toEqual(profile);
     });
 
-    const request = httpMock.expectOne('http://localhost:9000/api/v1/individual-seller/me');
+    const request = httpMock.expectOne('/api/v1/individual-seller/me');
     expect(request.request.method).toBe('GET');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
