@@ -35,6 +35,7 @@ class ListingDomainFoundationMigrationTests {
             assertThat(tableCount(connection, "category_attribute_definitions")).isEqualTo(1);
             assertThat(tableCount(connection, "listings")).isEqualTo(1);
             assertThat(tableCount(connection, "listing_attributes")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_moderation_decisions")).isEqualTo(1);
         }
     }
 

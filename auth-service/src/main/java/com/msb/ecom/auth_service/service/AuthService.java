@@ -4,9 +4,10 @@ import com.msb.ecom.auth_service.dto.CurrentUserResponse;
 import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.auth_service.repository.UserRepository;
+import com.msb.ecom.common.web.security.CurrentActor;
+import com.msb.ecom.common.web.security.CurrentActorProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,15 +23,16 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final UlidGenerator ulidGenerator;
+    private final CurrentActorProvider currentActorProvider;
 
     @Transactional
-    public CurrentUserResponse ensureCurrentUser(Jwt jwt) {
-        return CurrentUserResponse.from(ensureUserEntity(jwt));
+    public CurrentUserResponse ensureCurrentUser() {
+        return CurrentUserResponse.from(ensureUserEntity());
     }
 
     @Transactional
-    public CurrentUserResponse updateCurrentUser(Jwt jwt, UpdateCurrentUserRequest request, Long expectedVersion) {
-        User user = ensureUserEntity(jwt);
+    public CurrentUserResponse updateCurrentUser(UpdateCurrentUserRequest request, Long expectedVersion) {
+        User user = ensureUserEntity();
 
         if (expectedVersion != null && user.getVersion() != expectedVersion) {
             throw new ProfileVersionConflictException();
@@ -44,26 +46,30 @@ public class AuthService {
         return CurrentUserResponse.from(userRepository.saveAndFlush(user));
     }
 
-    public User ensureUserEntity(Jwt jwt) {
-        String subject = requiredSubject(jwt);
-        String email = normalizedEmail(jwt);
-        boolean emailVerified = Boolean.TRUE.equals(jwt.getClaim("email_verified"));
-        String displayName = displayName(jwt, email);
+    public User ensureUserEntity() {
+        CurrentActor actor = currentActorProvider.currentActor();
+        String subject = requiredSubject(actor.subject());
+        String email = normalizedEmail(actor.email());
+        String displayName = displayName(actor.displayName(), email);
 
         return userRepository.findByKeycloakSub(subject)
                 .map(existing -> {
-                    existing.applyKeycloakProjection(email, emailVerified, displayName);
+                    existing.applyKeycloakProjection(email, actor.emailVerified(), displayName);
                     return existing;
                 })
                 .orElseGet(() -> {
-                    User created = User.create(ulidGenerator.next(), subject, email, emailVerified, displayName);
+                    User created = User.create(
+                            ulidGenerator.next(),
+                            subject,
+                            email,
+                            actor.emailVerified(),
+                            displayName);
                     log.info("Creating identity user mapping for keycloakSub={}", subject);
                     return userRepository.save(created);
                 });
     }
 
-    private String requiredSubject(Jwt jwt) {
-        String subject = jwt.getSubject();
+    private String requiredSubject(String subject) {
         if (subject == null || subject.isBlank()) {
             throw new IllegalStateException("Authenticated token is missing subject");
         }
@@ -73,8 +79,7 @@ public class AuthService {
         return subject;
     }
 
-    private String normalizedEmail(Jwt jwt) {
-        String email = jwt.getClaimAsString("email");
+    private String normalizedEmail(String email) {
         if (email == null || email.isBlank()) {
             return null;
         }
@@ -85,11 +90,8 @@ public class AuthService {
         return trimmed.toLowerCase(Locale.ROOT);
     }
 
-    private String displayName(Jwt jwt, String email) {
-        String name = firstPresent(
-                jwt.getClaimAsString("name"),
-                jwt.getClaimAsString("preferred_username"),
-                email);
+    private String displayName(String actorDisplayName, String email) {
+        String name = firstPresent(actorDisplayName, email);
         if (name == null || name.isBlank()) {
             return null;
         }

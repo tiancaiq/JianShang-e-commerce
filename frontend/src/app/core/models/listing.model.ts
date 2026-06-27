@@ -1,7 +1,8 @@
 export type ListingSellerType = 'INDIVIDUAL' | 'BUSINESS';
 export type ListingCondition = 'NEW' | 'OPEN_BOX' | 'LIKE_NEW' | 'GOOD' | 'FAIR' | 'FOR_PARTS';
 export type ListingMediaUploadStatus = 'PENDING_UPLOAD' | 'UPLOADED' | 'FAILED';
-export type ListingMediaModerationStatus = 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ListingMediaModerationStatus = 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+export type ListingModerationDecision = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
 
 export interface Category {
   id: string;
@@ -66,6 +67,7 @@ export interface ListingDraft {
   version: number;
   createdAt: string;
   updatedAt: string;
+  images?: ListingImage[];
 }
 
 export interface ListingMediaUploadRequest {
@@ -99,4 +101,47 @@ export interface ListingMedia {
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ListingImageRequest {
+  mediaId: string;
+  altText?: string | null;
+}
+
+export interface UpdateListingImagesRequest {
+  images: ListingImageRequest[];
+}
+
+export interface ListingImage {
+  id: string;
+  listingId: string;
+  mediaObjectId: string;
+  displayOrder: number;
+  altText: string | null;
+  moderationStatus: ListingMediaModerationStatus;
+  originalFileName: string | null;
+  contentType: string;
+  sizeBytes: number;
+  uploadStatus: ListingMediaUploadStatus;
+  objectBucket: string;
+  objectKey: string;
+  uploadUrl: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListingModerationDecisionRequest {
+  decision: ListingModerationDecision;
+  reason: string;
+}
+
+export interface ListingModerationDecisionResponse {
+  id: string;
+  listingId: string;
+  decision: ListingModerationDecision;
+  reason: string;
+  reviewerUserId: string;
+  listingVersion: number;
+  createdAt: string;
 }

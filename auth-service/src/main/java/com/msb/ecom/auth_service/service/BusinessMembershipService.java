@@ -4,7 +4,6 @@ import com.msb.ecom.auth_service.dto.BusinessMembershipResponse;
 import com.msb.ecom.auth_service.model.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,8 +19,8 @@ public class BusinessMembershipService {
     private final JdbcTemplate jdbcTemplate;
 
     @Transactional(readOnly = true)
-    public BusinessMembershipResponse getCurrentMembership(Jwt jwt, String businessId) {
-        User user = authService.ensureUserEntity(jwt);
+    public BusinessMembershipResponse getCurrentMembership(String businessId) {
+        User user = authService.ensureUserEntity();
         return jdbcTemplate.query("""
                         select m.business_id, m.user_id, m.role, m.status
                         from business_memberships m

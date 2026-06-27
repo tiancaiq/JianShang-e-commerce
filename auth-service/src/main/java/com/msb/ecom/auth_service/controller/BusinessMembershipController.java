@@ -4,8 +4,6 @@ import com.msb.ecom.auth_service.dto.ApiDataResponse;
 import com.msb.ecom.auth_service.dto.BusinessMembershipResponse;
 import com.msb.ecom.auth_service.service.BusinessMembershipService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,12 +17,7 @@ public class BusinessMembershipController {
     private final BusinessMembershipService businessMembershipService;
 
     @GetMapping("/{businessId}/membership/me")
-    public ApiDataResponse<BusinessMembershipResponse> me(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable String businessId) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(businessMembershipService.getCurrentMembership(jwt, businessId));
+    public ApiDataResponse<BusinessMembershipResponse> me(@PathVariable String businessId) {
+        return new ApiDataResponse<>(businessMembershipService.getCurrentMembership(businessId));
     }
 }

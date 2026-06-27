@@ -6,8 +6,6 @@ import com.msb.ecom.auth_service.dto.BusinessApplicationResponse;
 import com.msb.ecom.auth_service.service.BusinessApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,12 +21,8 @@ public class AdminBusinessApplicationController {
 
     @PostMapping("/{id}/decision")
     public ApiDataResponse<BusinessApplicationResponse> decide(
-            @AuthenticationPrincipal Jwt jwt,
             @PathVariable String id,
             @Valid @RequestBody BusinessApplicationDecisionRequest request) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(businessApplicationService.decide(jwt, id, request));
+        return new ApiDataResponse<>(businessApplicationService.decide(id, request));
     }
 }

@@ -41,7 +41,7 @@ services:
     container_name: msb-demo-keycloak
     command: start-dev --import-realm
     environment:
-      KC_HOSTNAME: auth.bigjianshang.shop
+      KC_HOSTNAME: ${KC_HOSTNAME:-localhost}
       KC_PROXY_HEADERS: xforwarded
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_DB:-keycloak}

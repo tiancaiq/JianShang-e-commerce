@@ -539,12 +539,14 @@ GET /categories/{categoryId}/attributes
 ```text
 POST /listings/{listingId}/media/upload-request
 POST /listings/{listingId}/media/{mediaId}/confirm
+PUT  /listings/{listingId}/images
 ```
 
 LIST-02 scopes media to an existing draft listing. Upload request contains file
 name, content type, size, and optional checksum. Response contains local demo
 upload metadata, object key, upload status, moderation status, and version.
-LIST-03 will attach confirmed media to ordered listing images.
+LIST-03 attaches confirmed media to ordered draft listing images. The request
+array order becomes the display order.
 
 ### Listing create (`LST-04`, `LST-05`)
 
@@ -575,12 +577,11 @@ LIST-01 uses the unified draft endpoint above with `sellerType` set to
 quantity; they omit negotiation and meeting fields. Publishing, image
 attachment, moderation submission, and public browsing remain separate slices.
 
-### Listing management (`LST-06` through `LST-10`)
+### Listing management (`LIST-04` and later)
 
 ```text
 GET    /listings/{listingId}
 PATCH  /listings/{listingId}
-PUT    /listings/{listingId}/images
 POST   /listings/{listingId}/submit
 POST   /listings/{listingId}/pause
 POST   /listings/{listingId}/relist
@@ -591,13 +592,52 @@ GET    /businesses/{businessId}/listings
 
 Patch and state commands require `If-Match`.
 
-### Listing moderation (`LST-09`)
+LIST-04 implements owner draft read/list/edit: `GET /listings/{listingId}`,
+`GET /users/me/listings`, `GET /businesses/{businessId}/listings`, and
+`PATCH /listings/{listingId}`.
+
+LIST-05 implements `POST /listings/{listingId}/submit`. The command requires
+the current version in `If-Match`, requires at least one attached uploaded
+image, moves the listing to `PENDING_REVIEW`, and moves listing/image
+moderation state to `PENDING`. Pause, relist, close, and public read paths
+remain later slices.
+
+### Listing moderation (`LIST-06`, `LST-09`)
 
 ```text
-GET  /admin/moderation/listings
-POST /admin/moderation/listings/{caseId}/claim
-POST /admin/moderation/listings/{caseId}/decision
+GET  /admin/listings/moderation
+POST /admin/listings/{listingId}/decision
 ```
+
+LIST-06 implements the basic decision path without case claiming. Both
+endpoints require authenticated platform admin role `PLATFORM_ADMIN`.
+
+Queue response returns submitted listings where `status=PENDING_REVIEW` and
+`moderationStatus=PENDING`.
+
+Decision command requires `If-Match` with the current listing version.
+
+Request:
+
+```json
+{"decision": "APPROVE|REJECT|REQUEST_CHANGES", "reason": "text"}
+```
+
+Rules:
+
+- `reason` is required for every decision.
+- Only pending-review listings can receive a decision.
+- `APPROVE` sets listing status `ACTIVE`, moderation status `APPROVED`, and
+  `publishedAt`.
+- `REJECT` sets listing status `REJECTED` and moderation status `REJECTED`.
+- `REQUEST_CHANGES` sets listing status `CHANGES_REQUESTED` and moderation
+  status `CHANGES_REQUESTED`.
+- Attached listing image/media moderation status is updated with the listing
+  decision result.
+- Every decision is appended to listing moderation decision history.
+- A stale version returns `409 LISTING_VERSION_CONFLICT`.
+
+Moderation case claiming and assignment remain deferred.
 
 ### Search (`SRC-02`, `SRC-03`)
 

@@ -1,8 +1,8 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { Category, ListingDraft, ListingMedia } from '../../core/models/listing.model';
+import { Category, ListingDraft, ListingImage, ListingMedia } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 import { ListingDraftFormComponent } from './listing-draft-form.component';
@@ -68,24 +68,57 @@ describe('ListingDraftFormComponent', () => {
     updatedAt: '2026-06-16T12:01:00Z',
   };
 
+  const image: ListingImage = {
+    id: '01I00000000000000000000001',
+    listingId: draft.id,
+    mediaObjectId: media.id,
+    displayOrder: 0,
+    altText: 'bike.png',
+    moderationStatus: 'NOT_SUBMITTED',
+    originalFileName: 'bike.png',
+    contentType: 'image/png',
+    sizeBytes: 1024,
+    uploadStatus: 'UPLOADED',
+    objectBucket: 'listing-media-local',
+    objectKey: media.objectKey,
+    uploadUrl: media.uploadUrl,
+    version: 0,
+    createdAt: '2026-06-16T12:02:00Z',
+    updatedAt: '2026-06-16T12:02:00Z',
+  };
+
   beforeEach(async () => {
     listingService = jasmine.createSpyObj<ListingService>('ListingService', [
       'getCategories',
       'createDraft',
+      'getListing',
+      'updateDraft',
+      'submitForReview',
       'requestMediaUpload',
       'confirmMediaUpload',
+      'updateListingImages',
     ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
     listingService.getCategories.and.returnValue(of([category]));
     listingService.createDraft.and.returnValue(of(draft));
+    listingService.getListing.and.returnValue(of(draft));
+    listingService.updateDraft.and.returnValue(of({ ...draft, title: 'Updated bicycle', version: 1 }));
+    listingService.submitForReview.and.returnValue(of({
+      ...draft,
+      status: 'PENDING_REVIEW',
+      moderationStatus: 'PENDING',
+      version: 1,
+      images: [image],
+    }));
     listingService.requestMediaUpload.and.returnValue(of(media));
     listingService.confirmMediaUpload.and.returnValue(of({
       ...media,
       uploadStatus: 'UPLOADED' as const,
       version: 1,
     }));
+    listingService.updateListingImages.and.returnValue(of([image]));
 
     await TestBed.configureTestingModule({
       imports: [ListingDraftFormComponent],
@@ -94,6 +127,7 @@ describe('ListingDraftFormComponent', () => {
         { provide: ListingService, useValue: listingService },
         { provide: ToastService, useValue: toastService },
         { provide: Router, useValue: router },
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => null } } } },
       ],
     }).compileComponents();
 
@@ -130,6 +164,44 @@ describe('ListingDraftFormComponent', () => {
     }));
     expect(component.savedId()).toBe(draft.id);
     expect(toastService.success).toHaveBeenCalledWith('Listing draft saved.');
+  });
+
+  it('saves the selected image immediately after creating the draft', () => {
+    fixture.detectChanges();
+    fillCommonFields();
+
+    component.handleMediaSelected(fileInputEvent(new File(['x'], 'bike.png', { type: 'image/png' })));
+    component.saveDraft();
+
+    expect(listingService.createDraft).toHaveBeenCalled();
+    expect(listingService.requestMediaUpload).toHaveBeenCalledOnceWith(draft.id, {
+      contentType: 'image/png',
+      fileName: 'bike.png',
+      sizeBytes: 1,
+    });
+    expect(listingService.confirmMediaUpload).toHaveBeenCalledOnceWith(draft.id, media.id, {
+      sizeBytes: 1,
+    });
+    expect(listingService.updateListingImages).toHaveBeenCalledOnceWith(draft.id, {
+      images: [{ mediaId: media.id, altText: 'bike.png' }],
+    });
+    expect(component.savedId()).toBe(draft.id);
+    expect(component.selectedMediaName()).toBe('');
+    expect(component.mediaItems()[0]).toEqual(jasmine.objectContaining({
+      id: image.id,
+      mediaObjectId: media.id,
+      uploadStatus: 'UPLOADED',
+    }));
+    expect(toastService.success).toHaveBeenCalledWith('Listing draft and image saved.');
+  });
+
+  it('shows the selected image before the draft is saved', () => {
+    fixture.detectChanges();
+
+    component.handleMediaSelected(fileInputEvent(new File(['x'], 'bike.png', { type: 'image/png' })));
+
+    expect(component.selectedMediaName()).toBe('bike.png');
+    expect(listingService.requestMediaUpload).not.toHaveBeenCalled();
   });
 
   it('saves a business draft with business fields', () => {
@@ -197,11 +269,15 @@ describe('ListingDraftFormComponent', () => {
     expect(listingService.confirmMediaUpload).toHaveBeenCalledOnceWith(draft.id, media.id, {
       sizeBytes: 1,
     });
+    expect(listingService.updateListingImages).toHaveBeenCalledOnceWith(draft.id, {
+      images: [{ mediaId: media.id, altText: 'bike.png' }],
+    });
     expect(component.mediaItems()[0]).toEqual(jasmine.objectContaining({
-      id: media.id,
+      id: image.id,
+      mediaObjectId: media.id,
       uploadStatus: 'UPLOADED',
     }));
-    expect(component.mediaMessage()).toBe('Image metadata saved.');
+    expect(component.mediaMessage()).toBe('Image attached to draft.');
     expect(toastService.success).toHaveBeenCalledWith('Listing image saved.');
   });
 
@@ -213,6 +289,34 @@ describe('ListingDraftFormComponent', () => {
 
     expect(component.mediaError()).toBe('Use a JPEG, PNG, or WebP image.');
     expect(listingService.requestMediaUpload).not.toHaveBeenCalled();
+  });
+
+  it('submits an editable draft with an attached image for review', () => {
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = draft.version;
+    component.isEditMode.set(true);
+    component.mediaItems.set([image]);
+
+    component.submitForReview();
+
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, draft.version);
+    expect(component.listingStatus()).toBe('PENDING_REVIEW');
+    expect(component.canEditDraft()).toBeFalse();
+    expect(toastService.success).toHaveBeenCalledWith('Listing submitted for review.');
+  });
+
+  it('requires an attached image before submitting for review', () => {
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = draft.version;
+    component.isEditMode.set(true);
+    component.mediaItems.set([]);
+
+    component.submitForReview();
+
+    expect(listingService.submitForReview).not.toHaveBeenCalled();
+    expect(component.errorMsg()).toBe('Add at least one image before submitting for review.');
   });
 
   function fillCommonFields(): void {

@@ -152,7 +152,7 @@ IAM-03 does not implement:
 
 Older `docs/mvp/requirements.md` labels IAM-03 as password recovery. The
 current implementation sequence in
-`docs/mvp/iam-authentication-accounts-implementation-plan.md` defines IAM-03
+`docs/mvp/iam/iam-authentication-accounts-implementation-plan.md` defines IAM-03
 as identity user table and Keycloak `sub` mapping. This implementation follows
 the current IAM slice plan. Password recovery remains Keycloak-owned and is
 not implemented in application code here.
