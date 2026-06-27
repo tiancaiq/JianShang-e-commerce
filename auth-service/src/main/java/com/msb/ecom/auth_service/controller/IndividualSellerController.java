@@ -7,8 +7,6 @@ import com.msb.ecom.auth_service.service.IndividualSellerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,21 +22,14 @@ public class IndividualSellerController {
     private final IndividualSellerService individualSellerService;
 
     @GetMapping("/me")
-    public ApiDataResponse<IndividualSellerProfileResponse> me(@AuthenticationPrincipal Jwt jwt) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(individualSellerService.getCurrentProfile(jwt));
+    public ApiDataResponse<IndividualSellerProfileResponse> me() {
+        return new ApiDataResponse<>(individualSellerService.getCurrentProfile());
     }
 
     @PostMapping("/activation")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiDataResponse<IndividualSellerProfileResponse> activate(
-            @AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody ActivateIndividualSellerRequest request) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(individualSellerService.activate(jwt, request));
+        return new ApiDataResponse<>(individualSellerService.activate(request));
     }
 }

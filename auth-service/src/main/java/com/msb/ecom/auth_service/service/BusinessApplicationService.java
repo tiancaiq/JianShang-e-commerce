@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,8 +47,8 @@ public class BusinessApplicationService {
     private String webhookSecret;
 
     @Transactional
-    public BusinessApplicationResponse createDraft(Jwt jwt, BusinessApplicationDraftRequest request) {
-        User user = authService.ensureUserEntity(jwt);
+    public BusinessApplicationResponse createDraft(BusinessApplicationDraftRequest request) {
+        User user = authService.ensureUserEntity();
         if (businessApplicationRepository.existsByApplicantUserIdAndStatus(user.getId(), DRAFT)) {
             throw new BusinessApplicationConflictException("A draft business application already exists.");
         }
@@ -73,8 +72,8 @@ public class BusinessApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public BusinessApplicationResponse getOwned(Jwt jwt, String id) {
-        User user = authService.ensureUserEntity(jwt);
+    public BusinessApplicationResponse getOwned(String id) {
+        User user = authService.ensureUserEntity();
         return businessApplicationRepository.findByIdAndApplicantUserId(id, user.getId())
                 .map(BusinessApplicationResponse::from)
                 .orElseThrow(BusinessApplicationNotFoundException::new);
@@ -82,11 +81,10 @@ public class BusinessApplicationService {
 
     @Transactional
     public BusinessApplicationResponse updateDraft(
-            Jwt jwt,
             String id,
             Long expectedVersion,
             BusinessApplicationDraftRequest request) {
-        User user = authService.ensureUserEntity(jwt);
+        User user = authService.ensureUserEntity();
         BusinessApplication application = businessApplicationRepository.findByIdAndApplicantUserId(id, user.getId())
                 .orElseThrow(BusinessApplicationNotFoundException::new);
 
@@ -112,8 +110,8 @@ public class BusinessApplicationService {
     }
 
     @Transactional
-    public BusinessApplicationResponse submit(Jwt jwt, String id, Long expectedVersion) {
-        User user = authService.ensureUserEntity(jwt);
+    public BusinessApplicationResponse submit(String id, Long expectedVersion) {
+        User user = authService.ensureUserEntity();
         BusinessApplication application = businessApplicationRepository.findByIdAndApplicantUserId(id, user.getId())
                 .orElseThrow(BusinessApplicationNotFoundException::new);
 
@@ -168,8 +166,8 @@ public class BusinessApplicationService {
     }
 
     @Transactional
-    public BusinessApplicationResponse decide(Jwt jwt, String id, BusinessApplicationDecisionRequest request) {
-        User reviewer = authService.ensureUserEntity(jwt);
+    public BusinessApplicationResponse decide(String id, BusinessApplicationDecisionRequest request) {
+        User reviewer = authService.ensureUserEntity();
         requirePlatformAdmin(reviewer.getId());
 
         BusinessApplication application = businessApplicationRepository.findById(id)

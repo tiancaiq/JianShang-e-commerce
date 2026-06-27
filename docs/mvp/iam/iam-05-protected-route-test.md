@@ -42,7 +42,7 @@ listing, or chat feature was added.
 - `api-gateway/src/test/java/com/msb/ecom/api_gateway/ApiGatewayApplicationTests.java`
 - `auth-service/src/test/java/com/msb/ecom/auth_service/AuthServiceApplicationTests.java`
 - `frontend/src/app/core/guards/auth.guard.spec.ts`
-- `docs/mvp/iam-05-protected-route-test.md`
+- `docs/mvp/iam/iam-05-protected-route-test.md`
 
 ## Verification Commands
 

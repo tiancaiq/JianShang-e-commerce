@@ -8,7 +8,6 @@ import com.msb.ecom.auth_service.repository.IndividualSellerProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +28,8 @@ public class IndividualSellerService {
     private final JdbcTemplate jdbcTemplate;
 
     @Transactional
-    public IndividualSellerProfileResponse activate(Jwt jwt, ActivateIndividualSellerRequest request) {
-        User user = authService.ensureUserEntity(jwt);
+    public IndividualSellerProfileResponse activate(ActivateIndividualSellerRequest request) {
+        User user = authService.ensureUserEntity();
 
         if (individualSellerProfileRepository.existsByUserId(user.getId())) {
             throw new IndividualSellerAlreadyActiveException();
@@ -52,8 +51,8 @@ public class IndividualSellerService {
     }
 
     @Transactional(readOnly = true)
-    public IndividualSellerProfileResponse getCurrentProfile(Jwt jwt) {
-        User user = authService.ensureUserEntity(jwt);
+    public IndividualSellerProfileResponse getCurrentProfile() {
+        User user = authService.ensureUserEntity();
         return individualSellerProfileRepository.findByUserId(user.getId())
                 .map(IndividualSellerProfileResponse::from)
                 .orElseThrow(IndividualSellerProfileNotFoundException::new);

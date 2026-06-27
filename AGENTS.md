@@ -15,6 +15,29 @@ The approved MVP specification is:
 When older README or tutorial documents conflict with these files, the MVP
 documents take precedence.
 
+## Documentation Organization
+
+Keep top-level MVP documents in `docs/mvp/`:
+
+- `requirements.md`
+- `architecture.md`
+- `database.md`
+- `api-contract.md`
+- `development-roadmap.md`
+
+Keep roadmap slice documents in feature folders:
+
+- Authentication/accounts: `docs/mvp/iam/`
+- Business onboarding/store: `docs/mvp/bus/`
+- Individual seller profile: `docs/mvp/ind/`
+- Listings/media: `docs/mvp/list/`
+- Verification/demo fixes: `docs/mvp/fix/`
+
+When adding a new slice document, place it in the matching feature folder and
+update references in `docs/mvp/development-roadmap.md`. Do not add new
+slice-level docs directly under `docs/mvp/` unless they define a new top-level
+MVP area and the folder structure is updated at the same time.
+
 ## Current Implementation Boundary
 
 Phase 0 and Phase 1 setup tasks in `docs/mvp/development-roadmap.md` are

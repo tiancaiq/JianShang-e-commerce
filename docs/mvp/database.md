@@ -313,7 +313,14 @@ definition. Unique `(listing_id, attribute_definition_id)`.
 
 ### `listing_images`
 
-Stores listing, media object, display order, alt text, and moderation status.
+LIST-03 table for ordered draft listing images. Stores listing, confirmed media
+object, display order, alt text, moderation status, optimistic version, and
+timestamps.
+
+Unique constraints:
+
+- `(listing_id, media_object_id)`
+- `(listing_id, display_order)`
 
 ### `listing_media_objects`
 
@@ -323,6 +330,26 @@ upload status, moderation status, optimistic version, and timestamps.
 
 LIST-03 can use this table when attaching confirmed media to ordered listing
 images.
+
+LIST-06 allows image/media moderation status to include `CHANGES_REQUESTED`
+when an admin asks the seller to revise a submitted listing.
+
+### `listing_moderation_decisions`
+
+LIST-06 append-only decision history for submitted listing review.
+
+Important columns:
+
+- `listing_id`
+- `decision`: `APPROVE`, `REJECT`, or `REQUEST_CHANGES`
+- `reason`
+- `reviewer_user_id`
+- `listing_version`
+- `created_at`
+
+Rows are immutable audit history for the basic MVP listing review flow.
+Moderation case assignment and evidence tables remain deferred to later admin
+moderation work.
 
 ### `listing_status_history`
 

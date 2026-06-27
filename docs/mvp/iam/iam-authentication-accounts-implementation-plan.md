@@ -7,8 +7,8 @@ Scope: First MVP feature area after Phase 1
 Related docs:
 
 - `docs/adr/0001-keycloak-oidc-bff-authentication.md`
-- `docs/mvp/iam-00-legacy-auth-cleanup-plan.md`
-- `docs/mvp/iam-01-keycloak-local-setup.md`
+- `docs/mvp/iam/iam-00-legacy-auth-cleanup-plan.md`
+- `docs/mvp/iam/iam-01-keycloak-local-setup.md`
 - `docs/mvp/requirements.md`
 - `docs/mvp/api-contract.md`
 - `docs/mvp/database.md`
@@ -44,7 +44,7 @@ replaced, or retained before implementing the target Keycloak/BFF flow.
 
 ### Files Likely Touched
 
-- `docs/mvp/iam-00-legacy-auth-cleanup-plan.md`
+- `docs/mvp/iam/iam-00-legacy-auth-cleanup-plan.md`
 - Existing legacy references only for inspection:
   - `auth-service/src/main/java/com/msb/ecom/auth_service/service/JwtService.java`
   - `auth-service/src/main/java/com/msb/ecom/auth_service/service/AuthService.java`
@@ -96,7 +96,7 @@ future authentication slices.
 - `docker-compose.yml`
 - `.env.example`
 - `infra/keycloak/realm-msb-local.json`
-- `docs/mvp/iam-01-keycloak-local-setup.md`
+- `docs/mvp/iam/iam-01-keycloak-local-setup.md`
 
 ### Database Impact
 
@@ -151,7 +151,7 @@ Code flow with PKCE. The browser receives only a secure opaque session cookie.
 - `api-gateway/src/main/java/com/msb/ecom/api_gateway/routes/Routes.java`
 - New gateway auth/session classes as needed
 - `docs/mvp/api-contract.md`
-- `docs/mvp/iam-authentication-accounts-implementation-plan.md`
+- `docs/mvp/iam/iam-authentication-accounts-implementation-plan.md`
 
 ### Database Impact
 

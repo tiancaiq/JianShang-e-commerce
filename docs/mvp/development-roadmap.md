@@ -41,7 +41,8 @@ The current repository contains implementation work for:
 - Authentication and accounts: IAM-00 through IAM-06
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
-- Listing foundation and draft creation: LIST-00 and LIST-01
+- Listing foundation, drafts, media, submit, and admin decision: LIST-00
+  through LIST-06
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -150,8 +151,8 @@ Completed slices:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| IND-01 Individual seller activation | Complete | `docs/mvp/ind-01-individual-seller-activation.md` |
-| IND-02 Current individual seller profile | Complete | `docs/mvp/ind-02-current-individual-seller-profile.md` |
+| IND-01 Individual seller activation | Complete | `docs/mvp/ind/ind-01-individual-seller-activation.md` |
+| IND-02 Current individual seller profile | Complete | `docs/mvp/ind/ind-02-current-individual-seller-profile.md` |
 
 Remaining MVP work:
 
@@ -168,9 +169,9 @@ Completed slices:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| BUS-01 Business application draft | Complete | `docs/mvp/bus-01-business-application-draft.md` |
-| BUS-02 Submit business application | Complete | `docs/mvp/bus-02-submit-business-application.md` |
-| BUS-03/BUS-04 Verification callback and admin decision | Complete | `docs/mvp/bus-03-04-business-verification-and-admin-decision.md` |
+| BUS-01 Business application draft | Complete | `docs/mvp/bus/bus-01-business-application-draft.md` |
+| BUS-02 Submit business application | Complete | `docs/mvp/bus/bus-02-submit-business-application.md` |
+| BUS-03/BUS-04 Verification callback and admin decision | Complete | `docs/mvp/bus/bus-03-04-business-verification-and-admin-decision.md` |
 
 Remaining MVP work:
 
@@ -182,24 +183,26 @@ Remaining MVP work:
 
 ### 5.4 Listings And Media
 
-Status: listing schema, categories, draft creation, and media metadata request
-and confirm are implemented.
+Status: listing schema, categories, draft creation, media metadata request and
+confirm, ordered draft image attachment, draft editing, and submission for
+review, and admin listing moderation decisions are implemented.
 
 Completed slices:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| LIST-00 Listing domain foundation | Complete | `docs/mvp/list-00-listing-domain-foundation.md` |
-| LIST-01 Create listing draft | Complete | `docs/mvp/list-01-create-listing-draft.md` |
-| LIST-02 Media upload request and confirm metadata | Complete | `docs/mvp/list-02-media-upload-request-confirm.md` |
+| LIST-00 Listing domain foundation | Complete | `docs/mvp/list/list-00-listing-domain-foundation.md` |
+| LIST-01 Create listing draft | Complete | `docs/mvp/list/list-01-create-listing-draft.md` |
+| LIST-02 Media upload request and confirm metadata | Complete | `docs/mvp/list/list-02-media-upload-request-confirm.md` |
+| LIST-03 Attach and order listing images | Complete | `docs/mvp/list/list-03-attach-and-order-listing-images.md` |
+| LIST-04 Edit listing draft | Complete | `docs/mvp/list/list-04-edit-listing-draft.md` |
+| LIST-05 Submit listing for moderation | Complete | `docs/mvp/list/list-05-submit-listing-for-moderation.md` |
+| LIST-06 Admin listing moderation decision | Complete | `docs/mvp/list/list-06-admin-listing-moderation-decision.md` |
 
 Recommended next listing slices:
 
-1. LIST-03 attach and order listing images.
-2. LIST-04 edit listing draft.
-3. LIST-05 submit listing for moderation.
-4. LIST-06 listing moderation decision.
-5. LIST-07 public listing detail.
+1. LIST-07 public listing detail.
+2. SEARCH-00 search/storefront read model plan.
 
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
@@ -240,15 +243,14 @@ Individual trade creation and completion remain V3.
 
 ### 5.7 Basic Admin Moderation
 
-Status: business application admin decision exists; listing moderation is not
-complete.
+Status: business application admin decision and basic listing moderation
+decision are complete.
 
 Recommended slices:
 
-1. ADM-LIST-00 moderation case foundation for listing submission.
+1. ADM-LIST-00 moderation case foundation for richer listing review queues.
 2. ADM-LIST-01 listing submission creates a moderation case.
-3. ADM-LIST-02 admin listing decision.
-4. ADM-LIST-03 seller-facing decision status.
+3. ADM-LIST-03 seller-facing decision reason/status.
 
 Advanced reports, suspensions, support cases, operations queues, and disputes
 remain V3.
@@ -261,7 +263,7 @@ Status: complete.
 
 Reference:
 
-- `docs/mvp/fix-01-restore-verification-baseline.md`
+- `docs/mvp/fix/fix-01-restore-verification-baseline.md`
 
 Goal:
 
@@ -306,38 +308,51 @@ Acceptance criteria:
    - No publish or search behavior yet.
 
 3. LIST-03: Attach and order listing images.
+   - Status: complete.
    - Attach confirmed media to draft listings.
    - Support display order.
    - Support alt text.
    - Enforce listing ownership.
    - Add an image section to the draft listing frontend.
 
-4. LIST-04: Edit listing draft.
+4. SITE-00: Logical three-site separation.
+   - Status: complete.
+   - Keep one Angular app.
+   - Separate `/`, `/seller`, and `/admin` route groups.
+   - Add marketplace, seller, and admin layouts.
+   - Keep marketplace guest-accessible.
+   - Protect seller and admin routes.
+   - Do not add inventory, orders, or payments.
+
+5. LIST-04: Edit listing draft.
+   - Status: complete.
    - Allow the owner to edit draft fields.
    - Use optimistic locking with `If-Match`.
    - Keep the listing status as draft.
    - Prevent editing owner, status, and moderation fields.
 
-5. LIST-05: Submit listing for moderation.
+6. LIST-05: Submit listing for moderation.
+   - Status: complete.
    - Submit a draft listing for review.
    - Require required fields and media.
    - Move the listing to pending review.
    - Prevent further draft edits unless changes are requested.
 
-6. LIST-06: Admin listing moderation decision.
+7. LIST-06: Admin listing moderation decision.
+   - Status: complete.
    - Admin can approve, reject, or request changes.
    - Record reviewer, reason, and decision timestamp.
    - Approved listings become eligible for public read paths.
    - Add seller-facing moderation status.
 
-7. LIST-07: Public listing detail.
+8. LIST-07: Public listing detail.
    - Add a guest-readable listing detail endpoint.
    - Show only approved active listings.
    - Hide draft, rejected, and private seller data.
    - Clearly label individual versus business sellers.
    - Show off-platform payment and delivery notice for individual listings.
 
-8. SEARCH-00: Search and storefront read model plan.
+9. SEARCH-00: Search and storefront read model plan.
    - Decide the initial database-backed read path.
    - Define public listing cards.
    - Define storefront shape.

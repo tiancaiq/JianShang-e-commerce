@@ -2,6 +2,8 @@ package com.msb.ecom.common.web.autoconfigure;
 
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.error.CommonApiExceptionHandler;
+import com.msb.ecom.common.web.security.CurrentActorProvider;
+import com.msb.ecom.common.web.security.SpringSecurityCurrentActorProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -21,5 +23,11 @@ public class CommonWebAutoConfiguration {
     @ConditionalOnMissingBean
     CommonApiExceptionHandler commonApiExceptionHandler() {
         return new CommonApiExceptionHandler();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    CurrentActorProvider currentActorProvider() {
+        return new SpringSecurityCurrentActorProvider();
     }
 }

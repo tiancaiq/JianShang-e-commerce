@@ -6,8 +6,6 @@ import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
 import com.msb.ecom.auth_service.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,22 +21,15 @@ public class AuthController {
     private final AuthService authService;
 
     @GetMapping("/me")
-    public ApiDataResponse<CurrentUserResponse> me(@AuthenticationPrincipal Jwt jwt) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(authService.ensureCurrentUser(jwt));
+    public ApiDataResponse<CurrentUserResponse> me() {
+        return new ApiDataResponse<>(authService.ensureCurrentUser());
     }
 
     @PatchMapping("/me")
     public ApiDataResponse<CurrentUserResponse> updateMe(
-            @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody UpdateCurrentUserRequest request) {
-        if (jwt == null) {
-            throw new IllegalStateException("Authentication is required");
-        }
-        return new ApiDataResponse<>(authService.updateCurrentUser(jwt, request, parseVersion(ifMatch)));
+        return new ApiDataResponse<>(authService.updateCurrentUser(request, parseVersion(ifMatch)));
     }
 
     private Long parseVersion(String ifMatch) {

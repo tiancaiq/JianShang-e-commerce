@@ -6,6 +6,7 @@ import com.msb.ecom.common.web.error.ApiErrorEnvelope;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.function.*;
 
@@ -36,11 +37,14 @@ public class Routes {
         private String authServiceUrl;
 
         @Bean
+        @Order(0)
         public RouterFunction<ServerResponse> productServiceRoute() {
                 return route("product_service")
                                 .route(RequestPredicates.path("/api/product/**")
                                                 .or(RequestPredicates.path("/api/v1/listings"))
-                                                .or(RequestPredicates.path("/api/v1/listings/**")),
+                                                .or(RequestPredicates.path("/api/v1/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/users/me/listings"))
+                                                .or(RequestPredicates.path("/api/v1/admin/listings/**")),
                                                 http(productServiceUrl))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("productServiceCircuitBreaker",
@@ -49,6 +53,7 @@ public class Routes {
         }
 
         @Bean
+        @Order(1)
         public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
                 return route("public_category_service")
                                 .route(RequestPredicates.path("/api/v1/categories")
@@ -90,6 +95,7 @@ public class Routes {
         }
 
         @Bean
+        @Order(10)
         public RouterFunction<ServerResponse> authServiceRoute() {
                 return route("auth_service")
                                 .route(RequestPredicates.path("/api/v1/users/**")
