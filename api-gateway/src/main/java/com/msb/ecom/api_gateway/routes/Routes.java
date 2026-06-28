@@ -54,6 +54,19 @@ public class Routes {
 
         @Bean
         @Order(1)
+        public RouterFunction<ServerResponse> publicListingServiceRoute() {
+                return route("public_listing_service")
+                                .route(RequestPredicates.path("/api/v1/public/listings")
+                                                .or(RequestPredicates.path("/api/v1/public/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/public/listing-media/**")),
+                                                http(productServiceUrl))
+                                .filter(circuitBreaker("publicListingServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(2)
         public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
                 return route("public_category_service")
                                 .route(RequestPredicates.path("/api/v1/categories")

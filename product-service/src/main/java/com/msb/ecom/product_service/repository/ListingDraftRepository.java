@@ -2,6 +2,7 @@ package com.msb.ecom.product_service.repository;
 
 import com.msb.ecom.product_service.model.ListingSellerType;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
+import com.msb.ecom.product_service.dto.PublicListingResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -122,6 +123,76 @@ public class ListingDraftRepository {
                 order by updated_at asc, created_at asc
                 """,
                 (rs, rowNum) -> listingDraftResponse(rs));
+    }
+
+    public Optional<PublicListingResponse> findPublicListingById(String listingId) {
+        List<PublicListingResponse> matches = jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.id = ?
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                """,
+                (rs, rowNum) -> new PublicListingResponse(
+                        rs.getString("id"),
+                        rs.getString("seller_type"),
+                        rs.getString("category_id"),
+                        rs.getString("category_slug"),
+                        rs.getString("category_name"),
+                        rs.getString("title"),
+                        rs.getString("description"),
+                        rs.getString("condition_code"),
+                        rs.getString("condition_notes"),
+                        rs.getBigDecimal("price_amount"),
+                        rs.getString("currency"),
+                        rs.getBoolean("negotiable"),
+                        rs.getInt("quantity"),
+                        rs.getString("public_city"),
+                        rs.getString("public_region"),
+                        rs.getTimestamp("published_at").toInstant(),
+                        null,
+                        List.of()),
+                listingId);
+        return matches.stream().findFirst();
+    }
+
+    public List<PublicListingResponse> findPublicListings(int limit) {
+        return jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                order by coalesce(l.published_at, l.updated_at) desc, l.id desc
+                limit ?
+                """,
+                (rs, rowNum) -> new PublicListingResponse(
+                        rs.getString("id"),
+                        rs.getString("seller_type"),
+                        rs.getString("category_id"),
+                        rs.getString("category_slug"),
+                        rs.getString("category_name"),
+                        rs.getString("title"),
+                        rs.getString("description"),
+                        rs.getString("condition_code"),
+                        rs.getString("condition_notes"),
+                        rs.getBigDecimal("price_amount"),
+                        rs.getString("currency"),
+                        rs.getBoolean("negotiable"),
+                        rs.getInt("quantity"),
+                        rs.getString("public_city"),
+                        rs.getString("public_region"),
+                        rs.getTimestamp("published_at").toInstant(),
+                        null,
+                        List.of()),
+                limit);
     }
 
     public int updateDraft(String listingId, long expectedVersion, ListingDraftUpdate update, Instant now) {

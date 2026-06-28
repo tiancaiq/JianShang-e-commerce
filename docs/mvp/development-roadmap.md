@@ -41,8 +41,8 @@ The current repository contains implementation work for:
 - Authentication and accounts: IAM-00 through IAM-06
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
-- Listing foundation, drafts, media, submit, and admin decision: LIST-00
-  through LIST-06
+- Listing foundation, drafts, media, submit, admin decision, and public detail:
+  LIST-00 through LIST-07
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -184,8 +184,9 @@ Remaining MVP work:
 ### 5.4 Listings And Media
 
 Status: listing schema, categories, draft creation, media metadata request and
-confirm, ordered draft image attachment, draft editing, and submission for
-review, and admin listing moderation decisions are implemented.
+confirm, ordered draft image attachment, draft editing, submission for review,
+admin listing moderation decisions, public approved listing detail, public
+browse, and object-storage-backed image delivery are implemented.
 
 Completed slices:
 
@@ -198,18 +199,20 @@ Completed slices:
 | LIST-04 Edit listing draft | Complete | `docs/mvp/list/list-04-edit-listing-draft.md` |
 | LIST-05 Submit listing for moderation | Complete | `docs/mvp/list/list-05-submit-listing-for-moderation.md` |
 | LIST-06 Admin listing moderation decision | Complete | `docs/mvp/list/list-06-admin-listing-moderation-decision.md` |
+| LIST-07 Public listing detail | Complete | `docs/mvp/list/list-07-public-listing-detail.md` |
+| MEDIA-01 Object storage image delivery | Complete | `docs/mvp/list/media-01-object-storage-image-delivery.md` |
 
 Recommended next listing slices:
 
-1. LIST-07 public listing detail.
-2. SEARCH-00 search/storefront read model plan.
+1. SEARCH-00 search/storefront read model plan.
+2. SEARCH-02 keyword/filter browse improvements.
 
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
 
 ### 5.5 Search And Storefront
 
-Status: not started.
+Status: initial database-backed public approved listing browse is implemented.
 
 MVP goal:
 
@@ -223,8 +226,10 @@ Recommended slices:
 
 1. SEARCH-00 search/storefront read model plan.
 2. SEARCH-01 public approved listing browse without OpenSearch.
-3. SEARCH-02 public listing detail.
-4. SEARCH-03 public business storefront page.
+   - Status: complete.
+   - Reference: `docs/mvp/search/search-01-public-approved-listing-browse.md`
+3. SEARCH-02 public business storefront page.
+4. SEARCH-03 search filters, sorting, and cursor pagination.
 5. SEARCH-04 OpenSearch projection only after the database-backed read path is
    correct.
 
@@ -346,6 +351,7 @@ Acceptance criteria:
    - Add seller-facing moderation status.
 
 8. LIST-07: Public listing detail.
+   - Status: complete.
    - Add a guest-readable listing detail endpoint.
    - Show only approved active listings.
    - Hide draft, rejected, and private seller data.
@@ -359,8 +365,9 @@ Acceptance criteria:
    - Defer OpenSearch until database-backed browse is correct.
 
 9. SEARCH-01: Public approved listing browse.
+   - Status: complete.
    - Let guests browse approved listings.
-   - Add simple filters and sorting.
+   - Show newest approved active listings on the marketplace homepage.
    - Do not add OpenSearch yet.
 
 10. SEARCH-02: Public business storefront.

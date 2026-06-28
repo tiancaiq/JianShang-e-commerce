@@ -82,6 +82,7 @@ describe('ListingDraftFormComponent', () => {
     objectBucket: 'listing-media-local',
     objectKey: media.objectKey,
     uploadUrl: media.uploadUrl,
+    url: '/api/v1/listings/01L00000000000000000000001/media/01M00000000000000000000001/content',
     version: 0,
     createdAt: '2026-06-16T12:02:00Z',
     updatedAt: '2026-06-16T12:02:00Z',
@@ -95,8 +96,10 @@ describe('ListingDraftFormComponent', () => {
       'updateDraft',
       'submitForReview',
       'requestMediaUpload',
+      'uploadMediaFile',
       'confirmMediaUpload',
       'updateListingImages',
+      'mediaUrl',
     ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
@@ -113,12 +116,14 @@ describe('ListingDraftFormComponent', () => {
       images: [image],
     }));
     listingService.requestMediaUpload.and.returnValue(of(media));
+    listingService.uploadMediaFile.and.returnValue(of(undefined));
     listingService.confirmMediaUpload.and.returnValue(of({
       ...media,
       uploadStatus: 'UPLOADED' as const,
       version: 1,
     }));
     listingService.updateListingImages.and.returnValue(of([image]));
+    listingService.mediaUrl.and.callFake(url => url || '');
 
     await TestBed.configureTestingModule({
       imports: [ListingDraftFormComponent],
@@ -179,6 +184,7 @@ describe('ListingDraftFormComponent', () => {
       fileName: 'bike.png',
       sizeBytes: 1,
     });
+    expect(listingService.uploadMediaFile).toHaveBeenCalledOnceWith(media.uploadUrl, jasmine.any(File));
     expect(listingService.confirmMediaUpload).toHaveBeenCalledOnceWith(draft.id, media.id, {
       sizeBytes: 1,
     });
@@ -266,6 +272,7 @@ describe('ListingDraftFormComponent', () => {
       fileName: 'bike.png',
       sizeBytes: 1,
     });
+    expect(listingService.uploadMediaFile).toHaveBeenCalledOnceWith(media.uploadUrl, jasmine.any(File));
     expect(listingService.confirmMediaUpload).toHaveBeenCalledOnceWith(draft.id, media.id, {
       sizeBytes: 1,
     });
@@ -317,6 +324,30 @@ describe('ListingDraftFormComponent', () => {
 
     expect(listingService.submitForReview).not.toHaveBeenCalled();
     expect(component.errorMsg()).toBe('Add at least one image before submitting for review.');
+  });
+
+  it('keeps submit for review available for non-draft existing listings', () => {
+    listingService.submitForReview.and.returnValue(throwError(() => ({
+      error: { error: { message: 'Only draft listings can be submitted for review.' } },
+    })));
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = 2;
+    component.isEditMode.set(true);
+    component.listingStatus.set('ACTIVE');
+    component.mediaItems.set([image]);
+    fixture.detectChanges();
+
+    const submitButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.includes('Submit for review'));
+
+    expect(submitButton).toBeTruthy();
+    expect(submitButton?.disabled).toBeFalse();
+
+    component.submitForReview();
+
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 2);
+    expect(component.errorMsg()).toBe('Only draft listings can be submitted for review.');
   });
 
   function fillCommonFields(): void {

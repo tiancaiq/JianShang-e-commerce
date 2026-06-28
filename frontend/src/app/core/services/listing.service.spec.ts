@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ListingService } from './listing.service';
-import { Category, ListingDraft, ListingImage, ListingMedia } from '../models/listing.model';
+import { Category, ListingDraft, ListingImage, ListingMedia, PublicListing } from '../models/listing.model';
 
 describe('ListingService', () => {
   let service: ListingService;
@@ -77,9 +77,40 @@ describe('ListingService', () => {
     objectBucket: 'listing-media-local',
     objectKey: media.objectKey,
     uploadUrl: media.uploadUrl,
+    url: '/api/v1/listings/01L00000000000000000000001/media/01M00000000000000000000001/content',
     version: 0,
     createdAt: '2026-06-16T12:02:00Z',
     updatedAt: '2026-06-16T12:02:00Z',
+  };
+
+  const publicListing: PublicListing = {
+    id: draft.id,
+    sellerType: 'INDIVIDUAL',
+    categoryId: categories[0].id,
+    categorySlug: 'general',
+    categoryName: 'General',
+    title: 'Used bicycle',
+    description: 'A reliable city bike.',
+    condition: 'GOOD',
+    conditionNotes: null,
+    priceAmount: 250,
+    currency: 'USD',
+    negotiable: true,
+    quantity: 1,
+    publicCity: 'Irvine',
+    publicRegion: 'CA',
+    publishedAt: '2026-06-17T12:00:00Z',
+    transactionNotice: 'Payment and delivery are arranged directly by participants.',
+    images: [{
+      id: image.id,
+      displayOrder: 0,
+      altText: 'Blue bike',
+      originalFileName: 'bike.png',
+      contentType: 'image/png',
+      sizeBytes: 1024,
+      uploadUrl: image.uploadUrl,
+      url: '/api/v1/public/listing-media/01I00000000000000000000001',
+    }],
   };
 
   beforeEach(() => {
@@ -147,6 +178,30 @@ describe('ListingService', () => {
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush(draft);
+  });
+
+  it('loads public listing detail through the gateway without browser tokens', () => {
+    service.getPublicListing(draft.id).subscribe(response => {
+      expect(response).toEqual(publicListing);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/public/listings/${draft.id}`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush(publicListing);
+  });
+
+  it('loads public approved listing browse through the gateway without browser tokens', () => {
+    service.getPublicListings().subscribe(response => {
+      expect(response).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne('/api/v1/public/listings');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush([publicListing]);
   });
 
   it('loads current seller listings through the gateway without browser tokens', () => {
@@ -252,6 +307,21 @@ describe('ListingService', () => {
     expect(request.request.headers.has('Authorization')).toBeFalse();
     expect(request.request.body).toEqual({ sizeBytes: 1024 });
     request.flush(confirmed);
+  });
+
+  it('uploads listing media bytes directly to storage without gateway credentials', () => {
+    const file = new File(['x'], 'bike.png', { type: 'image/png' });
+
+    service.uploadMediaFile(media.uploadUrl, file).subscribe(response => {
+      expect(response).toBeNull();
+    });
+
+    const request = httpMock.expectOne(media.uploadUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.withCredentials).toBeFalse();
+    expect(request.request.headers.get('Content-Type')).toBe('image/png');
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush(null);
   });
 
   it('updates listing image order through the gateway without browser tokens', () => {

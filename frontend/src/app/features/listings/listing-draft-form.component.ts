@@ -148,6 +148,7 @@ import { ToastService } from '../../core/services/toast.service';
             <ul class="media-list">
               @for (media of mediaItems(); track media.id) {
                 <li>
+                  <img [src]="imageUrl(media)" [alt]="media.altText || media.originalFileName || 'Listing image'" />
                   <span>{{ media.originalFileName || media.objectKey }}</span>
                   <strong>{{ media.displayOrder + 1 }}</strong>
                 </li>
@@ -170,8 +171,8 @@ import { ToastService } from '../../core/services/toast.service';
 
         <div class="actions">
           <button type="button" class="secondary-btn" (click)="router.navigate(['/seller/listings'])" [disabled]="saving() || submitting()">Cancel</button>
-          @if (isEditMode() && canEditDraft()) {
-            <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="saving() || submitting() || mediaItems().length === 0">
+          @if (isEditMode()) {
+            <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="saving() || submitting()">
               {{ submitting() ? 'Submitting' : 'Submit for review' }}
             </button>
           }
@@ -236,7 +237,7 @@ import { ToastService } from '../../core/services/toast.service';
     .field select,
     .field textarea {
       width: 100%;
-      min-height: 40px;
+      min-height: 64px;
       padding: 0.625rem 0.75rem;
       background: var(--color-bg-tertiary);
       border: 1px solid var(--color-border);
@@ -304,7 +305,7 @@ import { ToastService } from '../../core/services/toast.service';
       justify-content: space-between;
       gap: 0.75rem;
       align-items: center;
-      min-height: 40px;
+      min-height: 64px;
       padding: 0.625rem 0.75rem;
       background: var(--color-bg-tertiary);
       border: 1px solid var(--color-border);
@@ -577,7 +578,7 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   submitForReview(): void {
-    if (!this.editListingId || !this.canEditDraft()) {
+    if (!this.editListingId) {
       return;
     }
     if (this.mediaItems().length === 0) {
@@ -614,11 +615,22 @@ export class ListingDraftFormComponent implements OnInit {
       fileName: file.name,
       sizeBytes: file.size,
     }).subscribe({
-      next: media => this.confirmMedia(listingId, file, media, draftJustCreated),
+      next: media => this.uploadMediaBytes(listingId, file, media, draftJustCreated),
       error: error => {
         this.saving.set(false);
         this.uploadingMedia.set(false);
         this.mediaError.set(error.error?.error?.message || 'Image upload could not be requested.');
+      },
+    });
+  }
+
+  private uploadMediaBytes(listingId: string, file: File, media: ListingMedia, draftJustCreated: boolean): void {
+    this.listingService.uploadMediaFile(media.uploadUrl, file).subscribe({
+      next: () => this.confirmMedia(listingId, file, media, draftJustCreated),
+      error: () => {
+        this.saving.set(false);
+        this.uploadingMedia.set(false);
+        this.mediaError.set('Image bytes could not be uploaded to storage.');
       },
     });
   }
@@ -668,6 +680,10 @@ export class ListingDraftFormComponent implements OnInit {
         this.mediaError.set(error.error?.error?.message || 'Image could not be attached to the draft.');
       },
     });
+  }
+
+  imageUrl(image: ListingImage): string {
+    return this.listingService.mediaUrl(image.url || image.uploadUrl);
   }
 
   private validate(): boolean {

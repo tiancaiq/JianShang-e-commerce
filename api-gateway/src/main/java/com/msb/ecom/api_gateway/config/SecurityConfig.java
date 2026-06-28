@@ -55,6 +55,8 @@ public class SecurityConfig {
                                 "/actuator/health/**", "/fallbackRoute",
                                 "/api/v1/webhooks/business-verification",
                                 "/api/v1/categories", "/api/v1/categories/**",
+                                "/api/v1/public/listings", "/api/v1/public/listings/**",
+                                "/api/v1/public/listing-media/**",
                                 "/api/v1/auth/login", "/api/v1/auth/session",
                                 "/api/v1/auth/callback/**", "/oauth2/authorization/**",
                                 "/login/oauth2/code/**")

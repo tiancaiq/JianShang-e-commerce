@@ -10,10 +10,12 @@ import com.msb.ecom.product_service.dto.ListingMediaResponse;
 import com.msb.ecom.product_service.dto.ListingMediaUploadRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
+import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,6 +50,23 @@ public class ListingController {
     @GetMapping("/listings/{listingId}")
     public ListingDraftResponse getOwnedDraft(@PathVariable String listingId) {
         return listingService.getOwnedListing(listingId);
+    }
+
+    @GetMapping("/public/listings/{listingId}")
+    public PublicListingResponse getPublicListing(@PathVariable String listingId) {
+        return listingService.getPublicListing(listingId);
+    }
+
+    @GetMapping("/public/listings")
+    public List<PublicListingResponse> publicListings() {
+        return listingService.getPublicListings();
+    }
+
+    @GetMapping("/public/listing-media/{imageId}")
+    public ResponseEntity<Void> publicListingMedia(@PathVariable String imageId) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(listingService.publicListingMediaReadUri(imageId))
+                .build();
     }
 
     @GetMapping("/users/me/listings")
@@ -102,6 +121,15 @@ public class ListingController {
             @PathVariable String mediaId,
             @Valid @RequestBody ListingMediaConfirmRequest request) {
         return listingService.confirmMediaUpload(listingId, mediaId, request);
+    }
+
+    @GetMapping("/listings/{listingId}/media/{mediaId}/content")
+    public ResponseEntity<Void> ownedListingMedia(
+            @PathVariable String listingId,
+            @PathVariable String mediaId) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(listingService.ownedListingMediaReadUri(listingId, mediaId))
+                .build();
     }
 
     @PutMapping("/listings/{listingId}/images")

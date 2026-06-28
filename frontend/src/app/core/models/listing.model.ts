@@ -126,6 +126,7 @@ export interface ListingImage {
   objectBucket: string;
   objectKey: string;
   uploadUrl: string;
+  url?: string;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -144,4 +145,36 @@ export interface ListingModerationDecisionResponse {
   reviewerUserId: string;
   listingVersion: number;
   createdAt: string;
+}
+
+export interface PublicListingImage {
+  id: string;
+  displayOrder: number;
+  altText: string | null;
+  originalFileName: string | null;
+  contentType: string;
+  sizeBytes: number;
+  uploadUrl: string;
+  url?: string;
+}
+
+export interface PublicListing {
+  id: string;
+  sellerType: ListingSellerType;
+  categoryId: string;
+  categorySlug: string;
+  categoryName: string;
+  title: string;
+  description: string;
+  condition: ListingCondition;
+  conditionNotes: string | null;
+  priceAmount: number;
+  currency: string;
+  negotiable: boolean;
+  quantity: number;
+  publicCity: string | null;
+  publicRegion: string | null;
+  publishedAt: string;
+  transactionNotice: string | null;
+  images: PublicListingImage[];
 }

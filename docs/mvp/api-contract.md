@@ -543,10 +543,21 @@ PUT  /listings/{listingId}/images
 ```
 
 LIST-02 scopes media to an existing draft listing. Upload request contains file
-name, content type, size, and optional checksum. Response contains local demo
-upload metadata, object key, upload status, moderation status, and version.
-LIST-03 attaches confirmed media to ordered draft listing images. The request
-array order becomes the display order.
+name, content type, size, and optional checksum. MEDIA-01 returns a signed
+storage upload target, object key, upload status, moderation status, and
+version. Confirm verifies that the storage object exists before marking the
+media uploaded. LIST-03 attaches confirmed media to ordered draft listing
+images. The request array order becomes the display order.
+
+```text
+GET /listings/{listingId}/media/{mediaId}/content
+GET /public/listing-media/{imageId}
+```
+
+MEDIA-01 uses these read endpoints for seller preview and public approved image
+delivery. The endpoints redirect to short-lived signed storage URLs. Public
+media is exposed only when the listing, image, and media object are all
+approved.
 
 ### Listing create (`LST-04`, `LST-05`)
 
@@ -639,12 +650,72 @@ Rules:
 
 Moderation case claiming and assignment remain deferred.
 
+### Public listing detail (`LIST-07`)
+
+```text
+GET /public/listings/{listingId}
+```
+
+LIST-07 implements a guest-readable direct listing detail endpoint.
+
+Rules:
+
+- Login is not required.
+- Only listings with `status=ACTIVE` and `moderationStatus=APPROVED` are
+  visible.
+- Non-public listing states return `404 LISTING_NOT_FOUND`.
+- The response omits owner user IDs, business internal IDs, internal status,
+  moderation status, versions, media object IDs, object bucket, and object
+  key.
+- Individual listings include an off-platform payment and delivery notice.
+
+Response:
+
+```json
+{
+  "id": "01J...",
+  "sellerType": "INDIVIDUAL",
+  "categoryId": "01J...",
+  "categorySlug": "general",
+  "categoryName": "General",
+  "title": "Used bicycle",
+  "description": "A reliable city bike.",
+  "condition": "GOOD",
+  "conditionNotes": null,
+  "priceAmount": 250.00,
+  "currency": "USD",
+  "negotiable": true,
+  "quantity": 1,
+  "publicCity": "Irvine",
+  "publicRegion": "CA",
+  "publishedAt": "2026-06-17T12:00:00Z",
+  "transactionNotice": "Payment and delivery are arranged directly by participants. The platform does not verify or protect off-platform payment.",
+  "images": [
+    {
+      "id": "01J...",
+      "displayOrder": 0,
+      "altText": "Blue bike",
+      "originalFileName": "bike.png",
+      "contentType": "image/png",
+      "sizeBytes": 1024,
+      "uploadUrl": "local-demo://..."
+    }
+  ]
+}
+```
+
 ### Search (`SRC-02`, `SRC-03`)
 
 ```text
+GET /public/listings
 GET /search/listings?q=&categoryId=&sellerType=&condition=&minPrice=&maxPrice=&city=&region=&cursor=&limit=
 GET /stores/{slug}/listings?cursor=&limit=
 ```
+
+SEARCH-01 implements the initial database-backed public browse path:
+`GET /public/listings`. It returns newest approved active listings using the
+same safe public projection as `GET /public/listings/{listingId}`. It has a
+server-side cap and no client filters yet.
 
 Maximum `limit` is server-controlled. Search result includes seller type and
 checkout/off-platform disclosure.

@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.service.AuthServiceClient;
+import com.msb.ecom.product_service.storage.ListingMediaStorage;
+import com.msb.ecom.product_service.storage.StorageUploadTarget;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -16,18 +19,23 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 
 import java.util.List;
+import java.net.URI;
 
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -60,6 +68,21 @@ class ListingDraftApiTests {
 
     @MockBean
     AuthServiceClient authServiceClient;
+
+    @MockBean
+    ListingMediaStorage listingMediaStorage;
+
+    @BeforeEach
+    void configureMediaStorage() {
+        when(listingMediaStorage.createUploadTarget(anyString(), anyString(), anyLong()))
+                .thenAnswer(invocation -> new StorageUploadTarget(
+                        "listing-media-test",
+                        invocation.getArgument(0),
+                        "PUT",
+                        "https://storage.example.test/" + invocation.getArgument(0, String.class)));
+        when(listingMediaStorage.createReadUri(anyString()))
+                .thenReturn(URI.create("https://storage.example.test/signed-read"));
+    }
 
     @Test
     void categoriesArePublicReferenceData() throws Exception {
@@ -178,7 +201,8 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.contentType", equalTo("image/png")))
                 .andExpect(jsonPath("$.uploadStatus", equalTo("PENDING_UPLOAD")))
                 .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
-                .andExpect(jsonPath("$.uploadMethod", equalTo("LOCAL_DEMO")))
+                .andExpect(jsonPath("$.objectBucket", equalTo("listing-media-test")))
+                .andExpect(jsonPath("$.uploadMethod", equalTo("PUT")))
                 .andExpect(jsonPath("$.uploadUrl", notNullValue()))
                 .andReturn()
                 .getResponse()
@@ -199,6 +223,36 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.id", equalTo(mediaId)))
                 .andExpect(jsonPath("$.uploadStatus", equalTo("UPLOADED")))
                 .andExpect(jsonPath("$.version", equalTo(1)));
+
+        verify(listingMediaStorage).verifyUploaded(
+                "listings/" + listingId + "/" + mediaId + "/bike.png",
+                "image/png",
+                1024L);
+    }
+
+    @Test
+    void confirmMediaUploadRequiresObjectStorageObject() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+        String mediaId = createPendingMedia(listingId, "bike.png");
+
+        doThrow(new IllegalArgumentException("Uploaded object was not found in storage."))
+                .when(listingMediaStorage)
+                .verifyUploaded(anyString(), anyString(), anyLong());
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")))
+                .andExpect(jsonPath("$.error.message", equalTo("Uploaded object was not found in storage.")));
     }
 
     @Test
@@ -672,6 +726,136 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
     }
 
+    @Test
+    void guestCanReadApprovedPublicListingDetailWithoutPrivateFields() throws Exception {
+        String listingId = createApprovedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", equalTo(listingId)))
+                .andExpect(jsonPath("$.sellerType", equalTo("INDIVIDUAL")))
+                .andExpect(jsonPath("$.categoryId", equalTo(CATEGORY_ID)))
+                .andExpect(jsonPath("$.categorySlug", equalTo("general")))
+                .andExpect(jsonPath("$.categoryName", equalTo("General")))
+                .andExpect(jsonPath("$.title", equalTo("Used bicycle")))
+                .andExpect(jsonPath("$.priceAmount", equalTo(250.00)))
+                .andExpect(jsonPath("$.currency", equalTo("USD")))
+                .andExpect(jsonPath("$.publicCity", equalTo("Irvine")))
+                .andExpect(jsonPath("$.publicRegion", equalTo("CA")))
+                .andExpect(jsonPath("$.publishedAt", notNullValue()))
+                .andExpect(jsonPath("$.transactionNotice", notNullValue()))
+                .andExpect(jsonPath("$.images[0].originalFileName", equalTo("bike.png")))
+                .andExpect(jsonPath("$.images[0].uploadUrl", notNullValue()))
+                .andExpect(jsonPath("$.images[0].url", notNullValue()))
+                .andExpect(jsonPath("$.individualSellerUserId").doesNotExist())
+                .andExpect(jsonPath("$.businessId").doesNotExist())
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.moderationStatus").doesNotExist())
+                .andExpect(jsonPath("$.version").doesNotExist())
+                .andExpect(jsonPath("$.images[0].mediaObjectId").doesNotExist())
+                .andExpect(jsonPath("$.images[0].objectBucket").doesNotExist())
+                .andExpect(jsonPath("$.images[0].objectKey").doesNotExist())
+                .andExpect(jsonPath("$.images[0].moderationStatus").doesNotExist());
+    }
+
+    @Test
+    void guestCanReadApprovedPublicListingImageThroughSignedRedirect() throws Exception {
+        String listingId = createApprovedIndividualListing();
+        String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", equalTo("https://storage.example.test/signed-read")));
+    }
+
+    @Test
+    void sellerCanPreviewOwnedDraftImageThroughSignedRedirect() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+        String mediaId = createConfirmedMedia(listingId, "bike.png");
+
+        mockMvc.perform(get("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", equalTo("https://storage.example.test/signed-read")));
+    }
+
+    @Test
+    void guestCanBrowseApprovedPublicListingsOnly() throws Exception {
+        String approvedListingId = createApprovedIndividualListing();
+        String pendingListingId = createSubmittedListingForAdminDecision();
+        String rejectedListingId = createRejectedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", hasItem(approvedListingId)))
+                .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.not(hasItem(pendingListingId))))
+                .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.not(hasItem(rejectedListingId))))
+                .andExpect(jsonPath("$[0].individualSellerUserId").doesNotExist())
+                .andExpect(jsonPath("$[0].status").doesNotExist())
+                .andExpect(jsonPath("$[0].moderationStatus").doesNotExist());
+    }
+
+    @Test
+    void publicBrowseToleratesLegacyApprovedListingWithoutPublishedAt() throws Exception {
+        String approvedListingId = createApprovedIndividualListing();
+        jdbcTemplate.update("update listings set published_at = null where id = ?", approvedListingId);
+
+        mockMvc.perform(get("/api/v1/public/listings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", hasItem(approvedListingId)))
+                .andExpect(jsonPath("$[0].publishedAt", notNullValue()));
+    }
+
+    @Test
+    void publicListingDetailHidesDraftListing() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
+    @Test
+    void publicListingDetailHidesPendingReviewListing() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
+    @Test
+    void publicListingDetailHidesRejectedListing() throws Exception {
+        String listingId = createRejectedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
+    @Test
+    void publicListingDetailHidesChangesRequestedListing() throws Exception {
+        String listingId = createChangesRequestedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
     private String individualRequest() {
         return """
                 {
@@ -743,6 +927,49 @@ class ListingDraftApiTests {
                         .header("If-Match", "0"))
                 .andExpect(status().isOk());
         return listingId;
+    }
+
+    private String createApprovedIndividualListing() throws Exception {
+        String listingId = createSubmittedListingForAdminDecision();
+        decideListing(listingId, "APPROVE", "Listing looks good");
+        return listingId;
+    }
+
+    private String createRejectedIndividualListing() throws Exception {
+        String listingId = createSubmittedListingForAdminDecision();
+        decideListing(listingId, "REJECT", "Rejected for test");
+        return listingId;
+    }
+
+    private String createChangesRequestedIndividualListing() throws Exception {
+        String listingId = createSubmittedListingForAdminDecision();
+        decideListing(listingId, "REQUEST_CHANGES", "Needs clearer photos");
+        return listingId;
+    }
+
+    private String createSubmittedListingForAdminDecision() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        "01A00000000000000000000001", "PLATFORM_ADMIN"));
+        return listingId;
+    }
+
+    private void decideListing(String listingId, String decision, String reason) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/listings/{listingId}/decision", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "%s",
+                                  "reason": "%s"
+                                }
+                                """.formatted(decision, reason)))
+                .andExpect(status().isOk());
     }
 
     private String createPendingMedia(String listingId, String fileName) throws Exception {

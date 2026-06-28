@@ -3,6 +3,7 @@ package com.msb.ecom.product_service.repository;
 import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
 import com.msb.ecom.product_service.dto.ListingImageResponse;
 import com.msb.ecom.product_service.dto.ListingMediaResponse;
+import com.msb.ecom.product_service.dto.PublicListingImageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -119,6 +120,51 @@ public class ListingMediaRepository {
                 listingId);
     }
 
+    public List<PublicListingImageResponse> findPublicImagesByListingId(String listingId) {
+        return jdbcTemplate.query("""
+                        select li.id, li.display_order, li.alt_text,
+                               mo.original_file_name, mo.content_type, mo.size_bytes,
+                               mo.object_bucket, mo.object_key
+                        from listing_images li
+                        join listing_media_objects mo on mo.id = li.media_object_id
+                        where li.listing_id = ?
+                          and li.moderation_status = 'APPROVED'
+                          and mo.moderation_status = 'APPROVED'
+                          and mo.upload_status = 'UPLOADED'
+                        order by li.display_order
+                        """,
+                (rs, rowNum) -> new PublicListingImageResponse(
+                        rs.getString("id"),
+                        rs.getInt("display_order"),
+                        rs.getString("alt_text"),
+                        rs.getString("original_file_name"),
+                        rs.getString("content_type"),
+                        rs.getLong("size_bytes"),
+                        publicMediaUrl(rs.getString("id")),
+                        publicMediaUrl(rs.getString("id"))),
+                listingId);
+    }
+
+    public Optional<ListingMediaResponse> findPublicImageMediaByImageId(String imageId) {
+        List<ListingMediaResponse> matches = jdbcTemplate.query("""
+                        select mo.id, mo.listing_id, mo.seller_type, mo.individual_seller_user_id, mo.business_id,
+                               mo.object_bucket, mo.object_key, mo.original_file_name, mo.content_type, mo.size_bytes,
+                               mo.checksum_sha256, mo.upload_status, mo.moderation_status, mo.version, mo.created_at, mo.updated_at
+                        from listing_images li
+                        join listing_media_objects mo on mo.id = li.media_object_id
+                        join listings l on l.id = li.listing_id
+                        where li.id = ?
+                          and l.status = 'ACTIVE'
+                          and l.moderation_status = 'APPROVED'
+                          and li.moderation_status = 'APPROVED'
+                          and mo.moderation_status = 'APPROVED'
+                          and mo.upload_status = 'UPLOADED'
+                        """,
+                (rs, rowNum) -> mediaResponse(rs),
+                imageId);
+        return matches.stream().findFirst();
+    }
+
     public boolean hasAttachedUploadedImage(String listingId) {
         Integer count = jdbcTemplate.queryForObject("""
                         select count(*)
@@ -227,8 +273,17 @@ public class ListingMediaRepository {
                 rs.getString("object_bucket"),
                 rs.getString("object_key"),
                 "local-demo://" + rs.getString("object_bucket") + "/" + rs.getString("object_key"),
+                sellerMediaUrl(rs.getString("listing_id"), rs.getString("media_object_id")),
                 rs.getLong("version"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private String publicMediaUrl(String imageId) {
+        return "/api/v1/public/listing-media/" + imageId;
+    }
+
+    private String sellerMediaUrl(String listingId, String mediaId) {
+        return "/api/v1/listings/" + listingId + "/media/" + mediaId + "/content";
     }
 }

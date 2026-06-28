@@ -36,7 +36,7 @@ import { ListingService } from '../../core/services/listing.service';
               </div>
               <div class="status">
                 <span>{{ listing.status }}</span>
-                <small>v{{ listing.version }}</small>
+                <small>{{ listing.moderationStatus }} · v{{ listing.version }}</small>
               </div>
             </a>
           }
