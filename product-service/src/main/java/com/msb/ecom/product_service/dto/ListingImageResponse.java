@@ -16,6 +16,7 @@ public record ListingImageResponse(
         String objectBucket,
         String objectKey,
         String uploadUrl,
+        String url,
         long version,
         Instant createdAt,
         Instant updatedAt

@@ -306,6 +306,9 @@ Indexes:
 - `(individual_seller_user_id, status, updated_at)`
 - `(category_id, status, published_at)`
 
+LIST-07 public detail reads only listings where `status=ACTIVE` and
+`moderation_status=APPROVED`.
+
 ### `listing_attributes`
 
 Normalized typed or string representation keyed by listing and attribute

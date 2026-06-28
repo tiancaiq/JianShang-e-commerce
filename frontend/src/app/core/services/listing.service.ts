@@ -12,6 +12,7 @@ import {
   ListingMediaUploadRequest,
   ListingModerationDecisionRequest,
   ListingModerationDecisionResponse,
+  PublicListing,
   UpdateListingImagesRequest,
 } from '../models/listing.model';
 
@@ -35,6 +36,18 @@ export class ListingService {
 
   getListing(listingId: string): Observable<ListingDraft> {
     return this.http.get<ListingDraft>(`${this.baseUrl}/listings/${listingId}`, {
+      withCredentials: true,
+    });
+  }
+
+  getPublicListing(listingId: string): Observable<PublicListing> {
+    return this.http.get<PublicListing>(`${this.baseUrl}/public/listings/${listingId}`, {
+      withCredentials: true,
+    });
+  }
+
+  getPublicListings(): Observable<PublicListing[]> {
+    return this.http.get<PublicListing[]>(`${this.baseUrl}/public/listings`, {
       withCredentials: true,
     });
   }
@@ -71,6 +84,13 @@ export class ListingService {
     });
   }
 
+  uploadMediaFile(uploadUrl: string, file: File): Observable<void> {
+    return this.http.put<void>(uploadUrl, file, {
+      headers: { 'Content-Type': file.type },
+      withCredentials: false,
+    });
+  }
+
   confirmMediaUpload(listingId: string, mediaId: string, request: ListingMediaConfirmRequest): Observable<ListingMedia> {
     return this.http.post<ListingMedia>(`${this.baseUrl}/listings/${listingId}/media/${mediaId}/confirm`, request, {
       withCredentials: true,
@@ -96,5 +116,15 @@ export class ListingService {
         withCredentials: true,
       },
     );
+  }
+
+  mediaUrl(url: string | null | undefined): string {
+    if (!url) {
+      return '';
+    }
+    if (url.startsWith('/api/')) {
+      return `${environment.apiGatewayUrl}${url}`;
+    }
+    return url;
   }
 }

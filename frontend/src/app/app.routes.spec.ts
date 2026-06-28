@@ -7,6 +7,9 @@ describe('app routes', () => {
 
     expect(marketplaceRoute).toBeTruthy();
     expect(marketplaceRoute?.canActivate).toBeUndefined();
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings/:listingId',
+    }));
   });
 
   it('protects seller and admin route groups', () => {

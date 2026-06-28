@@ -67,6 +67,26 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldExposePublicListingsWithoutLogin() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/public/listings")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldExposePublicListingMediaWithoutLogin() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/public/listing-media/01I00000000000000000000001")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldReturnFallbackWhenOrderServiceDown() {
 		String orderJson = """
 				{

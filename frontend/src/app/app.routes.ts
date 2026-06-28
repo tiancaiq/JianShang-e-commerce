@@ -54,6 +54,7 @@ export const routes: Routes = [
     loadComponent: () => import('./layout/marketplace-layout/marketplace-layout.component').then(m => m.MarketplaceLayoutComponent),
     children: [
       { path: '', loadComponent: () => import('./features/marketplace/marketplace-home.component').then(m => m.MarketplaceHomeComponent) },
+      { path: 'listings/:listingId', loadComponent: () => import('./features/marketplace/public-listing-detail.component').then(m => m.PublicListingDetailComponent) },
     ],
   },
   { path: '**', redirectTo: '' },

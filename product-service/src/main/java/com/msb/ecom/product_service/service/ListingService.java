@@ -32,12 +32,17 @@ import com.msb.ecom.product_service.dto.ListingMediaResponse;
 import com.msb.ecom.product_service.dto.ListingMediaUploadRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
+import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
+import com.msb.ecom.product_service.storage.ListingMediaStorage;
+import com.msb.ecom.product_service.storage.ListingMediaStorageProperties;
+import com.msb.ecom.product_service.storage.StorageUploadTarget;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -52,8 +57,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class ListingService {
 
-    private static final long MAX_IMAGE_SIZE_BYTES = 10L * 1024L * 1024L;
-    private static final String MEDIA_BUCKET = "listing-media-local";
     private static final Pattern SAFE_FILE_PART = Pattern.compile("[^A-Za-z0-9._-]");
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of(
             "image/jpeg",
@@ -67,6 +70,8 @@ public class ListingService {
     private final AuthServiceClient authServiceClient;
     private final UlidGenerator ulidGenerator;
     private final CurrentActorProvider currentActorProvider;
+    private final ListingMediaStorage listingMediaStorage;
+    private final ListingMediaStorageProperties mediaStorageProperties;
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getActiveCategories() {
@@ -108,6 +113,44 @@ public class ListingService {
         BusinessMembershipAuthorization membership =
                 authServiceClient.requireBusinessListingPermission(actor.accessToken(), normalizedBusinessId);
         return withImages(listingDraftRepository.findByBusinessId(membership.businessId()));
+    }
+
+    @Transactional(readOnly = true)
+    // Public detail exposes only approved active listing data and safe image metadata.
+    public PublicListingResponse getPublicListing(String listingId) {
+        PublicListingResponse listing = listingDraftRepository.findPublicListingById(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new);
+        return publicListingWithImagesAndNotice(listing);
+    }
+
+    @Transactional(readOnly = true)
+    // Public browse returns the newest approved active listings for marketplace guests.
+    public List<PublicListingResponse> getPublicListings() {
+        return listingDraftRepository.findPublicListings(24).stream()
+                .map(this::publicListingWithImagesAndNotice)
+                .toList();
+    }
+
+    private PublicListingResponse publicListingWithImagesAndNotice(PublicListingResponse listing) {
+        return new PublicListingResponse(
+                listing.id(),
+                listing.sellerType(),
+                listing.categoryId(),
+                listing.categorySlug(),
+                listing.categoryName(),
+                listing.title(),
+                listing.description(),
+                listing.condition(),
+                listing.conditionNotes(),
+                listing.priceAmount(),
+                listing.currency(),
+                listing.negotiable(),
+                listing.quantity(),
+                listing.publicCity(),
+                listing.publicRegion(),
+                listing.publishedAt(),
+                transactionNotice(listing.sellerType()),
+                listingMediaRepository.findPublicImagesByListingId(listing.id()));
     }
 
     @Transactional
@@ -236,6 +279,7 @@ public class ListingService {
         String checksum = normalizedChecksum(request.checksumSha256());
         String fileName = normalizedOptionalText("File name", request.fileName(), 255);
         String objectKey = objectKey(listing.id(), mediaId, fileName, contentType);
+        StorageUploadTarget uploadTarget = listingMediaStorage.createUploadTarget(objectKey, contentType, sizeBytes);
 
         ListingMediaResponse response = listingMediaRepository.insertMedia(new ListingMediaInsert(
                 mediaId,
@@ -243,7 +287,7 @@ public class ListingService {
                 listing.sellerType(),
                 listing.individualSellerUserId(),
                 listing.businessId(),
-                MEDIA_BUCKET,
+                uploadTarget.bucket(),
                 objectKey,
                 fileName,
                 contentType,
@@ -252,7 +296,7 @@ public class ListingService {
                 Instant.now()));
 
         log.info("Created listing media upload slot listingId={} mediaId={}", listing.id(), response.id());
-        return response;
+        return withUploadTarget(response, uploadTarget);
     }
 
     @Transactional
@@ -276,6 +320,7 @@ public class ListingService {
         if (media.checksumSha256() != null && checksum != null && !media.checksumSha256().equalsIgnoreCase(checksum)) {
             throw new IllegalArgumentException("Confirmed checksum does not match upload request.");
         }
+        listingMediaStorage.verifyUploaded(media.objectKey(), media.contentType(), media.sizeBytes());
 
         ListingMediaResponse response = listingMediaRepository.confirmMedia(
                 listingId,
@@ -286,6 +331,24 @@ public class ListingService {
 
         log.info("Confirmed listing media upload listingId={} mediaId={}", listingId, mediaId);
         return response;
+    }
+
+    @Transactional(readOnly = true)
+    public URI publicListingMediaReadUri(String imageId) {
+        ListingMediaResponse media = listingMediaRepository.findPublicImageMediaByImageId(normalizedRequiredId("Image ID", imageId))
+                .orElseThrow(ListingMediaNotFoundException::new);
+        return listingMediaStorage.createReadUri(media.objectKey());
+    }
+
+    @Transactional(readOnly = true)
+    public URI ownedListingMediaReadUri(String listingId, String mediaId) {
+        ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        ListingMediaResponse media = listingMediaRepository.findMediaById(listing.id(), normalizedRequiredId("Media ID", mediaId))
+                .orElseThrow(ListingMediaNotFoundException::new);
+        if (!"UPLOADED".equals(media.uploadStatus())) {
+            throw new ListingMediaNotFoundException();
+        }
+        return listingMediaStorage.createReadUri(media.objectKey());
     }
 
     @Transactional
@@ -529,6 +592,13 @@ public class ListingService {
         return normalized;
     }
 
+    private String transactionNotice(String sellerType) {
+        if ("INDIVIDUAL".equals(sellerType)) {
+            return "Payment and delivery are arranged directly by participants. The platform does not verify or protect off-platform payment.";
+        }
+        return null;
+    }
+
     private void requireListingOwner(ListingOwnerSnapshot listing) {
         CurrentActor actor = currentActorProvider.currentActor();
         if (listing.sellerType() == ListingSellerType.INDIVIDUAL) {
@@ -558,10 +628,32 @@ public class ListingService {
         if (sizeBytes <= 0) {
             throw new IllegalArgumentException("Media size is required.");
         }
-        if (sizeBytes > MAX_IMAGE_SIZE_BYTES) {
+        if (sizeBytes > mediaStorageProperties.maxImageSizeBytes()) {
             throw new IllegalArgumentException("Media size must be 10 MB or less.");
         }
         return sizeBytes;
+    }
+
+    private ListingMediaResponse withUploadTarget(ListingMediaResponse response, StorageUploadTarget uploadTarget) {
+        return new ListingMediaResponse(
+                response.id(),
+                response.listingId(),
+                response.sellerType(),
+                response.individualSellerUserId(),
+                response.businessId(),
+                response.objectBucket(),
+                response.objectKey(),
+                response.originalFileName(),
+                response.contentType(),
+                response.sizeBytes(),
+                response.checksumSha256(),
+                response.uploadStatus(),
+                response.moderationStatus(),
+                uploadTarget.uploadMethod(),
+                uploadTarget.uploadUrl(),
+                response.version(),
+                response.createdAt(),
+                response.updatedAt());
     }
 
     private String normalizedChecksum(String value) {

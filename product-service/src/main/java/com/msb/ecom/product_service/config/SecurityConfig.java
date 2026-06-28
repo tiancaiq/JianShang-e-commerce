@@ -17,6 +17,9 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/categories",
                                 "/api/v1/categories/**",
+                                "/api/v1/public/listings",
+                                "/api/v1/public/listings/**",
+                                "/api/v1/public/listing-media/**",
                                 "/actuator/health/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
