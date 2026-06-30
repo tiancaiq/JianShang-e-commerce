@@ -4,6 +4,7 @@ import com.msb.ecom.auth_service.dto.ApiDataResponse;
 import com.msb.ecom.auth_service.dto.CurrentUserResponse;
 import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
 import com.msb.ecom.auth_service.service.AuthService;
+import com.msb.ecom.common.web.http.IfMatchVersion;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AuthController {
 
+    private static final String PROFILE_VERSION_REQUIRED = "If-Match must contain the current profile version";
+
     private final AuthService authService;
 
     @GetMapping("/me")
@@ -29,21 +32,8 @@ public class AuthController {
     public ApiDataResponse<CurrentUserResponse> updateMe(
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody UpdateCurrentUserRequest request) {
-        return new ApiDataResponse<>(authService.updateCurrentUser(request, parseVersion(ifMatch)));
-    }
-
-    private Long parseVersion(String ifMatch) {
-        if (ifMatch == null || ifMatch.isBlank()) {
-            throw new IllegalArgumentException("If-Match must contain the current profile version");
-        }
-        String value = ifMatch.trim();
-        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
-            value = value.substring(1, value.length() - 1);
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("If-Match must contain the current profile version");
-        }
+        return new ApiDataResponse<>(authService.updateCurrentUser(
+                request,
+                IfMatchVersion.parseRequired(ifMatch, PROFILE_VERSION_REQUIRED)));
     }
 }

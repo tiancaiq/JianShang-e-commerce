@@ -50,9 +50,28 @@ The three product surfaces are:
 - Public user marketplace site: guests can browse goods without login; signed
   in users can manage profile, sell individual items, and chat.
 - Business seller portal: approved merchants manage store profile and basic
-  listings in MVP.
+  business listings in MVP.
 - Admin portal: platform staff manage business approval and listing
   moderation in MVP.
+
+Individual sellers use the public marketplace/account experience for personal
+listing management. They do not use the business seller portal.
+
+UI direction:
+
+- Marketplace uses a shopping/commerce style with prominent search,
+  categories, listing cards, listing detail pages, and clear seller type
+  labels.
+- Business seller portal uses a management dashboard style for onboarding,
+  store profile, and listing-management work.
+- Admin portal uses a management dashboard style for review queues,
+  moderation decisions, and audit context.
+- Do not spend MVP time making seller/admin look like the public marketplace.
+  Their layouts should support operational work.
+
+Detailed marketplace UI redesign direction:
+
+- `docs/mvp/ui/marketplace-ui-redesign.md`
 
 Before starting another product feature slice, restore the verification
 baseline after the demo deployment:
@@ -62,6 +81,11 @@ baseline after the demo deployment:
   Docker.
 - Demo documentation should be intentionally tracked or removed.
 - Any changed CI/deployment assumptions should be documented.
+
+Stabilization sprint:
+
+- Before continuing feature development, complete the P0 cleanup slices in
+  `docs/mvp/fix/fix-02-stabilization-sprint-plan.md`.
 
 Do not start V2 or V3 features until the MVP browser, seller, listing, search,
 chat, and moderation paths are validated.
@@ -153,11 +177,12 @@ Completed slices:
 | --- | --- | --- |
 | IND-01 Individual seller activation | Complete | `docs/mvp/ind/ind-01-individual-seller-activation.md` |
 | IND-02 Current individual seller profile | Complete | `docs/mvp/ind/ind-02-current-individual-seller-profile.md` |
+| IND-03 Marketplace individual selling plan | Planned | `docs/mvp/ind/ind-03-marketplace-individual-selling-plan.md` |
 
 Remaining MVP work:
 
 - Use the active individual seller profile when creating and managing
-  individual listings.
+  individual listings inside the marketplace account experience.
 - Keep completed-sales count deferred until the V3 trade completion flow.
 
 ### 5.3 Business Seller Profile And Basic Store
@@ -202,21 +227,26 @@ Completed slices:
 | LIST-07 Public listing detail | Complete | `docs/mvp/list/list-07-public-listing-detail.md` |
 | MEDIA-01 Object storage image delivery | Complete | `docs/mvp/list/media-01-object-storage-image-delivery.md` |
 
-Recommended next listing slices:
+Recommended next search/storefront slices:
 
-1. SEARCH-00 search/storefront read model plan.
-2. SEARCH-02 keyword/filter browse improvements.
+1. IND-03 implementation: move individual seller personal listing routes into
+   marketplace/account routes.
+2. SEARCH-02 public business storefront.
+3. SEARCH-03 search filters, sorting, and cursor pagination.
 
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
 
 ### 5.5 Search And Storefront
 
-Status: initial database-backed public approved listing browse is implemented.
+Status: read model plan and initial database-backed public approved listing
+browse are implemented.
 
 MVP goal:
 
 - Guests can visit the public site and see approved goods without logging in.
+- The public marketplace should feel like a shopping site rather than an
+  admin dashboard.
 - Listing and storefront pages clearly distinguish individual sellers from
   business sellers.
 - Individual listings show that payment and delivery are arranged
@@ -225,6 +255,8 @@ MVP goal:
 Recommended slices:
 
 1. SEARCH-00 search/storefront read model plan.
+   - Status: complete.
+   - Reference: `docs/mvp/search/search-00-search-storefront-read-model-plan.md`
 2. SEARCH-01 public approved listing browse without OpenSearch.
    - Status: complete.
    - Reference: `docs/mvp/search/search-01-public-approved-listing-browse.md`
@@ -261,6 +293,37 @@ Advanced reports, suspensions, support cases, operations queues, and disputes
 remain V3.
 
 ## 6. Immediate Next Work
+
+### FIX-02 Stabilization Sprint
+
+Status: planned.
+
+Reference:
+
+- `docs/mvp/fix/fix-02-stabilization-sprint-plan.md`
+
+Goal:
+
+- Clean up completed MVP work before more teammates start coding.
+- Do not add features.
+- Fix route/product-surface drift, legacy auth leftovers, V2 demo leakage,
+  duplicate docs, and baseline verification gaps.
+
+P0 cleanup slices:
+
+1. STAB-P0-01 Stabilize Git state and verification baseline.
+   - Status: complete.
+   - Reference: `docs/mvp/fix/stab-p0-01-git-verification-baseline.md`
+2. STAB-P0-02 Remove individual seller tools from business seller portal.
+   - Status: complete.
+   - Reference: `docs/mvp/fix/stab-p0-02-business-seller-portal-boundary.md`
+3. STAB-P0-03 Remove or quarantine V2 demo UI from active MVP navigation.
+   - Status: complete.
+   - Reference: `docs/mvp/fix/stab-p0-03-v2-demo-ui-quarantine.md`
+4. STAB-P0-04 Remove legacy custom JWT issuance path.
+   - Status: complete.
+   - Reference: `docs/mvp/fix/stab-p0-04-legacy-jwt-cleanup.md`
+5. STAB-P0-05 Fix documentation duplicates and slice naming drift.
 
 ### FIX-01 Restore Verification Baseline
 
@@ -359,6 +422,8 @@ Acceptance criteria:
    - Show off-platform payment and delivery notice for individual listings.
 
 9. SEARCH-00: Search and storefront read model plan.
+   - Status: complete.
+   - Reference: `docs/mvp/search/search-00-search-storefront-read-model-plan.md`
    - Decide the initial database-backed read path.
    - Define public listing cards.
    - Define storefront shape.

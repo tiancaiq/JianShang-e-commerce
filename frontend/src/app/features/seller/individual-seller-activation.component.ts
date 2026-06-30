@@ -303,8 +303,8 @@ export class IndividualSellerActivationComponent implements OnInit {
     this.errorMsg.set('');
 
     this.individualSellerService.getMe().subscribe({
-      next: response => {
-        this.profile.set(response.data);
+      next: profile => {
+        this.profile.set(profile);
         this.loading.set(false);
       },
       error: error => {
@@ -335,8 +335,8 @@ export class IndividualSellerActivationComponent implements OnInit {
       publicRegion: this.publicRegion.trim(),
       termsVersion: this.termsVersion,
     }).subscribe({
-      next: response => {
-        this.profile.set(response.data);
+      next: profile => {
+        this.profile.set(profile);
         this.saving.set(false);
         this.toastService.success('Individual seller profile activated.');
       },

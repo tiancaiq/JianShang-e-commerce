@@ -2,6 +2,7 @@ package com.msb.ecom.product_service.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 @Component
+@Slf4j
 public class RestAuthServiceClient implements AuthServiceClient {
 
     private static final String LISTING_DRAFT_CREATE = "LISTING_DRAFT_CREATE";
@@ -28,11 +30,15 @@ public class RestAuthServiceClient implements AuthServiceClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied individual seller authorization status={}",
+                            clientResponse.getStatusCode().value());
                     throw new ListingAuthorizationException("Active individual seller profile is required.");
                 })
                 .body(IndividualSellerEnvelope.class);
 
         if (response == null || response.data() == null || !"ACTIVE".equals(response.data().status())) {
+            log.warn("Auth-service returned inactive individual seller authorization status={}",
+                    response == null || response.data() == null ? "missing" : response.data().status());
             throw new ListingAuthorizationException("Active individual seller profile is required.");
         }
         return response.data();
@@ -45,6 +51,8 @@ public class RestAuthServiceClient implements AuthServiceClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied business listing authorization businessId={} status={}",
+                            businessId, clientResponse.getStatusCode().value());
                     throw new ListingAuthorizationException("Active business listing permission is required.");
                 })
                 .body(BusinessMembershipEnvelope.class);
@@ -53,6 +61,8 @@ public class RestAuthServiceClient implements AuthServiceClient {
                 || response.data() == null
                 || !"ACTIVE".equals(response.data().status())
                 || !response.data().permissions().contains(LISTING_DRAFT_CREATE)) {
+            log.warn("Auth-service returned insufficient business listing authorization businessId={} status={}",
+                    businessId, response == null || response.data() == null ? "missing" : response.data().status());
             throw new ListingAuthorizationException("Active business listing permission is required.");
         }
         return response.data();
@@ -65,6 +75,8 @@ public class RestAuthServiceClient implements AuthServiceClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied platform admin authorization status={}",
+                            clientResponse.getStatusCode().value());
                     throw new ListingAuthorizationException("Platform admin access is required.");
                 })
                 .body(PlatformAdminEnvelope.class);
@@ -72,6 +84,8 @@ public class RestAuthServiceClient implements AuthServiceClient {
         if (response == null
                 || response.data() == null
                 || !"PLATFORM_ADMIN".equals(response.data().role())) {
+            log.warn("Auth-service returned insufficient platform admin authorization role={}",
+                    response == null || response.data() == null ? "missing" : response.data().role());
             throw new ListingAuthorizationException("Platform admin access is required.");
         }
         return response.data();

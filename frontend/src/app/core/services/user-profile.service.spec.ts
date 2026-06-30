@@ -48,7 +48,7 @@ describe('UserProfileService', () => {
 
   it('loads the current profile through the gateway', () => {
     service.getMe().subscribe(response => {
-      expect(response.data).toEqual(user);
+      expect(response).toEqual(user);
     });
 
     const request = httpMock.expectOne('/api/v1/users/me');
@@ -66,7 +66,7 @@ describe('UserProfileService', () => {
       phone: '+19495551234',
       avatarUrl: 'https://example.com/avatar.png',
     }, 3).subscribe(response => {
-      expect(response.data).toEqual(user);
+      expect(response).toEqual(user);
     });
 
     const request = httpMock.expectOne('/api/v1/users/me');

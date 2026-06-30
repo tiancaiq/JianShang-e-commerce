@@ -1,5 +1,7 @@
 package com.msb.ecom.product_service.service;
 
+import com.msb.ecom.common.core.validation.FixedLengthIds;
+import com.msb.ecom.common.core.validation.TextInputs;
 import com.msb.ecom.common.web.security.CurrentActor;
 import com.msb.ecom.common.web.security.CurrentActorProvider;
 import com.msb.ecom.product_service.model.CategoryNotFoundException;
@@ -57,6 +59,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public class ListingService {
 
+    static final int PUBLIC_BROWSE_LIMIT = 24;
     private static final Pattern SAFE_FILE_PART = Pattern.compile("[^A-Za-z0-9._-]");
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of(
             "image/jpeg",
@@ -124,9 +127,9 @@ public class ListingService {
     }
 
     @Transactional(readOnly = true)
-    // Public browse returns the newest approved active listings for marketplace guests.
+    // Public browse is intentionally fixed-size until SEARCH-03 adds cursor pagination.
     public List<PublicListingResponse> getPublicListings() {
-        return listingDraftRepository.findPublicListings(24).stream()
+        return listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT).stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
     }
@@ -222,6 +225,8 @@ public class ListingService {
         ListingDraftResponse listing = listingDraftRepository.findOptionalById(normalizedListingId)
                 .orElseThrow(ListingNotFoundException::new);
         if (!"PENDING_REVIEW".equals(listing.status()) || !"PENDING".equals(listing.moderationStatus())) {
+            log.warn("Rejected listing moderation decision listingId={} status={} moderationStatus={} reason=invalid_state",
+                    listing.id(), listing.status(), listing.moderationStatus());
             throw new IllegalArgumentException("Only pending-review listings can receive a moderation decision.");
         }
 
@@ -250,6 +255,8 @@ public class ListingService {
                 publishedAt,
                 now);
         if (updated == 0) {
+            log.warn("Rejected listing moderation decision listingId={} expectedVersion={} reason=version_conflict",
+                    listing.id(), expectedVersion);
             throw new ListingVersionConflictException();
         }
         listingMediaRepository.markImagesModerationStatus(listing.id(), nextModerationStatus, Timestamp.from(now));
@@ -320,7 +327,7 @@ public class ListingService {
         if (media.checksumSha256() != null && checksum != null && !media.checksumSha256().equalsIgnoreCase(checksum)) {
             throw new IllegalArgumentException("Confirmed checksum does not match upload request.");
         }
-        listingMediaStorage.verifyUploaded(media.objectKey(), media.contentType(), media.sizeBytes());
+        verifyMediaUpload(media);
 
         ListingMediaResponse response = listingMediaRepository.confirmMedia(
                 listingId,
@@ -604,6 +611,8 @@ public class ListingService {
         if (listing.sellerType() == ListingSellerType.INDIVIDUAL) {
             IndividualSellerAuthorization seller = authServiceClient.requireActiveIndividualSeller(actor.accessToken());
             if (!listing.individualSellerUserId().equals(seller.userId())) {
+                log.warn("Denied listing owner check listingId={} sellerType={} expectedUserId={} actualUserId={}",
+                        listing.id(), listing.sellerType(), listing.individualSellerUserId(), seller.userId());
                 throw new ListingAuthorizationException("Listing belongs to another seller.");
             }
             return;
@@ -612,7 +621,20 @@ public class ListingService {
         BusinessMembershipAuthorization membership =
                 authServiceClient.requireBusinessListingPermission(actor.accessToken(), listing.businessId());
         if (!listing.businessId().equals(membership.businessId())) {
+            log.warn("Denied listing owner check listingId={} sellerType={} expectedBusinessId={} actualBusinessId={}",
+                    listing.id(), listing.sellerType(), listing.businessId(), membership.businessId());
             throw new ListingAuthorizationException("Listing belongs to another business.");
+        }
+    }
+
+    // Adds listing/media context around storage verification failures without logging upload URLs or tokens.
+    private void verifyMediaUpload(ListingMediaResponse media) {
+        try {
+            listingMediaStorage.verifyUploaded(media.objectKey(), media.contentType(), media.sizeBytes());
+        } catch (IllegalArgumentException exception) {
+            log.warn("Listing media verification failed listingId={} mediaId={} objectKey={} reason={}",
+                    media.listingId(), media.id(), media.objectKey(), exception.getMessage());
+            throw exception;
         }
     }
 
@@ -682,11 +704,7 @@ public class ListingService {
     }
 
     private String normalizedRequiredId(String fieldName, String value) {
-        String normalized = normalizedRequiredText(fieldName, value, 26);
-        if (normalized.length() != 26) {
-            throw new IllegalArgumentException(fieldName + " is invalid.");
-        }
-        return normalized;
+        return FixedLengthIds.requireTrimmed(fieldName, value, 26);
     }
 
     private String normalizedRequiredText(String fieldName, String value, int maxLength) {
@@ -698,7 +716,7 @@ public class ListingService {
     }
 
     private String normalizedText(String fieldName, String value, int maxLength) {
-        String normalized = value == null ? "" : value.trim().replaceAll("\\s+", " ");
+        String normalized = TextInputs.collapseWhitespaceToEmpty(value);
         if (normalized.isBlank()) {
             throw new IllegalArgumentException(fieldName + " is required.");
         }
@@ -709,11 +727,8 @@ public class ListingService {
     }
 
     private String normalizedOptionalText(String fieldName, String value, int maxLength) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim().replaceAll("\\s+", " ");
-        if (normalized.isBlank()) {
+        String normalized = TextInputs.collapseWhitespaceToNull(value);
+        if (normalized == null) {
             return null;
         }
         if (normalized.length() > maxLength) {

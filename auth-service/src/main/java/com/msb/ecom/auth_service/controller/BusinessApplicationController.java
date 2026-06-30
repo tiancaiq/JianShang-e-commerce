@@ -4,6 +4,7 @@ import com.msb.ecom.auth_service.dto.ApiDataResponse;
 import com.msb.ecom.auth_service.dto.BusinessApplicationDraftRequest;
 import com.msb.ecom.auth_service.dto.BusinessApplicationResponse;
 import com.msb.ecom.auth_service.service.BusinessApplicationService;
+import com.msb.ecom.common.web.http.IfMatchVersion;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/business-applications")
 @RequiredArgsConstructor
 public class BusinessApplicationController {
+
+    private static final String BUSINESS_APPLICATION_VERSION_REQUIRED =
+            "If-Match must contain the current business application version";
 
     private final BusinessApplicationService businessApplicationService;
 
@@ -41,29 +45,19 @@ public class BusinessApplicationController {
             @PathVariable String id,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody BusinessApplicationDraftRequest request) {
-        return new ApiDataResponse<>(businessApplicationService.updateDraft(id, parseVersion(ifMatch), request));
+        return new ApiDataResponse<>(businessApplicationService.updateDraft(
+                id,
+                IfMatchVersion.parseRequired(ifMatch, BUSINESS_APPLICATION_VERSION_REQUIRED),
+                request));
     }
 
     @PostMapping("/{id}/submit")
     public ApiDataResponse<BusinessApplicationResponse> submit(
             @PathVariable String id,
             @RequestHeader(name = "If-Match", required = false) String ifMatch) {
-        return new ApiDataResponse<>(businessApplicationService.submit(id, parseVersion(ifMatch)));
-    }
-
-    private Long parseVersion(String ifMatch) {
-        if (ifMatch == null || ifMatch.isBlank()) {
-            throw new IllegalArgumentException("If-Match must contain the current business application version");
-        }
-        String value = ifMatch.trim();
-        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
-            value = value.substring(1, value.length() - 1);
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("If-Match must contain the current business application version");
-        }
+        return new ApiDataResponse<>(businessApplicationService.submit(
+                id,
+                IfMatchVersion.parseRequired(ifMatch, BUSINESS_APPLICATION_VERSION_REQUIRED)));
     }
 
 }

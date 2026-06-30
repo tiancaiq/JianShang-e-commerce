@@ -18,6 +18,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.net.URI;
 
@@ -325,6 +327,30 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void sellerCannotConfirmMediaForAnotherSellersDraft() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+        String mediaId = createPendingMedia(listingId, "bike.png");
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        "01U00000000000000000000099", "Irvine", "CA", "ACTIVE"));
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
     void activeIndividualSellerCanAttachConfirmedImages() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -592,6 +618,29 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void nonAdminCannotMakeListingModerationDecision() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenThrow(new ListingAuthorizationException("Platform admin access is required."));
+
+        mockMvc.perform(post("/api/v1/admin/listings/{listingId}/decision", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("seller-token")))
+                        .header("If-Match", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Seller cannot approve own listing"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
     void platformAdminCanListPendingReviewListings() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -774,6 +823,22 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void publicListingMediaHidesPendingReviewImage() throws Exception {
+        String listingId = createSubmittedListingForAdminDecision();
+        String response = mockMvc.perform(get("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_MEDIA_NOT_FOUND")));
+    }
+
+    @Test
     void sellerCanPreviewOwnedDraftImageThroughSignedRedirect() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -785,6 +850,24 @@ class ListingDraftApiTests {
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", equalTo("https://storage.example.test/signed-read")));
+    }
+
+    @Test
+    void sellerCannotPreviewAnotherSellersDraftImage() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+        String mediaId = createConfirmedMedia(listingId, "bike.png");
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        "01U00000000000000000000099", "Irvine", "CA", "ACTIVE"));
+
+        mockMvc.perform(get("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-token"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
     }
 
     @Test
@@ -801,6 +884,26 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$[0].individualSellerUserId").doesNotExist())
                 .andExpect(jsonPath("$[0].status").doesNotExist())
                 .andExpect(jsonPath("$[0].moderationStatus").doesNotExist());
+    }
+
+    @Test
+    void publicBrowseIsCappedToFixedMvpLimit() throws Exception {
+        Instant basePublishedAt = Instant.parse("2099-06-17T12:00:00Z");
+        try {
+            for (int index = 0; index < 25; index++) {
+                insertApprovedPublicListing(
+                        String.format("01P%023d", index),
+                        basePublishedAt.plusSeconds(index));
+            }
+
+            mockMvc.perform(get("/api/v1/public/listings"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()", equalTo(24)))
+                    .andExpect(jsonPath("$[0].id", equalTo("01P00000000000000000000024")))
+                    .andExpect(jsonPath("$[23].id", equalTo("01P00000000000000000000001")));
+        } finally {
+            jdbcTemplate.update("delete from listings where id like '01P%'");
+        }
     }
 
     @Test
@@ -903,6 +1006,27 @@ class ListingDraftApiTests {
                 .getContentAsString();
         JsonNode json = objectMapper.readTree(response);
         return json.get("id").asText();
+    }
+
+    private void insertApprovedPublicListing(String listingId, Instant publishedAt) {
+        jdbcTemplate.update("""
+                insert into listings (
+                    id, seller_type, individual_seller_user_id, business_id, store_id,
+                    category_id, title, description, condition_code, condition_notes,
+                    price_amount, currency, negotiable, sku, quantity, public_city, public_region,
+                    status, moderation_status, published_at, version, created_at, updated_at
+                )
+                values (?, 'INDIVIDUAL', ?, null, null, ?, ?, 'Public browse fixture', 'GOOD', null,
+                        10.00, 'USD', true, null, 1, 'Irvine', 'CA',
+                        'ACTIVE', 'APPROVED', ?, 0, ?, ?)
+                """,
+                listingId,
+                USER_ID,
+                CATEGORY_ID,
+                "Public browse fixture " + listingId,
+                Timestamp.from(publishedAt),
+                Timestamp.from(publishedAt),
+                Timestamp.from(publishedAt));
     }
 
     private String createBusinessDraft() throws Exception {

@@ -7,6 +7,8 @@ interface NavItem {
   icon: string;
 }
 
+// Quarantined V2/tutorial navigation. It contains demo commerce links and must
+// not be used by the active MVP marketplace, business seller, or admin layouts.
 @Component({
   selector: 'app-sidebar',
   standalone: true,
@@ -232,6 +234,7 @@ export class SidebarComponent {
     },
   ];
 
+  // Toggles the legacy demo sidebar collapsed state.
   toggleCollapse() {
     this.collapsed.update(v => !v);
     this.collapseChanged.emit(this.collapsed());

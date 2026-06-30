@@ -37,13 +37,16 @@ Rules:
 
 ## Frontend
 
-Implemented seller portal routes:
+Implemented marketplace account routes:
 
 ```text
-/seller/listings
-/seller/listings/new
-/seller/listings/:listingId/edit
+/account/listings
+/account/listings/new
+/account/listings/:listingId/edit
 ```
+
+Legacy `/seller/listings...` paths redirect to these marketplace account
+routes for compatibility only.
 
 The seller listing page shows current seller drafts and links each draft to the
 edit form. Creating a draft now redirects to the edit route so the saved draft

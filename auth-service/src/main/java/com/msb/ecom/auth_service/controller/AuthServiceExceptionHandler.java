@@ -12,6 +12,7 @@ import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.error.ApiError;
 import com.msb.ecom.common.web.error.ApiErrorEnvelope;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
 
 @RestControllerAdvice
+@Slf4j
 public class AuthServiceExceptionHandler {
 
     @ExceptionHandler(ProfileVersionConflictException.class)
@@ -86,12 +88,15 @@ public class AuthServiceExceptionHandler {
     public ResponseEntity<ApiErrorEnvelope> handleBusinessApplicationForbidden(
             BusinessApplicationForbiddenException exception,
             HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Denied auth-service business action path={} correlationId={} reason=forbidden",
+                request.getRequestURI(), correlationId);
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ApiErrorEnvelope(new ApiError(
                         "FORBIDDEN",
                         "You are not allowed to perform this business application action.",
                         List.of(),
-                        CorrelationIdFilter.current(request))));
+                        correlationId)));
     }
 
     @ExceptionHandler(BusinessApplicationVersionConflictException.class)

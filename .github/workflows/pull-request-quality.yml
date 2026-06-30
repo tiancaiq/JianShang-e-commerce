@@ -134,7 +134,7 @@ jobs:
       - name: Validate migration-owning services
         run: |
           chmod +x ./mvnw
-          ./mvnw -B -pl auth-service,order-service,inventory-service,payment-service -am test
+          ./mvnw -B -pl auth-service,product-service -am test
 
   dependencies:
     name: Dependency Scan

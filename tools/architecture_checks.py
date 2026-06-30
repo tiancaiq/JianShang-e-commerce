@@ -15,13 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-SERVICE_ROOTS = {
+ACTIVE_MVP_SERVICE_ROOTS = {
     "api-gateway": "api_gateway",
     "auth-service": "auth_service",
-    "inventory-service": "inventory_service",
-    "notification-service": "notification_service",
-    "order-service": "order_service",
-    "payment-service": "payment_service",
     "product-service": "product_service",
 }
 
@@ -33,11 +29,7 @@ COMMON_ROOTS = {
 
 SERVICE_DATABASE_NAMES = {
     "auth-service": {"auth_service", "identity"},
-    "inventory-service": {"inventory_service", "inventory"},
-    "order-service": {"js_order", "order_service", "orders"},
-    "payment-service": {"payment_service", "payments"},
     "product-service": {"product-service", "product_service", "marketplace"},
-    "notification-service": {"notifications"},
 }
 
 DOMAIN_SEGMENTS_FOR_COMMON = {
@@ -118,7 +110,7 @@ def resource_files(root: Path) -> list[Path]:
 
 def check_service_package_ownership(repo: Path) -> list[Violation]:
     violations: list[Violation] = []
-    for service_root, package_segment in SERVICE_ROOTS.items():
+    for service_root, package_segment in ACTIVE_MVP_SERVICE_ROOTS.items():
         root = repo / service_root
         for path in java_files(root):
             text = read_text(path)
@@ -156,8 +148,8 @@ def check_common_package_ownership(repo: Path) -> list[Violation]:
 
 def check_service_import_boundaries(repo: Path) -> list[Violation]:
     violations: list[Violation] = []
-    service_segments = set(SERVICE_ROOTS.values())
-    for service_root, own_segment in SERVICE_ROOTS.items():
+    service_segments = set(ACTIVE_MVP_SERVICE_ROOTS.values())
+    for service_root, own_segment in ACTIVE_MVP_SERVICE_ROOTS.items():
         root = repo / service_root
         for path in java_files(root):
             text = read_text(path)
@@ -249,10 +241,10 @@ def run_self_test() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         repo = Path(temp_dir)
         write_file(
-            repo / "order-service/src/main/java/com/msb/ecom/order_service/BadImport.java",
+            repo / "product-service/src/main/java/com/msb/ecom/product_service/BadImport.java",
             """
-            package com.msb.ecom.order_service;
-            import com.msb.ecom.payment_service.repository.PaymentRepository;
+            package com.msb.ecom.product_service;
+            import com.msb.ecom.auth_service.repository.UserRepository;
             class BadImport {}
             """,
         )
@@ -266,8 +258,8 @@ def run_self_test() -> int:
             """,
         )
         write_file(
-            repo / "inventory-service/src/main/resources/application.properties",
-            "spring.datasource.url=jdbc:mysql://localhost:3306/payment_service\n",
+            repo / "product-service/src/main/resources/application.properties",
+            "spring.datasource.url=jdbc:mysql://localhost:3306/identity\n",
         )
 
         violations = run_checks(repo)

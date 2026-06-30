@@ -170,7 +170,7 @@ public class ListingDraftRepository {
                 join categories c on c.id = l.category_id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
-                order by coalesce(l.published_at, l.updated_at) desc, l.id desc
+                order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
                 """,
                 (rs, rowNum) -> new PublicListingResponse(

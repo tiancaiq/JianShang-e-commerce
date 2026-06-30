@@ -14,7 +14,6 @@ import { ToastService } from '../../core/services/toast.service';
       <header class="page-header">
         <div>
           <h1>Business Review</h1>
-          <p>Record a platform decision for a submitted business application.</p>
         </div>
       </header>
 
@@ -266,8 +265,8 @@ export class AdminBusinessApplicationDecisionComponent {
       decision: this.decision,
       reason,
     }).subscribe({
-      next: response => {
-        this.application.set(response.data);
+      next: application => {
+        this.application.set(application);
         this.saving.set(false);
         this.toastService.success('Business application decision saved.');
       },

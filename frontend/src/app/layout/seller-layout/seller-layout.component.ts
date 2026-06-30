@@ -13,9 +13,6 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
         <a routerLink="/seller" class="brand">MSB<span>Seller</span></a>
         <nav class="portal-nav" aria-label="Seller navigation">
           <a routerLink="/seller/dashboard" routerLinkActive="active">Dashboard</a>
-          <a routerLink="/seller/listings" routerLinkActive="active">Listings</a>
-          <a routerLink="/seller/listings/new" routerLinkActive="active">New Listing</a>
-          <a routerLink="/seller/activate" routerLinkActive="active">Individual Seller</a>
           <a routerLink="/seller/business/apply" routerLinkActive="active">Business Apply</a>
           <a routerLink="/seller/profile" routerLinkActive="active">Profile</a>
         </nav>
@@ -30,7 +27,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
             <button type="button" (click)="authService.logout()">Logout</button>
           </div>
         </header>
-        <main class="portal-content bg-noise">
+        <main class="portal-content">
           <div class="portal-content-inner">
             <router-outlet />
           </div>
@@ -43,16 +40,17 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
     .portal-shell {
       min-height: 100vh;
       display: flex;
+      background: var(--color-bg-primary);
     }
 
     .portal-sidebar {
       position: fixed;
       inset: 0 auto 0 0;
-      width: 248px;
+      width: 232px;
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
-      padding: 1.25rem 0.875rem;
+      gap: 1rem;
+      padding: 1rem 0.75rem;
       background: var(--color-bg-secondary);
       border-right: 1px solid var(--color-border);
       z-index: 30;
@@ -61,9 +59,9 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
     .brand {
       color: var(--color-text-primary);
       font-family: var(--font-display);
-      font-size: 1.125rem;
+      font-size: 1rem;
       font-weight: 800;
-      padding: 0 0.625rem;
+      padding: 0.25rem 0.625rem 0.75rem;
       text-decoration: none;
     }
 
@@ -82,11 +80,11 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       min-height: 40px;
       display: flex;
       align-items: center;
-      padding: 0.625rem 0.75rem;
+      padding: 0.5rem 0.75rem;
       border-radius: var(--radius-md);
       color: var(--color-text-secondary);
       font-size: 0.875rem;
-      font-weight: 700;
+      font-weight: 650;
       text-decoration: none;
     }
 
@@ -103,7 +101,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 
     .portal-main {
       flex: 1;
-      margin-left: 248px;
+      margin-left: 232px;
       min-width: 0;
       display: flex;
       flex-direction: column;
@@ -117,9 +115,8 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      padding: 1rem 1.5rem;
-      background: rgba(12, 12, 14, 0.9);
-      backdrop-filter: blur(12px);
+      padding: 0.875rem 1.5rem;
+      background: rgba(15, 16, 20, 0.96);
       border-bottom: 1px solid var(--color-border);
     }
 
@@ -152,13 +149,15 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
     .portal-content {
       position: relative;
       flex: 1;
+      background: var(--color-bg-primary);
     }
 
     .portal-content-inner {
       position: relative;
       z-index: 1;
       padding: 1.5rem;
-      max-width: 1260px;
+      max-width: 1180px;
+      margin: 0 auto;
     }
 
     @media (max-width: 760px) {

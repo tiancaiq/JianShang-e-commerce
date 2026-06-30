@@ -2,6 +2,17 @@ import { routes } from './app.routes';
 import { authGuard } from './core/guards/auth.guard';
 
 describe('app routes', () => {
+  const v2DemoSegments = new Set([
+    'products',
+    'orders',
+    'payments',
+    'inventory',
+    'cart',
+    'checkout',
+    'wallet',
+    'notifications',
+  ]);
+
   it('keeps marketplace routes public', () => {
     const marketplaceRoute = routes.find(route => route.path === '');
 
@@ -20,10 +31,63 @@ describe('app routes', () => {
     expect(adminRoute?.canActivate).toContain(authGuard);
   });
 
-  it('keeps compatibility redirects for old seller paths', () => {
+  it('protects marketplace account listing routes', () => {
+    const marketplaceRoute = routes.find(route => route.path === '');
+
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'sell',
+      redirectTo: 'account/listings/new',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/profile',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/seller-profile',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/listings',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/listings/new',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/listings/:listingId/edit',
+      canActivate: [authGuard],
+    }));
+  });
+
+  it('keeps seller portal business-only and redirects old personal seller paths', () => {
+    const sellerRoute = routes.find(route => route.path === 'seller');
+
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings',
+      redirectTo: '/account/listings',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings/new',
+      redirectTo: '/account/listings/new',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings/:listingId/edit',
+      redirectTo: '/account/listings/:listingId/edit',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'activate',
+      redirectTo: '/account/seller-profile',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'business/apply',
+    }));
+  });
+
+  it('keeps compatibility redirects for old console paths', () => {
     expect(routes).toContain(jasmine.objectContaining({
       path: 'listings/new',
-      redirectTo: 'seller/listings/new',
+      redirectTo: 'account/listings/new',
     }));
     expect(routes).toContain(jasmine.objectContaining({
       path: 'business/apply',
@@ -35,5 +99,59 @@ describe('app routes', () => {
       path: 'dashboard',
       redirectTo: '/seller/dashboard',
     }));
+    expect(consoleRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings',
+      redirectTo: '/account/listings',
+    }));
+    expect(consoleRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings/new',
+      redirectTo: '/account/listings/new',
+    }));
+    expect(consoleRoute?.children).toContain(jasmine.objectContaining({
+      path: 'seller/activate',
+      redirectTo: '/account/seller-profile',
+    }));
+  });
+
+  it('does not combine redirects with route guards', () => {
+    const visit = (routeList: typeof routes): void => {
+      for (const route of routeList) {
+        if (route.redirectTo) {
+          expect(route.canActivate)
+            .withContext(`route "${route.path}" uses redirectTo and cannot also use canActivate`)
+            .toBeUndefined();
+        }
+
+        if (route.children) {
+          visit(route.children);
+        }
+      }
+    };
+
+    visit(routes);
+  });
+
+  it('does not expose V2 demo commerce routes in the active MVP route tree', () => {
+    const firstSegment = (path: string | undefined): string => {
+      return (path || '').replace(/^\//, '').split('/')[0];
+    };
+
+    const visit = (routeList: typeof routes): void => {
+      for (const route of routeList) {
+        expect(v2DemoSegments.has(firstSegment(route.path)))
+          .withContext(`route "${route.path}" should not expose V2 demo UI in MVP navigation`)
+          .toBeFalse();
+
+        expect(v2DemoSegments.has(firstSegment(route.redirectTo as string | undefined)))
+          .withContext(`redirect "${route.redirectTo}" should not point to V2 demo UI in MVP navigation`)
+          .toBeFalse();
+
+        if (route.children) {
+          visit(route.children);
+        }
+      }
+    };
+
+    visit(routes);
   });
 });

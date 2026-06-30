@@ -45,7 +45,7 @@ describe('IndividualSellerService', () => {
       publicRegion: 'CA',
       termsVersion: '2026-01',
     }).subscribe(response => {
-      expect(response.data).toEqual(profile);
+      expect(response).toEqual(profile);
     });
 
     const request = httpMock.expectOne('/api/v1/individual-seller/activation');
@@ -62,7 +62,7 @@ describe('IndividualSellerService', () => {
 
   it('loads current individual seller profile through the gateway', () => {
     service.getMe().subscribe(response => {
-      expect(response.data).toEqual(profile);
+      expect(response).toEqual(profile);
     });
 
     const request = httpMock.expectOne('/api/v1/individual-seller/me');

@@ -31,6 +31,7 @@ Keep roadmap slice documents in feature folders:
 - Business onboarding/store: `docs/mvp/bus/`
 - Individual seller profile: `docs/mvp/ind/`
 - Listings/media: `docs/mvp/list/`
+- UI/product design direction: `docs/mvp/ui/`
 - Verification/demo fixes: `docs/mvp/fix/`
 
 When adding a new slice document, place it in the matching feature folder and
@@ -54,9 +55,13 @@ The three MVP product surfaces are:
   without login; signed-in users can manage profile, sell individual items,
   and chat.
 - Business seller portal: approved merchants manage store profile and basic
-  listings in MVP.
+  business listings in MVP.
 - Admin portal: platform staff manage business approval and listing
   moderation in MVP.
+
+Individual seller profile, personal listing creation, personal listing edits,
+and personal listing status belong in the marketplace account experience, not
+the business seller portal.
 
 Release placement:
 
@@ -69,6 +74,26 @@ Release placement:
 Do not implement V2 or V3 features while working on MVP slices. In particular,
 business inventory, cart, checkout, payment, orders, shipping, and
 notifications remain V2 even though the business seller portal exists in MVP.
+
+UI direction:
+
+- Marketplace UI should use shopping/commerce patterns: prominent search,
+  category navigation, listing cards, image-forward listing detail, seller
+  type labels, and buyer-facing calls to action.
+- Business seller portal UI should use a management dashboard style for
+  onboarding, store profile, listing management, and later operational work.
+- Admin portal UI should use a management dashboard style for queues, filters,
+  decision forms, audit context, and moderation safety.
+- Do not make seller/admin pages mimic the marketplace shopping UI. Shared
+  components are fine, but each surface should fit its user's job.
+- Prefer small shared Angular UI primitives under
+  `frontend/src/app/shared/components/ui/` for repeated structure such as
+  status pills, empty states, simple cards, and table shells. Keep primitives
+  theme-token driven so marketplace, seller, and admin surfaces remain visually
+  distinct. Do not create a broad design system or move surface-specific
+  product layout into shared components before duplication proves it is useful.
+- Follow `docs/mvp/ui/marketplace-ui-redesign.md` for public marketplace UI
+  changes.
 
 ## Product Invariants
 

@@ -8,7 +8,7 @@ SITE-00 keeps one Angular application while separating the user experience into
 three logical sites:
 
 - Marketplace public/user site
-- Seller portal
+- Business seller portal
 - Admin portal
 
 This slice does not add inventory, orders, payments, checkout, or new backend
@@ -18,17 +18,29 @@ admin role behavior.
 
 ```text
 /                 marketplace public/user site
-/seller           business and individual seller portal
+/seller           business seller portal
 /admin            admin portal
 ```
 
-Compatibility redirects remain for older seller paths:
+MVP target:
 
 ```text
-/dashboard        -> /seller/dashboard
-/listings/new     -> /seller/listings/new
-/business/apply   -> /seller/business/apply
-/profile          -> /seller/profile
+/sell                         marketplace individual seller entry
+/account/listings             marketplace individual seller listing management
+/account/listings/new         marketplace individual listing creation
+/account/listings/:id/edit    marketplace individual listing editing
+```
+
+Compatibility redirects remain for older seller paths until IND-03 is
+implemented:
+
+```text
+/seller/activate              -> /account/seller-profile
+/seller/listings              -> /account/listings
+/seller/listings/new          -> /account/listings/new
+/seller/listings/:id/edit     -> /account/listings/:id/edit
+/business/apply               -> /seller/business/apply
+/profile                      -> /account/profile
 ```
 
 ## Layouts
@@ -45,13 +57,15 @@ Marketplace layout:
 
 - Public route group.
 - Guest browsing is allowed.
-- Navigation has Browse, Sell, Account/Login state.
+- Navigation has Browse, Sell, My Listings, Account/Login state.
+- Individual seller activation and personal listing management live here.
 - Admin links are not shown.
 
 Seller layout:
 
 - Protected by BFF session guard.
-- Seller navigation only.
+- Business seller navigation only.
+- No individual personal listing tools.
 - No inventory, orders, or payment links.
 
 Admin layout:

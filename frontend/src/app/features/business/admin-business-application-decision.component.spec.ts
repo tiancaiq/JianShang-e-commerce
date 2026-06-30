@@ -42,7 +42,7 @@ describe('AdminBusinessApplicationDecisionComponent', () => {
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
-    businessApplicationService.decide.and.returnValue(of({ data: application }));
+    businessApplicationService.decide.and.returnValue(of(application));
 
     await TestBed.configureTestingModule({
       imports: [AdminBusinessApplicationDecisionComponent],

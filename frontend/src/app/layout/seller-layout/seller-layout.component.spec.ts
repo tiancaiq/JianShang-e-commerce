@@ -26,17 +26,23 @@ describe('SellerLayoutComponent', () => {
     fixture = TestBed.createComponent(SellerLayoutComponent);
   });
 
-  it('shows seller navigation without admin or V2 commerce links', () => {
+  it('shows business seller navigation without individual, admin, or V2 commerce links', () => {
     fixture.detectChanges();
 
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
-    expect(text).toContain('New Listing');
-    expect(text).toContain('Individual Seller');
     expect(text).toContain('Business Apply');
+    expect(text).toContain('Profile');
+    expect(text).not.toContain('New Listing');
+    expect(text).not.toContain('Individual Seller');
+    expect(text).not.toContain('My Listings');
     expect(text).not.toContain('Business Review');
     expect(text).not.toContain('Orders');
     expect(text).not.toContain('Payments');
     expect(text).not.toContain('Inventory');
+    expect(text).not.toContain('Cart');
+    expect(text).not.toContain('Checkout');
+    expect(text).not.toContain('Wallet');
+    expect(text).not.toContain('Notifications');
   });
 });

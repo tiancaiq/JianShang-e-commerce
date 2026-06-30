@@ -42,18 +42,16 @@ describe('BusinessApplicationComponent', () => {
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
-    businessApplicationService.createDraft.and.returnValue(of({ data: application }));
+    businessApplicationService.createDraft.and.returnValue(of(application));
     businessApplicationService.submit.and.returnValue(of({
-      data: {
-        ...application,
-        status: 'PENDING_VERIFICATION',
-        submittedAt: '2026-06-16T13:00:00Z',
-        reviewerUserId: null,
-        approvedBusinessId: null,
-        decisionReason: null,
-        decidedAt: null,
-        version: 1,
-      },
+      ...application,
+      status: 'PENDING_VERIFICATION',
+      submittedAt: '2026-06-16T13:00:00Z',
+      reviewerUserId: null,
+      approvedBusinessId: null,
+      decisionReason: null,
+      decidedAt: null,
+      version: 1,
     }));
 
     await TestBed.configureTestingModule({
