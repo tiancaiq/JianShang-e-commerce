@@ -7,14 +7,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.security.web.authentication.logout.LogoutHandler;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
@@ -45,7 +49,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity httpSecurity,
-            ClientRegistrationRepository clientRegistrationRepository) throws Exception {
+            ClientRegistrationRepository clientRegistrationRepository,
+            OAuth2AuthorizedClientService authorizedClientService) throws Exception {
         HttpSessionCsrfTokenRepository csrfTokenRepository = new HttpSessionCsrfTokenRepository();
         csrfTokenRepository.setHeaderName("X-CSRF-TOKEN");
 
@@ -83,6 +88,7 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
                 .logout(logout -> logout
                         .logoutUrl("/api/v1/auth/logout")
+                        .addLogoutHandler(oauth2AuthorizedClientLogoutHandler(authorizedClientService))
                         .logoutSuccessHandler(oidcLogoutSuccessHandler(clientRegistrationRepository))
                         .clearAuthentication(true)
                         .invalidateHttpSession(true)
@@ -150,6 +156,27 @@ public class SecurityConfig {
         successHandler.setPostLogoutRedirectUri(logoutRedirectUri);
         successHandler.setDefaultTargetUrl(logoutRedirectUri);
         return successHandler;
+    }
+
+    // Removes server-side OAuth tokens so a logged-out browser must start a fresh login flow.
+    private LogoutHandler oauth2AuthorizedClientLogoutHandler(
+            OAuth2AuthorizedClientService authorizedClientService) {
+        return (request, response, authentication) -> {
+            OAuth2AuthenticationToken oauth2Authentication = oauth2Authentication(authentication);
+            if (oauth2Authentication == null) {
+                return;
+            }
+            authorizedClientService.removeAuthorizedClient(
+                    oauth2Authentication.getAuthorizedClientRegistrationId(),
+                    oauth2Authentication.getName());
+        };
+    }
+
+    private OAuth2AuthenticationToken oauth2Authentication(Authentication authentication) {
+        if (authentication instanceof OAuth2AuthenticationToken oauth2Authentication) {
+            return oauth2Authentication;
+        }
+        return null;
     }
 
     @Bean

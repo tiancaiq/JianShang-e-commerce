@@ -178,7 +178,7 @@ public class ListingService {
             CreateListingDraftRequest request) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
         if (!canSellerEdit(listing.status())) {
-            throw new IllegalArgumentException("Closed listings cannot be edited.");
+            throw new IllegalArgumentException("Listing cannot be edited in its current state.");
         }
         if (!categoryRepository.activeCategoryExists(request.categoryId())) {
             throw new CategoryNotFoundException();
@@ -205,7 +205,7 @@ public class ListingService {
     // Seller close removes a listing from any public/moderation queue without deleting its audit history.
     public ListingDraftResponse closeListing(String listingId, long expectedVersion) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
-        if (!canSellerEdit(listing.status())) {
+        if (!canSellerClose(listing.status())) {
             throw new IllegalArgumentException("Only draft, pending-review, or active listings can be closed.");
         }
 
@@ -929,12 +929,19 @@ public class ListingService {
     private ListingOwnerSnapshot draftListingForMedia(String listingId) {
         ListingOwnerSnapshot listing = ownedListing(listingId);
         if (!canSellerEdit(listing.status())) {
-            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, or active.");
+            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, active, or closed.");
         }
         return listing;
     }
 
     private boolean canSellerEdit(String status) {
+        return "DRAFT".equals(status)
+                || "PENDING_REVIEW".equals(status)
+                || "ACTIVE".equals(status)
+                || "CLOSED".equals(status);
+    }
+
+    private boolean canSellerClose(String status) {
         return "DRAFT".equals(status) || "PENDING_REVIEW".equals(status) || "ACTIVE".equals(status);
     }
 

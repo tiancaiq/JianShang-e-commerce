@@ -86,6 +86,8 @@ export class AuthService {
       return;
     }
 
+    this.clearLegacyBrowserAuthStorage();
+
     const form = this.document.createElement('form');
     form.method = 'post';
     form.action = this.url('/api/v1/auth/logout');
@@ -194,5 +196,28 @@ export class AuthService {
       return null;
     }
     return returnUrl;
+  }
+
+  private clearLegacyBrowserAuthStorage(): void {
+    const keys = [
+      'accessToken',
+      'refreshToken',
+      'idToken',
+      'token',
+      'authToken',
+      'jwt',
+      'msb.accessToken',
+      'msb.refreshToken',
+      'msb.idToken',
+      'msb.auth',
+    ];
+    for (const storage of [this.document.defaultView?.localStorage, this.document.defaultView?.sessionStorage]) {
+      if (!storage) {
+        continue;
+      }
+      for (const key of keys) {
+        storage.removeItem(key);
+      }
+    }
   }
 }

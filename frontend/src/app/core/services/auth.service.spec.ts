@@ -186,6 +186,9 @@ describe('AuthService', () => {
     await statePromise;
 
     const submitSpy = spyOn(HTMLFormElement.prototype, 'submit').and.stub();
+    localStorage.setItem('accessToken', 'legacy-access-token');
+    sessionStorage.setItem('refreshToken', 'legacy-refresh-token');
+    localStorage.setItem('saved-filter', 'keep-user-preference');
 
     service.logout();
 
@@ -195,8 +198,12 @@ describe('AuthService', () => {
     expect(form).toBeTruthy();
     expect(form?.method).toBe('post');
     expect(form?.querySelector('input[name="_csrf"]')?.getAttribute('value')).toBe('csrf-token');
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(sessionStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('saved-filter')).toBe('keep-user-preference');
     expect(submitSpy).toHaveBeenCalled();
 
+    localStorage.removeItem('saved-filter');
     form?.remove();
   });
 });

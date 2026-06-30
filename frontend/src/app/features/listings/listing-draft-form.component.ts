@@ -9,6 +9,10 @@ import {
   listingDraftToFormState,
   ListingDraftFormState,
   MAX_LISTING_IMAGE_COUNT,
+  canSubmitListingForReview,
+  isClosableListingStatus,
+  isEditableListingStatus,
+  listingDraftRequestSnapshot,
   validateListingDraftForm,
   validateSelectedListingImage,
 } from './listing-draft-form.helpers';
@@ -198,7 +202,7 @@ interface PendingListingMedia {
         }
 
         @if (isEditMode() && listingStatus() === 'CLOSED') {
-          <div class="success-message">Listing is CLOSED and locked for edits.</div>
+          <div class="success-message">Listing is CLOSED. Save changes and submit for review to reopen it after approval.</div>
         }
 
         <div class="actions">
@@ -688,24 +692,21 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   canEditDraft(): boolean {
-    return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(this.listingStatus());
+    return isEditableListingStatus(this.listingStatus());
   }
 
   canCloseListing(): boolean {
-    return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(this.listingStatus());
+    return isClosableListingStatus(this.listingStatus());
   }
 
   canSubmitForReview(): boolean {
-    if (!this.isEditMode() || !this.canEditDraft()) {
-      return false;
-    }
-    if (this.mediaItems().length === 0 || this.pendingMediaItems().length > 0) {
-      return false;
-    }
-    if (this.listingStatus() === 'DRAFT') {
-      return true;
-    }
-    return this.hasUnsavedListingChanges();
+    return canSubmitListingForReview({
+      editMode: this.isEditMode(),
+      status: this.listingStatus(),
+      attachedImageCount: this.mediaItems().length,
+      pendingImageCount: this.pendingMediaItems().length,
+      hasUnsavedChanges: this.hasUnsavedListingChanges(),
+    });
   }
 
   submitForReview(): void {
@@ -976,7 +977,7 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   private formRequestSnapshot(): string {
-    return JSON.stringify(buildListingDraftRequest(this.formState()));
+    return listingDraftRequestSnapshot(this.formState());
   }
 
   private mediaUploadErrorMessage(error: unknown): string {

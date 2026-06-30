@@ -2,8 +2,8 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { PublicListing } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
+import { publicListing, publicListingImage } from '../../testing/listing-test-fixtures';
 import { MarketplaceHomeComponent } from './marketplace-home.component';
 
 describe('MarketplaceHomeComponent', () => {
@@ -11,44 +11,17 @@ describe('MarketplaceHomeComponent', () => {
   let component: MarketplaceHomeComponent;
   let listingService: jasmine.SpyObj<ListingService>;
 
-  const listing: PublicListing = {
-    id: '01L00000000000000000000001',
-    sellerType: 'INDIVIDUAL',
-    categoryId: '01K00000000000000000000001',
-    categorySlug: 'general',
-    categoryName: 'General',
-    title: 'Used bicycle',
-    description: 'A reliable city bike.',
-    condition: 'GOOD',
+  const listing = publicListing({
     conditionNotes: null,
-    priceAmount: 250,
-    currency: 'USD',
-    negotiable: true,
-    quantity: 1,
-    publicCity: 'Irvine',
-    publicRegion: 'CA',
-    publishedAt: '2026-06-17T12:00:00Z',
-    transactionNotice: 'Payment and delivery are arranged directly by participants.',
-    images: [{
-      id: '01I00000000000000000000001',
-      displayOrder: 0,
-      altText: 'Blue bike',
-      originalFileName: 'bike.png',
-      contentType: 'image/png',
-      sizeBytes: 1024,
-      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image.png',
-      url: '/api/v1/public/listing-media/01I00000000000000000000001',
-    }, {
-      id: '01I00000000000000000000002',
-      displayOrder: 1,
-      altText: 'Bike side view',
-      originalFileName: 'bike-side.png',
-      contentType: 'image/png',
-      sizeBytes: 2048,
-      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image-side.png',
-      url: '/api/v1/public/listing-media/01I00000000000000000000002',
-    }],
-  };
+    images: [
+      publicListingImage(),
+      publicListingImage({
+        id: '01I00000000000000000000002',
+        displayOrder: 1,
+        url: '/api/v1/public/listing-media/01I00000000000000000000002',
+      }),
+    ],
+  });
 
   beforeEach(async () => {
     listingService = jasmine.createSpyObj<ListingService>('ListingService', ['getPublicListings', 'mediaUrl']);

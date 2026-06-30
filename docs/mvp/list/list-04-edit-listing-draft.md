@@ -5,9 +5,9 @@ Status: complete.
 ## Scope
 
 LIST-04 lets an individual seller edit marketplace listings before or after
-moderation submission. Edits to pending-review or active listings move the
-listing back to draft so changed content is no longer publicly visible until it
-is resubmitted and approved again.
+moderation submission. Edits to pending-review, active, or closed listings move
+the listing back to draft so changed content is no longer publicly visible
+until it is resubmitted and approved again.
 
 This slice does not implement search, chat, inventory, order, payment, or
 business seller listing workflows.
@@ -30,9 +30,9 @@ POST  /api/v1/listings/{listingId}/close
 Rules:
 
 - Listing must exist and be owned by the current actor.
-- Listing can be edited from `DRAFT`, `PENDING_REVIEW`, or `ACTIVE`.
-- Editing a `PENDING_REVIEW` or `ACTIVE` listing resets it to `DRAFT` with
-  `NOT_SUBMITTED` moderation status and removes public visibility.
+- Listing can be edited from `DRAFT`, `PENDING_REVIEW`, `ACTIVE`, or `CLOSED`.
+- Editing a `PENDING_REVIEW`, `ACTIVE`, or `CLOSED` listing resets it to
+  `DRAFT` with `NOT_SUBMITTED` moderation status and removes public visibility.
 - Seller can close `DRAFT`, `PENDING_REVIEW`, or `ACTIVE` listings. Closed
   active listings are removed from public browse/detail.
 - Only editable draft content fields can change.

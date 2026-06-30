@@ -95,9 +95,10 @@ tokens, token type, and raw Keycloak session values.
 ### `POST /api/v1/auth/logout`
 
 Logs the browser out through Spring Security logout. The gateway invalidates
-the local session, deletes `JSESSIONID`, and uses the OIDC logout handler for
-real OIDC sessions so Keycloak can end the identity-provider session when
-supported.
+the local session, removes the server-side OAuth authorized client that holds
+access and refresh tokens, deletes `JSESSIONID`, and uses the OIDC logout
+handler for real OIDC sessions so Keycloak can end the identity-provider
+session when supported.
 
 Logout is a state-changing request and requires a valid CSRF token.
 
@@ -140,9 +141,12 @@ Credentialed CORS is restricted to configured first-party origins:
 
 ```text
 GATEWAY_CORS_ALLOWED_ORIGINS=http://localhost:4200
+GATEWAY_LOGOUT_REDIRECT_URI=http://localhost:4200/
 ```
 
 Wildcard credentialed CORS is no longer used.
+Set `GATEWAY_LOGOUT_REDIRECT_URI` to the deployed marketplace URL in VM or
+demo environments.
 
 ## Contract Reconciliation
 

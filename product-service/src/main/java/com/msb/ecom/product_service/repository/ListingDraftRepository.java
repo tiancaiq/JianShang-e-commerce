@@ -226,7 +226,7 @@ public class ListingDraftRepository {
                     version = version + 1,
                     updated_at = ?
                 where id = ?
-                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE')
+                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE', 'CLOSED')
                   and version = ?
                 """,
                 update.categoryId(),
@@ -326,7 +326,7 @@ public class ListingDraftRepository {
                     version = version + 1,
                     updated_at = ?
                 where id = ?
-                  and status in ('PENDING_REVIEW', 'ACTIVE')
+                  and status in ('PENDING_REVIEW', 'ACTIVE', 'CLOSED')
                 """,
                 Timestamp.from(now),
                 listingId);

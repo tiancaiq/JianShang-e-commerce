@@ -245,6 +245,7 @@ Completed slices:
 | LIST-06 Admin listing moderation decision | Complete | `docs/mvp/list/list-06-admin-listing-moderation-decision.md` |
 | LIST-07 Public listing detail | Complete | `docs/mvp/list/list-07-public-listing-detail.md` |
 | MEDIA-01 Object storage image delivery | Complete | `docs/mvp/list/media-01-object-storage-image-delivery.md` |
+| LIST-FE Stabilize listing frontend behavior | Complete | `docs/mvp/list/list-frontend-stabilization.md` |
 
 Recommended next search/storefront slices:
 

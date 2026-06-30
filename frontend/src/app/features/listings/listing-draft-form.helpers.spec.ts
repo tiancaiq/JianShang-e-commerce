@@ -2,7 +2,11 @@ import { ListingDraft, ListingImage, ListingMedia } from '../../core/models/list
 import {
   appendConfirmedMediaToImages,
   buildListingDraftRequest,
+  canSubmitListingForReview,
+  isClosableListingStatus,
+  isEditableListingStatus,
   listingDraftToFormState,
+  listingDraftRequestSnapshot,
   validateListingDraftForm,
   validateSelectedListingImage,
 } from './listing-draft-form.helpers';
@@ -38,6 +42,11 @@ describe('listing draft form helpers', () => {
       sku: null,
       quantity: 2,
     }));
+  });
+
+  it('creates a stable draft request snapshot for dirty-state checks', () => {
+    expect(listingDraftRequestSnapshot(baseState))
+      .toBe(JSON.stringify(buildListingDraftRequest(baseState)));
   });
 
   it('builds business draft requests with business-only fields', () => {
@@ -137,5 +146,58 @@ describe('listing draft form helpers', () => {
       { mediaId: '01M00000000000000000000001', altText: 'old.png' },
       { mediaId: '01M00000000000000000000002', altText: 'new.png' },
     ]);
+  });
+
+  it('identifies statuses that seller edit actions can still update', () => {
+    expect(isEditableListingStatus('DRAFT')).toBeTrue();
+    expect(isEditableListingStatus('PENDING_REVIEW')).toBeTrue();
+    expect(isEditableListingStatus('ACTIVE')).toBeTrue();
+    expect(isEditableListingStatus('CLOSED')).toBeTrue();
+    expect(isEditableListingStatus('SOLD')).toBeFalse();
+  });
+
+  it('identifies statuses that seller close actions can still close', () => {
+    expect(isClosableListingStatus('DRAFT')).toBeTrue();
+    expect(isClosableListingStatus('PENDING_REVIEW')).toBeTrue();
+    expect(isClosableListingStatus('ACTIVE')).toBeTrue();
+    expect(isClosableListingStatus('CLOSED')).toBeFalse();
+  });
+
+  it('allows review submit only when image and status rules are satisfied', () => {
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'DRAFT',
+      attachedImageCount: 1,
+      pendingImageCount: 0,
+      hasUnsavedChanges: false,
+    })).toBeTrue();
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'PENDING_REVIEW',
+      attachedImageCount: 1,
+      pendingImageCount: 0,
+      hasUnsavedChanges: false,
+    })).toBeFalse();
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'ACTIVE',
+      attachedImageCount: 1,
+      pendingImageCount: 0,
+      hasUnsavedChanges: true,
+    })).toBeTrue();
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'CLOSED',
+      attachedImageCount: 1,
+      pendingImageCount: 0,
+      hasUnsavedChanges: true,
+    })).toBeTrue();
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'DRAFT',
+      attachedImageCount: 1,
+      pendingImageCount: 1,
+      hasUnsavedChanges: true,
+    })).toBeFalse();
   });
 });

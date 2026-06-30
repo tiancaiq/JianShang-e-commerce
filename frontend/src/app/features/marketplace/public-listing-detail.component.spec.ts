@@ -3,8 +3,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { PublicListing } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
+import { publicListing, publicListingImage } from '../../testing/listing-test-fixtures';
 import { PublicListingDetailComponent } from './public-listing-detail.component';
 
 describe('PublicListingDetailComponent', () => {
@@ -12,44 +12,16 @@ describe('PublicListingDetailComponent', () => {
   let component: PublicListingDetailComponent;
   let listingService: jasmine.SpyObj<ListingService>;
 
-  const listing: PublicListing = {
-    id: '01L00000000000000000000001',
-    sellerType: 'INDIVIDUAL',
-    categoryId: '01K00000000000000000000001',
-    categorySlug: 'general',
-    categoryName: 'General',
-    title: 'Used bicycle',
-    description: 'A reliable city bike.',
-    condition: 'GOOD',
-    conditionNotes: 'Small scratch on frame.',
-    priceAmount: 250,
-    currency: 'USD',
-    negotiable: true,
-    quantity: 1,
-    publicCity: 'Irvine',
-    publicRegion: 'CA',
-    publishedAt: '2026-06-17T12:00:00Z',
-    transactionNotice: 'Payment and delivery are arranged directly by participants.',
-    images: [{
-      id: '01I00000000000000000000001',
-      displayOrder: 0,
-      altText: 'Blue bike',
-      originalFileName: 'bike.png',
-      contentType: 'image/png',
-      sizeBytes: 1024,
-      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image.png',
-      url: '/api/v1/public/listing-media/01I00000000000000000000001',
-    }, {
-      id: '01I00000000000000000000002',
-      displayOrder: 1,
-      altText: 'Bike side view',
-      originalFileName: 'bike-side.png',
-      contentType: 'image/png',
-      sizeBytes: 2048,
-      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image-side.png',
-      url: '/api/v1/public/listing-media/01I00000000000000000000002',
-    }],
-  };
+  const listing = publicListing({
+    images: [
+      publicListingImage(),
+      publicListingImage({
+        id: '01I00000000000000000000002',
+        displayOrder: 1,
+        url: '/api/v1/public/listing-media/01I00000000000000000000002',
+      }),
+    ],
+  });
 
   beforeEach(async () => {
     listingService = jasmine.createSpyObj<ListingService>('ListingService', ['getPublicListing', 'mediaUrl']);
@@ -79,32 +51,6 @@ describe('PublicListingDetailComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Individual seller');
     expect(fixture.nativeElement.textContent).toContain('Payment and delivery are arranged directly');
     expect(fixture.nativeElement.querySelector('img')?.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000001');
-  });
-
-  it('changes the primary detail image from the dark next arrow', () => {
-    fixture.detectChanges();
-
-    const nextButton = fixture.nativeElement.querySelector('.primary-image .image-arrow.next') as HTMLButtonElement;
-    nextButton.click();
-    fixture.detectChanges();
-
-    const primaryImage = fixture.nativeElement.querySelector('.primary-image img') as HTMLImageElement;
-    expect(primaryImage.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000002');
-  });
-
-  it('auto-advances the primary detail image every five seconds', () => {
-    jasmine.clock().install();
-    try {
-      fixture.detectChanges();
-
-      jasmine.clock().tick(5000);
-      fixture.detectChanges();
-
-      const primaryImage = fixture.nativeElement.querySelector('.primary-image img') as HTMLImageElement;
-      expect(primaryImage.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000002');
-    } finally {
-      jasmine.clock().uninstall();
-    }
   });
 
   it('shows unavailable state when public listing cannot be loaded', () => {

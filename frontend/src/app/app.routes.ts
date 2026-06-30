@@ -35,7 +35,7 @@ export const routes: Routes = [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },
-  { path: 'dashboard', redirectTo: 'seller/dashboard', pathMatch: 'full' },
+  { path: 'dashboard', redirectTo: '', pathMatch: 'full' },
   { path: 'listings/new', redirectTo: 'account/listings/new', pathMatch: 'full' },
   { path: 'business/apply', redirectTo: 'seller/business/apply', pathMatch: 'full' },
   { path: 'profile', redirectTo: 'account/profile', pathMatch: 'full' },

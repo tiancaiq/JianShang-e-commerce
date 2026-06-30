@@ -1806,6 +1806,29 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void sellerCanEditClosedListingBackToDraftForResubmission() throws Exception {
+        String listingId = createApprovedIndividualListing();
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/close", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("CLOSED")))
+                .andExpect(jsonPath("$.version", equalTo(3)));
+
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "3")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.quantity", equalTo(2)))
+                .andExpect(jsonPath("$.version", equalTo(4)));
+    }
+
+    @Test
     void guestCanReadApprovedPublicListingImageThroughAppEndpoint() throws Exception {
         String listingId = createApprovedIndividualListing();
         String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))

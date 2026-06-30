@@ -100,6 +100,10 @@ describe('app routes', () => {
 
   it('keeps compatibility redirects for old console paths', () => {
     expect(routes).toContain(jasmine.objectContaining({
+      path: 'dashboard',
+      redirectTo: '',
+    }));
+    expect(routes).toContain(jasmine.objectContaining({
       path: 'listings/new',
       redirectTo: 'account/listings/new',
     }));

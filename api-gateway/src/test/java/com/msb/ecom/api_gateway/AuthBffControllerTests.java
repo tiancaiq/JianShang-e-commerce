@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -15,6 +16,8 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -30,6 +33,9 @@ class AuthBffControllerTests {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
+
+    @MockitoBean
+    private OAuth2AuthorizedClientService authorizedClientService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -156,5 +162,7 @@ class AuthBffControllerTests {
                 .andExpect(status().is3xxRedirection())
                 .andExpect(header().string("Location", "http://localhost:4200/"))
                 .andExpect(header().string("Set-Cookie", containsString("JSESSIONID=;")));
+
+        verify(authorizedClientService).removeAuthorizedClient(anyString(), anyString());
     }
 }

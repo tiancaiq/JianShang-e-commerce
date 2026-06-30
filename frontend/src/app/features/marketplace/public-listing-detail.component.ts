@@ -1,13 +1,14 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { PublicListing, PublicListingImage } from '../../core/models/listing.model';
+import { PublicListing } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
+import { ListingImageGalleryComponent } from '../../shared/components/ui/listing-image-gallery.component';
 
 @Component({
   selector: 'app-public-listing-detail',
   standalone: true,
-  imports: [DecimalPipe, RouterLink],
+  imports: [DecimalPipe, ListingImageGalleryComponent, RouterLink],
   template: `
     <section class="listing-detail">
       @if (loading()) {
@@ -27,30 +28,7 @@ import { ListingService } from '../../core/services/listing.service';
 
         <div class="detail-grid">
           <section class="gallery" aria-label="Listing images">
-            @if (listing()?.images?.length) {
-              <figure class="primary-image">
-                <img [src]="imageUrl(selectedImage())" [alt]="selectedImage()?.altText || listing()?.title || 'Listing image'" />
-                @if (hasMultipleImages()) {
-                  <button type="button" class="image-arrow previous" aria-label="Previous listing image" (click)="showPreviousImage()">
-                    ‹
-                  </button>
-                  <button type="button" class="image-arrow next" aria-label="Next listing image" (click)="showNextImage()">
-                    ›
-                  </button>
-                }
-              </figure>
-              @if ((listing()?.images?.length || 0) > 1) {
-                <div class="thumb-grid">
-                  @for (image of listing()?.images; track image.id; let index = $index) {
-                    <button type="button" [class.active]="selectedImageIndex() === index" (click)="selectImage(index)">
-                      <img [src]="imageUrl(image)" [alt]="image.altText || image.originalFileName || listing()?.title || 'Listing image'" />
-                    </button>
-                  }
-                </div>
-              }
-            } @else {
-              <div class="image-placeholder">No public images</div>
-            }
+            <app-listing-image-gallery [images]="listing()?.images || []" [fallbackAlt]="listing()?.title || 'Listing image'" />
           </section>
 
           <article class="purchase-panel">
@@ -152,88 +130,6 @@ import { ListingService } from '../../core/services/listing.service';
       flex-direction: column;
       gap: 0.75rem;
       padding: 0.75rem;
-    }
-
-    figure {
-      margin: 0;
-    }
-
-    .primary-image,
-    .image-placeholder {
-      position: relative;
-      display: grid;
-      place-items: center;
-      min-height: 520px;
-      overflow: hidden;
-      border-radius: 8px;
-      background:
-        linear-gradient(135deg, rgba(255, 226, 240, 0.92), rgba(239, 232, 255, 0.92));
-    }
-
-    .primary-image img,
-    .thumb-grid img {
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: cover;
-    }
-
-    .image-arrow {
-      position: absolute;
-      top: 50%;
-      z-index: 2;
-      width: 42px;
-      height: 52px;
-      transform: translateY(-50%);
-      border: 0;
-      border-radius: 8px;
-      background: rgba(35, 22, 43, 0.78);
-      color: #fff;
-      cursor: pointer;
-      font-size: 2rem;
-      font-weight: 900;
-      line-height: 1;
-    }
-
-    .image-arrow.previous {
-      left: 0.75rem;
-    }
-
-    .image-arrow.next {
-      right: 0.75rem;
-    }
-
-    .image-arrow:hover,
-    .image-arrow:focus-visible {
-      background: rgba(35, 22, 43, 0.92);
-      outline: 2px solid rgba(255, 255, 255, 0.8);
-      outline-offset: 2px;
-    }
-
-    .thumb-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.75rem;
-    }
-
-    .thumb-grid button {
-      aspect-ratio: 1 / 1;
-      overflow: hidden;
-      border-radius: 8px;
-      border: 2px solid transparent;
-      padding: 0;
-      background: linear-gradient(135deg, #ffe5f0, #efe8ff);
-      cursor: pointer;
-    }
-
-    .thumb-grid button.active {
-      border-color: var(--market-accent);
-      box-shadow: 0 0 0 3px rgba(255, 126, 179, 0.2);
-    }
-
-    .image-placeholder {
-      color: var(--market-muted);
-      font-weight: 850;
     }
 
     .purchase-panel {
@@ -401,15 +297,10 @@ import { ListingService } from '../../core/services/listing.service';
         position: static;
       }
 
-      .primary-image,
-      .image-placeholder {
-        min-height: 360px;
-      }
     }
 
     @media (max-width: 640px) {
-      .facts,
-      .thumb-grid {
+      .facts {
         grid-template-columns: 1fr;
       }
 
@@ -419,22 +310,16 @@ import { ListingService } from '../../core/services/listing.service';
         flex-direction: column;
       }
 
-      .primary-image,
-      .image-placeholder {
-        min-height: 260px;
-      }
     }
   `],
 })
-export class PublicListingDetailComponent implements OnInit, OnDestroy {
+export class PublicListingDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly listingService = inject(ListingService);
-  private carouselTimer: ReturnType<typeof setInterval> | null = null;
 
   listing = signal<PublicListing | null>(null);
   loading = signal(false);
   errorMsg = signal('');
-  selectedImageIndex = signal(0);
 
   ngOnInit(): void {
     const listingId = this.route.snapshot.paramMap.get('listingId') || '';
@@ -447,8 +332,6 @@ export class PublicListingDetailComponent implements OnInit, OnDestroy {
     this.listingService.getPublicListing(listingId).subscribe({
       next: listing => {
         this.listing.set(listing);
-        this.selectedImageIndex.set(0);
-        this.startImageCarousel();
         this.loading.set(false);
       },
       error: () => {
@@ -456,10 +339,6 @@ export class PublicListingDetailComponent implements OnInit, OnDestroy {
         this.errorMsg.set('This listing is not available.');
       },
     });
-  }
-
-  ngOnDestroy(): void {
-    this.stopImageCarousel();
   }
 
   conditionLabel(condition: string): string {
@@ -484,48 +363,4 @@ export class PublicListingDetailComponent implements OnInit, OnDestroy {
       || 'Payment and delivery are arranged directly between buyer and seller. The platform does not process or verify off-platform payment.';
   }
 
-  imageUrl(image: PublicListingImage | undefined): string {
-    return this.listingService.mediaUrl(image?.url || image?.uploadUrl);
-  }
-
-  selectedImage(): PublicListingImage | undefined {
-    const images = this.listing()?.images || [];
-    return images[this.selectedImageIndex()] || images[0];
-  }
-
-  selectImage(index: number): void {
-    this.selectedImageIndex.set(index);
-  }
-
-  hasMultipleImages(): boolean {
-    return (this.listing()?.images.length || 0) > 1;
-  }
-
-  showPreviousImage(): void {
-    this.shiftSelectedImage(-1);
-  }
-
-  showNextImage(): void {
-    this.shiftSelectedImage(1);
-  }
-
-  private startImageCarousel(): void {
-    this.stopImageCarousel();
-    this.carouselTimer = setInterval(() => this.shiftSelectedImage(1), 5000);
-  }
-
-  private stopImageCarousel(): void {
-    if (this.carouselTimer) {
-      clearInterval(this.carouselTimer);
-      this.carouselTimer = null;
-    }
-  }
-
-  private shiftSelectedImage(direction: 1 | -1): void {
-    const images = this.listing()?.images || [];
-    if (images.length < 2) {
-      return;
-    }
-    this.selectedImageIndex.set((this.selectedImageIndex() + direction + images.length) % images.length);
-  }
 }

@@ -2,9 +2,10 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { Category, ListingDraft, ListingImage, ListingMedia } from '../../core/models/listing.model';
+import { Category, ListingMedia } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { listingDraft, listingImage } from '../../testing/listing-test-fixtures';
 import { ListingDraftFormComponent } from './listing-draft-form.component';
 
 describe('ListingDraftFormComponent', () => {
@@ -23,29 +24,11 @@ describe('ListingDraftFormComponent', () => {
     attributes: [],
   };
 
-  const draft: ListingDraft = {
-    id: '01L00000000000000000000001',
-    sellerType: 'INDIVIDUAL',
+  const draft = listingDraft({
     individualSellerUserId: '01U00000000000000000000001',
-    businessId: null,
     categoryId: category.id,
-    title: 'Used bicycle',
-    description: 'A reliable city bike.',
-    condition: 'GOOD',
     conditionNotes: null,
-    priceAmount: 250,
-    currency: 'USD',
-    negotiable: true,
-    sku: null,
-    quantity: 1,
-    publicCity: 'Irvine',
-    publicRegion: 'CA',
-    status: 'DRAFT',
-    moderationStatus: 'NOT_SUBMITTED',
-    version: 0,
-    createdAt: '2026-06-16T12:00:00Z',
-    updatedAt: '2026-06-16T12:00:00Z',
-  };
+  });
 
   const media: ListingMedia = {
     id: '01M00000000000000000000001',
@@ -68,25 +51,13 @@ describe('ListingDraftFormComponent', () => {
     updatedAt: '2026-06-16T12:01:00Z',
   };
 
-  const image: ListingImage = {
-    id: '01I00000000000000000000001',
+  const image = listingImage({
     listingId: draft.id,
     mediaObjectId: media.id,
-    displayOrder: 0,
     altText: 'bike.png',
-    moderationStatus: 'NOT_SUBMITTED',
-    originalFileName: 'bike.png',
-    contentType: 'image/png',
-    sizeBytes: 1024,
-    uploadStatus: 'UPLOADED',
-    objectBucket: 'listing-media-local',
     objectKey: media.objectKey,
     uploadUrl: media.uploadUrl,
-    url: '/api/v1/listings/01L00000000000000000000001/media/01M00000000000000000000001/content',
-    version: 0,
-    createdAt: '2026-06-16T12:02:00Z',
-    updatedAt: '2026-06-16T12:02:00Z',
-  };
+  });
 
   beforeEach(async () => {
     if (!URL.createObjectURL) {
@@ -420,6 +391,37 @@ describe('ListingDraftFormComponent', () => {
     component.description = 'Updated description.';
 
     expect(component.canSubmitForReview()).toBeTrue();
+  });
+
+  it('allows closed listings to be edited and resubmitted without showing another close action', () => {
+    listingService.updateDraft.and.returnValue(of({ ...draft, status: 'DRAFT', version: 4, images: [image] }));
+    fixture.detectChanges();
+    fillCommonFields();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = 3;
+    component.isEditMode.set(true);
+    component.listingStatus.set('CLOSED');
+    component.mediaItems.set([image]);
+    (component as unknown as { rememberCurrentFormSnapshot: () => void }).rememberCurrentFormSnapshot();
+    component.title = 'Reopened bicycle';
+    fixture.detectChanges();
+
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>);
+    const closeButton = buttons.find(button => button.textContent?.includes('Close listing'));
+    const submitButton = buttons.find(button => button.textContent?.includes('Submit for review'));
+
+    expect(component.canEditDraft()).toBeTrue();
+    expect(component.canCloseListing()).toBeFalse();
+    expect(component.canSubmitForReview()).toBeTrue();
+    expect(closeButton).toBeUndefined();
+    expect(submitButton?.disabled).toBeFalse();
+
+    component.submitForReview();
+
+    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(draft.id, 3, jasmine.objectContaining({
+      title: 'Reopened bicycle',
+    }));
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 4);
   });
 
   function fillCommonFields(): void {

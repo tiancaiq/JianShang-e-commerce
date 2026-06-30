@@ -34,6 +34,14 @@ export interface ListingDraftValidationResult {
   message: string;
 }
 
+export interface ListingSubmitEligibilityInput {
+  editMode: boolean;
+  status: string;
+  attachedImageCount: number;
+  pendingImageCount: number;
+  hasUnsavedChanges: boolean;
+}
+
 // Validates draft form rules before the component sends a create/update request.
 export function validateListingDraftForm(state: ListingDraftFormState): ListingDraftValidationResult {
   if (!state.categoryId) {
@@ -91,6 +99,10 @@ export function buildListingDraftRequest(state: ListingDraftFormState): CreateLi
   };
 }
 
+export function listingDraftRequestSnapshot(state: ListingDraftFormState): string {
+  return JSON.stringify(buildListingDraftRequest(state));
+}
+
 // Converts an API draft into the editable form state shown by the component.
 export function listingDraftToFormState(listing: ListingDraft): ListingDraftFormState {
   return {
@@ -134,6 +146,27 @@ export function appendConfirmedMediaToImages(currentImages: ListingImage[], medi
       altText: media.originalFileName,
     },
   ];
+}
+
+export function isEditableListingStatus(status: string): boolean {
+  return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE', 'CLOSED'].includes(status);
+}
+
+export function isClosableListingStatus(status: string): boolean {
+  return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(status);
+}
+
+export function canSubmitListingForReview(input: ListingSubmitEligibilityInput): boolean {
+  if (!input.editMode || !isEditableListingStatus(input.status)) {
+    return false;
+  }
+  if (input.attachedImageCount === 0 || input.pendingImageCount > 0) {
+    return false;
+  }
+  if (input.status === 'DRAFT') {
+    return true;
+  }
+  return input.hasUnsavedChanges;
 }
 
 function invalid(message: string): ListingDraftValidationResult {
