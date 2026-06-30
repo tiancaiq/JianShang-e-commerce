@@ -44,7 +44,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.net.URI;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -363,21 +362,21 @@ public class ListingService {
     }
 
     @Transactional(readOnly = true)
-    public URI publicListingMediaReadUri(String imageId) {
+    public ListingMediaContent publicListingMediaContent(String imageId) {
         ListingMediaResponse media = listingMediaRepository.findPublicImageMediaByImageId(normalizedRequiredId("Image ID", imageId))
                 .orElseThrow(ListingMediaNotFoundException::new);
-        return listingMediaStorage.createReadUri(media.objectKey());
+        return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
     }
 
     @Transactional(readOnly = true)
-    public URI ownedListingMediaReadUri(String listingId, String mediaId) {
+    public ListingMediaContent ownedListingMediaContent(String listingId, String mediaId) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
         ListingMediaResponse media = listingMediaRepository.findMediaById(listing.id(), normalizedRequiredId("Media ID", mediaId))
                 .orElseThrow(ListingMediaNotFoundException::new);
         if (!"UPLOADED".equals(media.uploadStatus())) {
             throw new ListingMediaNotFoundException();
         }
-        return listingMediaStorage.createReadUri(media.objectKey());
+        return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
     }
 
     @Transactional

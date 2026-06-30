@@ -13,10 +13,12 @@ import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
+import com.msb.ecom.product_service.service.ListingMediaContent;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -67,10 +69,11 @@ public class ListingController {
     }
 
     @GetMapping("/public/listing-media/{imageId}")
-    public ResponseEntity<Void> publicListingMedia(@PathVariable String imageId) {
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .location(listingService.publicListingMediaReadUri(imageId))
-                .build();
+    public ResponseEntity<byte[]> publicListingMedia(@PathVariable String imageId) {
+        ListingMediaContent content = listingService.publicListingMediaContent(imageId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(content.contentType()))
+                .body(content.bytes());
     }
 
     @GetMapping("/users/me/listings")
@@ -148,12 +151,13 @@ public class ListingController {
     }
 
     @GetMapping("/listings/{listingId}/media/{mediaId}/content")
-    public ResponseEntity<Void> ownedListingMedia(
+    public ResponseEntity<byte[]> ownedListingMedia(
             @PathVariable String listingId,
             @PathVariable String mediaId) {
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .location(listingService.ownedListingMediaReadUri(listingId, mediaId))
-                .build();
+        ListingMediaContent content = listingService.ownedListingMediaContent(listingId, mediaId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(content.contentType()))
+                .body(content.bytes());
     }
 
     @PutMapping("/listings/{listingId}/images")

@@ -13,8 +13,6 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
-import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -118,17 +116,12 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
     }
 
     @Override
-    public URI createReadUri(String objectKey) {
+    public byte[] readObject(String objectKey) {
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
                 .build();
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(signedUrlTtl)
-                .getObjectRequest(getObjectRequest)
-                .build();
-        PresignedGetObjectRequest signedRequest = presigner.presignGetObject(presignRequest);
-        return URI.create(signedRequest.url().toString());
+        return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
     }
 
     private String required(String field, String value) {

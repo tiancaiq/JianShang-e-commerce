@@ -1,7 +1,5 @@
 package com.msb.ecom.product_service.storage;
 
-import java.net.URI;
-
 public class LocalDemoListingMediaStorage implements ListingMediaStorage {
 
     private static final String BUCKET = "listing-media-local";
@@ -27,8 +25,8 @@ public class LocalDemoListingMediaStorage implements ListingMediaStorage {
     }
 
     @Override
-    public URI createReadUri(String objectKey) {
-        return URI.create(localUri(objectKey));
+    public byte[] readObject(String objectKey) {
+        return new byte[0];
     }
 
     private String localUri(String objectKey) {

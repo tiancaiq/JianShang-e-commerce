@@ -21,7 +21,6 @@ import org.testcontainers.containers.MySQLContainer;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import java.net.URI;
 
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -38,7 +37,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,8 +82,8 @@ class ListingDraftApiTests {
                         invocation.getArgument(0),
                         "PUT",
                         "https://storage.example.test/" + invocation.getArgument(0, String.class)));
-        when(listingMediaStorage.createReadUri(anyString()))
-                .thenReturn(URI.create("https://storage.example.test/signed-read"));
+        when(listingMediaStorage.readObject(anyString()))
+                .thenReturn(new byte[]{1, 2, 3});
     }
 
     @Test
@@ -842,7 +841,7 @@ class ListingDraftApiTests {
     }
 
     @Test
-    void guestCanReadApprovedPublicListingImageThroughSignedRedirect() throws Exception {
+    void guestCanReadApprovedPublicListingImageThroughAppEndpoint() throws Exception {
         String listingId = createApprovedIndividualListing();
         String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
                 .andExpect(status().isOk())
@@ -852,8 +851,9 @@ class ListingDraftApiTests {
         String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
 
         mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
-                .andExpect(status().isFound())
-                .andExpect(header().string("Location", equalTo("https://storage.example.test/signed-read")));
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.IMAGE_PNG))
+                .andExpect(content().bytes(new byte[]{1, 2, 3}));
     }
 
     @Test
@@ -873,7 +873,7 @@ class ListingDraftApiTests {
     }
 
     @Test
-    void sellerCanPreviewOwnedDraftImageThroughSignedRedirect() throws Exception {
+    void sellerCanPreviewOwnedDraftImageThroughAppEndpoint() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
                         USER_ID, "Irvine", "CA", "ACTIVE"));
@@ -882,8 +882,9 @@ class ListingDraftApiTests {
 
         mockMvc.perform(get("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
-                .andExpect(status().isFound())
-                .andExpect(header().string("Location", equalTo("https://storage.example.test/signed-read")));
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.IMAGE_PNG))
+                .andExpect(content().bytes(new byte[]{1, 2, 3}));
     }
 
     @Test

@@ -1,7 +1,5 @@
 package com.msb.ecom.product_service.storage;
 
-import java.net.URI;
-
 public interface ListingMediaStorage {
 
     String bucket();
@@ -12,5 +10,5 @@ public interface ListingMediaStorage {
 
     void verifyUploaded(String objectKey, String expectedContentType, long expectedSizeBytes);
 
-    URI createReadUri(String objectKey);
+    byte[] readObject(String objectKey);
 }
