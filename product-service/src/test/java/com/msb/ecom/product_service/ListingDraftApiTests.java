@@ -24,6 +24,7 @@ import java.util.List;
 import java.net.URI;
 
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
@@ -210,7 +211,16 @@ class ListingDraftApiTests {
                 .getResponse()
                 .getContentAsString();
 
-        String mediaId = objectMapper.readTree(uploadResponse).get("id").asText();
+        JsonNode upload = objectMapper.readTree(uploadResponse);
+        String mediaId = upload.get("id").asText();
+        org.assertj.core.api.Assertions.assertThat(upload.get("uploadUrl").asText())
+                .isEqualTo("/api/v1/listings/" + listingId + "/media/" + mediaId + "/content");
+
+        mockMvc.perform(put("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .contentType(MediaType.IMAGE_PNG)
+                        .content(new byte[1024]))
+                .andExpect(status().isNoContent());
 
         mockMvc.perform(post("/api/v1/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
@@ -226,6 +236,10 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.uploadStatus", equalTo("UPLOADED")))
                 .andExpect(jsonPath("$.version", equalTo(1)));
 
+        verify(listingMediaStorage).uploadObject(
+                eq("listings/" + listingId + "/" + mediaId + "/bike.png"),
+                eq("image/png"),
+                argThat(bytes -> bytes.length == 1024));
         verify(listingMediaStorage).verifyUploaded(
                 "listings/" + listingId + "/" + mediaId + "/bike.png",
                 "image/png",
@@ -322,6 +336,26 @@ class ListingDraftApiTests {
                                   "sizeBytes": 1024
                                 }
                                 """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
+    void sellerCannotUploadMediaBytesForAnotherSellersDraft() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createIndividualDraft();
+        String mediaId = createPendingMedia(listingId, "bike.png");
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        "01U00000000000000000000099", "Irvine", "CA", "ACTIVE"));
+
+        mockMvc.perform(put("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-token")))
+                        .contentType(MediaType.IMAGE_PNG)
+                        .content(new byte[1024]))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
     }

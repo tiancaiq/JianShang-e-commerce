@@ -8,6 +8,8 @@ public interface ListingMediaStorage {
 
     StorageUploadTarget createUploadTarget(String objectKey, String contentType, long sizeBytes);
 
+    void uploadObject(String objectKey, String contentType, byte[] bytes);
+
     void verifyUploaded(String objectKey, String expectedContentType, long expectedSizeBytes);
 
     URI createReadUri(String objectKey);

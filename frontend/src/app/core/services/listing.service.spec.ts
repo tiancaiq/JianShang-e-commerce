@@ -56,8 +56,8 @@ describe('ListingService', () => {
     checksumSha256: null,
     uploadStatus: 'PENDING_UPLOAD',
     moderationStatus: 'NOT_SUBMITTED',
-    uploadMethod: 'LOCAL_DEMO',
-    uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/01M00000000000000000000001/bike.png',
+    uploadMethod: 'PUT',
+    uploadUrl: '/api/v1/listings/01L00000000000000000000001/media/01M00000000000000000000001/content',
     version: 0,
     createdAt: '2026-06-16T12:01:00Z',
     updatedAt: '2026-06-16T12:01:00Z',
@@ -309,7 +309,7 @@ describe('ListingService', () => {
     request.flush(confirmed);
   });
 
-  it('uploads listing media bytes directly to storage without gateway credentials', () => {
+  it('uploads listing media bytes through the gateway when the backend returns an app URL', () => {
     const file = new File(['x'], 'bike.png', { type: 'image/png' });
 
     service.uploadMediaFile(media.uploadUrl, file).subscribe(response => {
@@ -317,6 +317,22 @@ describe('ListingService', () => {
     });
 
     const request = httpMock.expectOne(media.uploadUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.get('Content-Type')).toBe('image/png');
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush(null);
+  });
+
+  it('uploads listing media bytes directly to external storage without gateway credentials', () => {
+    const file = new File(['x'], 'bike.png', { type: 'image/png' });
+    const uploadUrl = 'https://storage.example.test/listings/bike.png';
+
+    service.uploadMediaFile(uploadUrl, file).subscribe(response => {
+      expect(response).toBeNull();
+    });
+
+    const request = httpMock.expectOne(uploadUrl);
     expect(request.request.method).toBe('PUT');
     expect(request.request.withCredentials).toBeFalse();
     expect(request.request.headers.get('Content-Type')).toBe('image/png');

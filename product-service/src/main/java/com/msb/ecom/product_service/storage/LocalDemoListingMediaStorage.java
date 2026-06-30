@@ -17,6 +17,11 @@ public class LocalDemoListingMediaStorage implements ListingMediaStorage {
     }
 
     @Override
+    public void uploadObject(String objectKey, String contentType, byte[] bytes) {
+        // Local demo mode keeps media metadata-only so offline development has no storage dependency.
+    }
+
+    @Override
     public void verifyUploaded(String objectKey, String expectedContentType, long expectedSizeBytes) {
         // Local demo mode preserves older metadata-only behavior for offline development.
     }

@@ -15,6 +15,7 @@ import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -132,6 +133,18 @@ public class ListingController {
             @PathVariable String mediaId,
             @Valid @RequestBody ListingMediaConfirmRequest request) {
         return listingService.confirmMediaUpload(listingId, mediaId, request);
+    }
+
+    @PutMapping(
+            value = "/listings/{listingId}/media/{mediaId}/content",
+            consumes = {"image/jpeg", "image/png", "image/webp"})
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void uploadMediaContent(
+            @PathVariable String listingId,
+            @PathVariable String mediaId,
+            @RequestHeader(HttpHeaders.CONTENT_TYPE) String contentType,
+            @RequestBody byte[] bytes) {
+        listingService.uploadMediaContent(listingId, mediaId, contentType, bytes);
     }
 
     @GetMapping("/listings/{listingId}/media/{mediaId}/content")

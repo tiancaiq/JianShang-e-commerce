@@ -303,7 +303,29 @@ public class ListingService {
                 Instant.now()));
 
         log.info("Created listing media upload slot listingId={} mediaId={}", listing.id(), response.id());
-        return withUploadTarget(response, uploadTarget);
+        return withAppUploadTarget(response, uploadTarget);
+    }
+
+    @Transactional
+    // Stores seller-uploaded bytes through the service to avoid browser-to-storage CORS and credential exposure.
+    public void uploadMediaContent(String listingId, String mediaId, String contentType, byte[] bytes) {
+        draftListingForMedia(listingId);
+        ListingMediaResponse media = listingMediaRepository.findMediaById(listingId, normalizedRequiredId("Media ID", mediaId))
+                .orElseThrow(ListingMediaNotFoundException::new);
+        if (!"PENDING_UPLOAD".equals(media.uploadStatus())) {
+            throw new IllegalArgumentException("Media upload is not pending.");
+        }
+        String normalizedContentType = normalizedContentType(contentType);
+        if (!media.contentType().equalsIgnoreCase(normalizedContentType)) {
+            throw new IllegalArgumentException("Uploaded object content type does not match upload request.");
+        }
+        if (bytes == null || bytes.length != media.sizeBytes()) {
+            throw new IllegalArgumentException("Uploaded object size does not match upload request.");
+        }
+
+        listingMediaStorage.uploadObject(media.objectKey(), media.contentType(), bytes);
+        log.info("Stored listing media bytes listingId={} mediaId={} sizeBytes={}",
+                media.listingId(), media.id(), bytes.length);
     }
 
     @Transactional
@@ -640,6 +662,10 @@ public class ListingService {
 
     private String normalizedContentType(String value) {
         String normalized = normalizedRequiredText("Content type", value, 80).toLowerCase(Locale.ROOT);
+        int parameterStart = normalized.indexOf(';');
+        if (parameterStart >= 0) {
+            normalized = normalized.substring(0, parameterStart).trim();
+        }
         if (!ALLOWED_IMAGE_TYPES.contains(normalized)) {
             throw new IllegalArgumentException("Only JPEG, PNG, and WebP images are supported.");
         }
@@ -676,6 +702,14 @@ public class ListingService {
                 response.version(),
                 response.createdAt(),
                 response.updatedAt());
+    }
+
+    private ListingMediaResponse withAppUploadTarget(ListingMediaResponse response, StorageUploadTarget uploadTarget) {
+        return withUploadTarget(response, new StorageUploadTarget(
+                uploadTarget.bucket(),
+                uploadTarget.objectKey(),
+                "PUT",
+                "/api/v1/listings/" + response.listingId() + "/media/" + response.id() + "/content"));
     }
 
     private String normalizedChecksum(String value) {

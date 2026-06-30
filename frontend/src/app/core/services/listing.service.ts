@@ -85,9 +85,11 @@ export class ListingService {
   }
 
   uploadMediaFile(uploadUrl: string, file: File): Observable<void> {
-    return this.http.put<void>(uploadUrl, file, {
+    const usesGateway = uploadUrl.startsWith('/api/');
+    const targetUrl = usesGateway ? `${environment.apiGatewayUrl}${uploadUrl}` : uploadUrl;
+    return this.http.put<void>(targetUrl, file, {
       headers: { 'Content-Type': file.type },
-      withCredentials: false,
+      withCredentials: usesGateway,
     });
   }
 

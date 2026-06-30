@@ -11,6 +11,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
@@ -79,6 +80,16 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
                 .build();
         PresignedPutObjectRequest signedRequest = presigner.presignPutObject(presignRequest);
         return new StorageUploadTarget(bucket, objectKey, "PUT", signedRequest.url().toString());
+    }
+
+    @Override
+    public void uploadObject(String objectKey, String contentType, byte[] bytes) {
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(objectKey)
+                .contentType(contentType)
+                .build();
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(bytes));
     }
 
     @Override
