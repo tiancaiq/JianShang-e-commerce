@@ -89,12 +89,21 @@ describe('ListingDraftFormComponent', () => {
   };
 
   beforeEach(async () => {
+    if (!URL.createObjectURL) {
+      Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:listing-preview' });
+    }
+    if (!URL.revokeObjectURL) {
+      Object.defineProperty(URL, 'revokeObjectURL', { value: () => undefined });
+    }
+    spyOn(URL, 'createObjectURL').and.returnValue('blob:listing-preview');
+    spyOn(URL, 'revokeObjectURL');
     listingService = jasmine.createSpyObj<ListingService>('ListingService', [
       'getCategories',
       'createDraft',
       'getListing',
       'updateDraft',
       'submitForReview',
+      'closeListing',
       'requestMediaUpload',
       'uploadMediaFile',
       'confirmMediaUpload',
@@ -107,7 +116,7 @@ describe('ListingDraftFormComponent', () => {
 
     listingService.getCategories.and.returnValue(of([category]));
     listingService.createDraft.and.returnValue(of(draft));
-    listingService.getListing.and.returnValue(of(draft));
+    listingService.getListing.and.returnValue(of({ ...draft, images: [image] }));
     listingService.updateDraft.and.returnValue(of({ ...draft, title: 'Updated bicycle', version: 1 }));
     listingService.submitForReview.and.returnValue(of({
       ...draft,
@@ -116,6 +125,7 @@ describe('ListingDraftFormComponent', () => {
       version: 1,
       images: [image],
     }));
+    listingService.closeListing.and.returnValue(of({ ...draft, status: 'CLOSED', version: 1 }));
     listingService.requestMediaUpload.and.returnValue(of(media));
     listingService.uploadMediaFile.and.returnValue(of(undefined));
     listingService.confirmMediaUpload.and.returnValue(of({
@@ -203,13 +213,13 @@ describe('ListingDraftFormComponent', () => {
       images: [{ mediaId: media.id, altText: 'bike.png' }],
     });
     expect(component.savedId()).toBe(draft.id);
-    expect(component.selectedMediaName()).toBe('');
+    expect(component.pendingMediaItems()).toEqual([]);
     expect(component.mediaItems()[0]).toEqual(jasmine.objectContaining({
       id: image.id,
       mediaObjectId: media.id,
       uploadStatus: 'UPLOADED',
     }));
-    expect(toastService.success).toHaveBeenCalledWith('Listing draft and image saved.');
+    expect(toastService.success).toHaveBeenCalledWith('Listing draft and images saved.');
   });
 
   it('shows the selected image before the draft is saved', () => {
@@ -217,11 +227,12 @@ describe('ListingDraftFormComponent', () => {
 
     component.handleMediaSelected(fileInputEvent(new File(['x'], 'bike.png', { type: 'image/png' })));
 
-    expect(component.selectedMediaName()).toBe('bike.png');
+    expect(component.pendingMediaItems()[0].file.name).toBe('bike.png');
     expect(listingService.requestMediaUpload).not.toHaveBeenCalled();
   });
 
   it('saves a business draft with business fields', () => {
+    (router as unknown as { url: string }).url = '/seller/listings/new';
     listingService.createDraft.and.returnValue(of({
       ...draft,
       sellerType: 'BUSINESS',
@@ -295,8 +306,8 @@ describe('ListingDraftFormComponent', () => {
       mediaObjectId: media.id,
       uploadStatus: 'UPLOADED',
     }));
-    expect(component.mediaMessage()).toBe('Image attached to draft.');
-    expect(toastService.success).toHaveBeenCalledWith('Listing image saved.');
+    expect(component.mediaMessage()).toBe('Images attached to listing.');
+    expect(toastService.success).toHaveBeenCalledWith('Listing images saved.');
   });
 
   it('rejects unsupported image types before calling the API', () => {
@@ -311,6 +322,7 @@ describe('ListingDraftFormComponent', () => {
 
   it('submits an editable draft with an attached image for review', () => {
     fixture.detectChanges();
+    fillCommonFields();
     (component as unknown as { editListingId: string }).editListingId = draft.id;
     (component as unknown as { currentVersion: number }).currentVersion = draft.version;
     component.isEditMode.set(true);
@@ -320,12 +332,13 @@ describe('ListingDraftFormComponent', () => {
 
     expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, draft.version);
     expect(component.listingStatus()).toBe('PENDING_REVIEW');
-    expect(component.canEditDraft()).toBeFalse();
+    expect(component.canEditDraft()).toBeTrue();
     expect(toastService.success).toHaveBeenCalledWith('Listing submitted for review.');
   });
 
   it('requires an attached image before submitting for review', () => {
     fixture.detectChanges();
+    fillCommonFields();
     (component as unknown as { editListingId: string }).editListingId = draft.id;
     (component as unknown as { currentVersion: number }).currentVersion = draft.version;
     component.isEditMode.set(true);
@@ -337,16 +350,17 @@ describe('ListingDraftFormComponent', () => {
     expect(component.errorMsg()).toBe('Add at least one image before submitting for review.');
   });
 
-  it('keeps submit for review available for non-draft existing listings', () => {
-    listingService.submitForReview.and.returnValue(throwError(() => ({
-      error: { error: { message: 'Only draft listings can be submitted for review.' } },
-    })));
+  it('saves active listing edits before submitting for review', () => {
+    listingService.updateDraft.and.returnValue(of({ ...draft, status: 'DRAFT', version: 3, images: [image] }));
     fixture.detectChanges();
+    fillCommonFields();
     (component as unknown as { editListingId: string }).editListingId = draft.id;
     (component as unknown as { currentVersion: number }).currentVersion = 2;
     component.isEditMode.set(true);
     component.listingStatus.set('ACTIVE');
     component.mediaItems.set([image]);
+    (component as unknown as { rememberCurrentFormSnapshot: () => void }).rememberCurrentFormSnapshot();
+    component.title = 'Updated bicycle';
     fixture.detectChanges();
 
     const submitButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
@@ -357,8 +371,33 @@ describe('ListingDraftFormComponent', () => {
 
     component.submitForReview();
 
-    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 2);
-    expect(component.errorMsg()).toBe('Only draft listings can be submitted for review.');
+    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(draft.id, 2, jasmine.objectContaining({
+      sellerType: 'INDIVIDUAL',
+      title: 'Updated bicycle',
+    }));
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 3);
+    expect(component.errorMsg()).toBe('');
+  });
+
+  it('disables resubmit for pending or active listings until the seller changes something', () => {
+    fixture.detectChanges();
+    fillCommonFields();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    component.isEditMode.set(true);
+    component.listingStatus.set('PENDING_REVIEW');
+    component.mediaItems.set([image]);
+    (component as unknown as { rememberCurrentFormSnapshot: () => void }).rememberCurrentFormSnapshot();
+    fixture.detectChanges();
+
+    let submitButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.includes('Submit for review'));
+
+    expect(component.canSubmitForReview()).toBeFalse();
+    expect(submitButton?.disabled).toBeTrue();
+
+    component.description = 'Updated description.';
+
+    expect(component.canSubmitForReview()).toBeTrue();
   });
 
   function fillCommonFields(): void {
@@ -374,6 +413,8 @@ describe('ListingDraftFormComponent', () => {
     return {
       target: {
         files: {
+          0: file,
+          length: 1,
           item: () => file,
         },
         value: '',

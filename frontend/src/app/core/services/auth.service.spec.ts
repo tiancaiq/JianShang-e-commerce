@@ -98,7 +98,7 @@ describe('AuthService', () => {
     expect(service.isAuthenticated()).toBeTrue();
   });
 
-  it('redirects login to the gateway login endpoint', () => {
+  it('redirects login to the marketplace gateway login endpoint by default', () => {
     const assign = jasmine.createSpy('assign');
     const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
     const serviceWithFakeDocument = new AuthService(
@@ -109,7 +109,67 @@ describe('AuthService', () => {
 
     serviceWithFakeDocument.login();
 
-    expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login');
+    expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login?client=marketplace');
+  });
+
+  it('redirects login with selected client and safe return URL', () => {
+    const assign = jasmine.createSpy('assign');
+    const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
+    const serviceWithFakeDocument = new AuthService(
+      TestBed.inject(HttpClient),
+      'browser',
+      fakeDocument
+    );
+
+    serviceWithFakeDocument.login('seller-portal', '/seller/business/apply?draft=1');
+
+    expect(assign).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/login?client=seller-portal&returnUrl=%2Fseller%2Fbusiness%2Fapply%3Fdraft%3D1'
+    );
+  });
+
+  it('drops unsafe login return URLs', () => {
+    const assign = jasmine.createSpy('assign');
+    const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
+    const serviceWithFakeDocument = new AuthService(
+      TestBed.inject(HttpClient),
+      'browser',
+      fakeDocument
+    );
+
+    serviceWithFakeDocument.login('admin-portal', 'https://evil.example/admin');
+
+    expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login?client=admin-portal');
+  });
+
+  it('redirects registration through the gateway registration endpoint', () => {
+    const assign = jasmine.createSpy('assign');
+    const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
+    const serviceWithFakeDocument = new AuthService(
+      TestBed.inject(HttpClient),
+      'browser',
+      fakeDocument
+    );
+
+    serviceWithFakeDocument.register('marketplace', '/account/profile');
+
+    expect(assign).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/register?client=marketplace&returnUrl=%2Faccount%2Fprofile'
+    );
+  });
+
+  it('drops unsafe registration return URLs', () => {
+    const assign = jasmine.createSpy('assign');
+    const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
+    const serviceWithFakeDocument = new AuthService(
+      TestBed.inject(HttpClient),
+      'browser',
+      fakeDocument
+    );
+
+    serviceWithFakeDocument.register('marketplace', '//evil.example/account');
+
+    expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/register?client=marketplace');
   });
 
   it('posts logout through the gateway with the current CSRF parameter', async () => {

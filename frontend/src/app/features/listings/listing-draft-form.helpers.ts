@@ -9,6 +9,7 @@ import {
 } from '../../core/models/listing.model';
 
 export const MAX_LISTING_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+export const MAX_LISTING_IMAGE_COUNT = 10;
 export const ALLOWED_LISTING_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export interface ListingDraftFormState {
@@ -57,9 +58,11 @@ export function validateListingDraftForm(state: ListingDraftFormState): ListingD
     if (!state.sku.trim()) {
       return invalid('SKU is required for business listings.');
     }
-    if (state.quantity === null || Number(state.quantity) < 0) {
-      return invalid('Quantity must be zero or greater.');
+    if (state.quantity === null || Number(state.quantity) < 1) {
+      return invalid('Quantity must be at least 1.');
     }
+  } else if (state.quantity === null || Number(state.quantity) < 1) {
+    return invalid('Quantity must be at least 1.');
   }
 
   return { valid: true, message: '' };
@@ -84,7 +87,7 @@ export function buildListingDraftRequest(state: ListingDraftFormState): CreateLi
       ? { city: state.publicCity.trim() || null, region: state.publicRegion.trim() || null }
       : null,
     sku: state.sellerType === 'BUSINESS' ? state.sku.trim() : null,
-    quantity: state.sellerType === 'BUSINESS' ? Number(state.quantity) : 1,
+    quantity: Number(state.quantity),
   };
 }
 

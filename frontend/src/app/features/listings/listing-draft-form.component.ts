@@ -8,10 +8,17 @@ import {
   buildListingDraftRequest,
   listingDraftToFormState,
   ListingDraftFormState,
+  MAX_LISTING_IMAGE_COUNT,
   validateListingDraftForm,
   validateSelectedListingImage,
 } from './listing-draft-form.helpers';
 import { ListingMediaUploadError, ListingMediaUploadService } from './listing-media-upload.service';
+
+interface PendingListingMedia {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
 
 @Component({
   selector: 'app-listing-draft-form',
@@ -28,13 +35,15 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
 
       <form class="draft-form" (ngSubmit)="saveDraft()">
         <div class="form-grid">
-          <label class="field">
-            <span>Seller type</span>
-            <select name="sellerType" [(ngModel)]="sellerType" [disabled]="!canEditDraft() || saving() || isEditMode()">
-              <option value="INDIVIDUAL">Individual</option>
-              <option value="BUSINESS">Business</option>
-            </select>
-          </label>
+          @if (!marketplaceAccountMode()) {
+            <label class="field">
+              <span>Seller type</span>
+              <select name="sellerType" [(ngModel)]="sellerType" [disabled]="!canEditDraft() || saving() || isEditMode()">
+                <option value="INDIVIDUAL">Individual</option>
+                <option value="BUSINESS">Business</option>
+              </select>
+            </label>
+          }
 
           @if (sellerType === 'BUSINESS') {
             <label class="field">
@@ -45,7 +54,7 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
 
           <label class="field">
             <span>Category</span>
-            <select name="categoryId" [(ngModel)]="categoryId" [disabled]="!canEditDraft() || loadingCategories() || saving()">
+            <select name="categoryId" [(ngModel)]="categoryId" [class.invalid]="fieldInvalid('categoryId')" [disabled]="!canEditDraft() || loadingCategories() || saving()">
               <option value="">Select category</option>
               @for (category of categories(); track category.id) {
                 <option [value]="category.id">{{ category.name }}</option>
@@ -68,12 +77,12 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
 
         <label class="field">
           <span>Title</span>
-          <input name="title" [(ngModel)]="title" maxlength="160" [disabled]="!canEditDraft() || saving()" />
+          <input name="title" [(ngModel)]="title" maxlength="160" [class.invalid]="fieldInvalid('title')" [disabled]="!canEditDraft() || saving()" />
         </label>
 
         <label class="field">
           <span>Description</span>
-          <textarea name="description" [(ngModel)]="description" maxlength="5000" rows="5" [disabled]="!canEditDraft() || saving()"></textarea>
+          <textarea name="description" [(ngModel)]="description" maxlength="5000" rows="5" [class.invalid]="fieldInvalid('description')" [disabled]="!canEditDraft() || saving()"></textarea>
         </label>
 
         <label class="field">
@@ -84,25 +93,30 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
         <div class="form-grid">
           <label class="field">
             <span>Price</span>
-            <input name="price" type="number" min="0" step="0.01" [(ngModel)]="price" [disabled]="!canEditDraft() || saving()" />
+            <input name="price" type="number" min="0" step="0.01" [(ngModel)]="price" [class.invalid]="fieldInvalid('price')" [disabled]="!canEditDraft() || saving()" />
           </label>
 
           <label class="field">
             <span>Currency</span>
-            <input name="currency" [(ngModel)]="currency" maxlength="3" [disabled]="!canEditDraft() || saving()" />
+            <input name="currency" [(ngModel)]="currency" maxlength="3" [class.invalid]="fieldInvalid('currency')" [disabled]="!canEditDraft() || saving()" />
           </label>
         </div>
 
         @if (sellerType === 'INDIVIDUAL') {
           <div class="form-grid">
             <label class="field">
-              <span>Public city</span>
+              <span>City</span>
               <input name="publicCity" [(ngModel)]="publicCity" maxlength="120" [disabled]="!canEditDraft() || saving()" />
             </label>
 
             <label class="field">
-              <span>Public region</span>
+              <span>County</span>
               <input name="publicRegion" [(ngModel)]="publicRegion" maxlength="120" [disabled]="!canEditDraft() || saving()" />
+            </label>
+
+            <label class="field">
+              <span>Quantity</span>
+              <input name="quantity" type="number" min="1" step="1" [(ngModel)]="quantity" [class.invalid]="fieldInvalid('quantity')" [disabled]="!canEditDraft() || saving()" />
             </label>
           </div>
 
@@ -119,29 +133,37 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
 
             <label class="field">
               <span>Quantity</span>
-              <input name="quantity" type="number" min="0" step="1" [(ngModel)]="quantity" [disabled]="!canEditDraft() || saving()" />
+              <input name="quantity" type="number" min="1" step="1" [(ngModel)]="quantity" [class.invalid]="fieldInvalid('quantity')" [disabled]="!canEditDraft() || saving()" />
             </label>
           </div>
         }
 
         <section class="media-panel" aria-label="Listing media">
           <label class="field">
-            <span>Listing image</span>
+            <span>Listing images</span>
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
+              multiple
               [disabled]="!canEditDraft() || saving() || uploadingMedia()"
               (change)="handleMediaSelected($event)"
             />
           </label>
 
-          @if (selectedMediaName()) {
-            <div class="media-selection">
-              <span>{{ selectedMediaName() }}</span>
-              <button type="button" class="text-btn" (click)="clearSelectedMedia()" [disabled]="!canEditDraft() || saving() || uploadingMedia()">
-                Remove
-              </button>
-            </div>
+          <p class="media-hint">{{ mediaItems().length + pendingMediaItems().length }} / {{ maxImageCount }} images attached.</p>
+
+          @if (pendingMediaItems().length > 0) {
+            <ul class="media-list">
+              @for (media of pendingMediaItems(); track media.id) {
+                <li>
+                  <img [src]="media.previewUrl" [alt]="media.file.name" />
+                  <span>{{ media.file.name }}</span>
+                  <button type="button" class="text-btn" (click)="removePendingMedia(media.id)" [disabled]="saving() || uploadingMedia()">
+                    Remove
+                  </button>
+                </li>
+              }
+            </ul>
           }
 
           @if (mediaError()) {
@@ -158,7 +180,9 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
                 <li>
                   <img [src]="imageUrl(media)" [alt]="media.altText || media.originalFileName || 'Listing image'" />
                   <span>{{ media.originalFileName || media.objectKey }}</span>
-                  <strong>{{ media.displayOrder + 1 }}</strong>
+                  <button type="button" class="text-btn" (click)="removeAttachedMedia(media)" [disabled]="!canEditDraft() || saving() || uploadingMedia()">
+                    Remove
+                  </button>
                 </li>
               }
             </ul>
@@ -173,14 +197,19 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
           <div class="success-message">Draft saved: {{ savedId() }}</div>
         }
 
-        @if (isEditMode() && !canEditDraft()) {
-          <div class="success-message">Listing is {{ listingStatus() }} and locked for draft edits.</div>
+        @if (isEditMode() && listingStatus() === 'CLOSED') {
+          <div class="success-message">Listing is CLOSED and locked for edits.</div>
         }
 
         <div class="actions">
           <button type="button" class="secondary-btn" (click)="router.navigate([listingBasePath()])" [disabled]="saving() || submitting()">Cancel</button>
-          @if (isEditMode()) {
-            <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="saving() || submitting()">
+          @if (isEditMode() && canCloseListing()) {
+            <button type="button" class="danger-btn" (click)="closeListing()" [disabled]="saving() || submitting() || uploadingMedia()">
+              Close listing
+            </button>
+          }
+          @if (isEditMode() && canEditDraft()) {
+            <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="!canSubmitForReview() || saving() || submitting()">
               {{ submitting() ? 'Submitting' : 'Submit for review' }}
             </button>
           }
@@ -274,6 +303,13 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
       box-shadow: 0 0 0 3px var(--listing-accent-muted);
     }
 
+    .field input.invalid,
+    .field select.invalid,
+    .field textarea.invalid {
+      border-color: #ec4899;
+      box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15);
+    }
+
     .checkbox-row {
       display: flex;
       align-items: center;
@@ -305,6 +341,13 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
       gap: 0.75rem;
       border-top: 1px solid var(--listing-border);
       padding-top: 1rem;
+    }
+
+    .media-hint {
+      margin: 0;
+      color: var(--listing-muted);
+      font-size: 0.8125rem;
+      font-weight: 700;
     }
 
     .media-list {
@@ -339,6 +382,7 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
     }
 
     .media-list span {
+      flex: 1;
       overflow-wrap: anywhere;
       color: var(--listing-muted);
     }
@@ -387,7 +431,8 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
     }
 
     .primary-btn,
-    .secondary-btn {
+    .secondary-btn,
+    .danger-btn {
       min-height: 40px;
       padding: 0 0.875rem;
       border-radius: var(--radius-md);
@@ -407,8 +452,15 @@ import { ListingMediaUploadError, ListingMediaUploadService } from './listing-me
       color: var(--listing-muted);
     }
 
+    .danger-btn {
+      border: 1px solid rgba(244, 63, 94, 0.28);
+      background: rgba(244, 63, 94, 0.08);
+      color: var(--color-danger);
+    }
+
     .primary-btn:disabled,
-    .secondary-btn:disabled {
+    .secondary-btn:disabled,
+    .danger-btn:disabled {
       opacity: 0.55;
       cursor: not-allowed;
     }
@@ -444,10 +496,12 @@ export class ListingDraftFormComponent implements OnInit {
   mediaError = signal('');
   mediaMessage = signal('');
   mediaItems = signal<ListingImage[]>([]);
-  selectedMediaName = signal('');
-  private selectedMediaFile: File | null = null;
+  pendingMediaItems = signal<PendingListingMedia[]>([]);
+  formSubmitted = signal(false);
+  readonly maxImageCount = MAX_LISTING_IMAGE_COUNT;
   private editListingId = '';
   private currentVersion = 0;
+  private lastLoadedRequestSnapshot = '';
 
   sellerType: ListingSellerType = 'INDIVIDUAL';
   businessId = '';
@@ -462,11 +516,15 @@ export class ListingDraftFormComponent implements OnInit {
   publicRegion = '';
   negotiable = true;
   sku = '';
-  quantity: number | null = 0;
+  quantity: number | null = 1;
 
   ngOnInit(): void {
     this.editListingId = this.route.snapshot.paramMap.get('listingId') || '';
     this.isEditMode.set(Boolean(this.editListingId));
+    if (this.marketplaceAccountMode()) {
+      this.sellerType = 'INDIVIDUAL';
+      this.businessId = '';
+    }
     this.loadCategories();
     if (this.editListingId) {
       this.loadDraft(this.editListingId);
@@ -492,9 +550,10 @@ export class ListingDraftFormComponent implements OnInit {
 
   saveDraft(): void {
     if (!this.canEditDraft()) {
-      this.errorMsg.set('This listing is no longer editable as a draft.');
+      this.errorMsg.set('This listing is no longer editable.');
       return;
     }
+    this.formSubmitted.set(true);
     if (!this.validate()) {
       return;
     }
@@ -515,9 +574,11 @@ export class ListingDraftFormComponent implements OnInit {
       next: listing => {
         this.editListingId = listing.id;
         this.currentVersion = listing.version;
+        this.listingStatus.set(listing.status);
         this.savedId.set(listing.id);
-        if (this.selectedMediaFile) {
-          this.uploadMediaForListing(listing.id, this.selectedMediaFile, true);
+        this.rememberCurrentFormSnapshot();
+        if (this.pendingMediaItems().length > 0) {
+          this.uploadPendingMediaForListing(listing.id, true);
           return;
         }
 
@@ -544,53 +605,158 @@ export class ListingDraftFormComponent implements OnInit {
 
   handleMediaSelected(event: Event): void {
     if (!this.canEditDraft()) {
-      this.mediaError.set('Images can be changed only while the listing is a draft.');
+      this.mediaError.set('Images can be changed only while the listing is draft, pending review, or active.');
       return;
     }
     const input = event.target as HTMLInputElement;
-    const file = input.files?.item(0);
+    const files = Array.from(input.files || []);
     input.value = '';
 
-    if (!file) {
+    if (files.length === 0) {
       return;
     }
-    const mediaValidationError = validateSelectedListingImage(file);
-    if (mediaValidationError) {
-      this.mediaError.set(mediaValidationError);
+    const availableSlots = MAX_LISTING_IMAGE_COUNT - this.mediaItems().length - this.pendingMediaItems().length;
+    if (files.length > availableSlots) {
+      this.mediaError.set(`A listing can have up to ${MAX_LISTING_IMAGE_COUNT} images.`);
       return;
     }
 
-    this.selectedMediaFile = file;
-    this.selectedMediaName.set(file.name);
+    const accepted: PendingListingMedia[] = [];
+    for (const file of files) {
+      const mediaValidationError = validateSelectedListingImage(file);
+      if (mediaValidationError) {
+        this.mediaError.set(mediaValidationError);
+        return;
+      }
+      accepted.push({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+      });
+    }
+
+    this.pendingMediaItems.update(items => [...items, ...accepted]);
     this.mediaError.set('');
     this.mediaMessage.set('');
 
     if (this.savedId()) {
-      this.uploadMediaForListing(this.savedId(), file, false);
+      this.uploadPendingMediaForListing(this.savedId(), false);
     }
   }
 
   clearSelectedMedia(): void {
-    this.selectedMediaFile = null;
-    this.selectedMediaName.set('');
+    this.pendingMediaItems().forEach(item => URL.revokeObjectURL(item.previewUrl));
+    this.pendingMediaItems.set([]);
+  }
+
+  removePendingMedia(id: string): void {
+    const item = this.pendingMediaItems().find(media => media.id === id);
+    if (item) {
+      URL.revokeObjectURL(item.previewUrl);
+    }
+    this.pendingMediaItems.update(items => items.filter(media => media.id !== id));
+  }
+
+  removeAttachedMedia(media: ListingImage): void {
+    if (!this.savedId() || !this.canEditDraft()) {
+      return;
+    }
+
+    const nextImages = this.mediaItems()
+      .filter(item => item.id !== media.id)
+      .map(item => ({
+        mediaId: item.mediaObjectId,
+        altText: item.altText,
+      }));
+
+    this.uploadingMedia.set(true);
+    this.mediaError.set('');
+    this.listingService.updateListingImages(this.savedId(), { images: nextImages }).subscribe({
+      next: images => {
+        this.mediaItems.set(images);
+        this.mediaMessage.set('Image removed.');
+        this.uploadingMedia.set(false);
+        this.refreshDraftAfterMediaChange(this.savedId());
+      },
+      error: error => {
+        this.uploadingMedia.set(false);
+        this.mediaError.set(error.error?.error?.message || 'Image could not be removed.');
+      },
+    });
   }
 
   canEditDraft(): boolean {
-    return this.listingStatus() === 'DRAFT';
+    return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(this.listingStatus());
+  }
+
+  canCloseListing(): boolean {
+    return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(this.listingStatus());
+  }
+
+  canSubmitForReview(): boolean {
+    if (!this.isEditMode() || !this.canEditDraft()) {
+      return false;
+    }
+    if (this.mediaItems().length === 0 || this.pendingMediaItems().length > 0) {
+      return false;
+    }
+    if (this.listingStatus() === 'DRAFT') {
+      return true;
+    }
+    return this.hasUnsavedListingChanges();
   }
 
   submitForReview(): void {
     if (!this.editListingId) {
       return;
     }
+    this.formSubmitted.set(true);
+    if (!this.validate()) {
+      return;
+    }
+    if (this.pendingMediaItems().length > 0) {
+      this.errorMsg.set('Save the draft to upload selected images before submitting for review.');
+      return;
+    }
     if (this.mediaItems().length === 0) {
       this.errorMsg.set('Add at least one image before submitting for review.');
+      return;
+    }
+    if (this.listingStatus() !== 'DRAFT' && !this.hasUnsavedListingChanges()) {
+      this.errorMsg.set('Update the listing before resubmitting it for review.');
       return;
     }
 
     this.submitting.set(true);
     this.errorMsg.set('');
-    this.listingService.submitForReview(this.editListingId, this.currentVersion).subscribe({
+    if (this.listingStatus() !== 'DRAFT') {
+      this.saveEditableListingBeforeSubmit();
+      return;
+    }
+
+    this.submitSavedDraft(this.currentVersion);
+  }
+
+  private saveEditableListingBeforeSubmit(): void {
+    const request = buildListingDraftRequest(this.formState());
+    this.listingService.updateDraft(this.editListingId, this.currentVersion, request).subscribe({
+      next: listing => {
+        this.populateFromDraft(listing);
+        this.submitSavedDraft(listing.version);
+      },
+      error: error => {
+        this.submitting.set(false);
+        if (error.status === 409) {
+          this.errorMsg.set('This listing changed elsewhere. Reload it before submitting.');
+          return;
+        }
+        this.errorMsg.set(error.error?.error?.message || 'Listing could not be saved before review.');
+      },
+    });
+  }
+
+  private submitSavedDraft(version: number): void {
+    this.listingService.submitForReview(this.editListingId, version).subscribe({
       next: listing => {
         this.submitting.set(false);
         this.populateFromDraft(listing);
@@ -607,12 +773,42 @@ export class ListingDraftFormComponent implements OnInit {
     });
   }
 
-  private uploadMediaForListing(listingId: string, file: File, draftJustCreated: boolean): void {
+  closeListing(): void {
+    if (!this.editListingId || !this.canCloseListing()) {
+      return;
+    }
+
+    this.submitting.set(true);
+    this.errorMsg.set('');
+    this.listingService.closeListing(this.editListingId, this.currentVersion).subscribe({
+      next: listing => {
+        this.submitting.set(false);
+        this.populateFromDraft(listing);
+        this.toastService.success('Listing closed.');
+      },
+      error: error => {
+        this.submitting.set(false);
+        if (error.status === 409) {
+          this.errorMsg.set('This listing changed elsewhere. Reload it before closing.');
+          return;
+        }
+        this.errorMsg.set(error.error?.error?.message || 'Listing could not be closed.');
+      },
+    });
+  }
+
+  private uploadPendingMediaForListing(listingId: string, draftJustCreated: boolean): void {
+    const pendingItems = this.pendingMediaItems();
+    if (pendingItems.length === 0) {
+      this.saving.set(false);
+      return;
+    }
+
     this.uploadingMedia.set(true);
     this.mediaError.set('');
     this.mediaMessage.set('');
 
-    this.mediaUploadService.uploadAndAttach(listingId, file, this.mediaItems()).subscribe({
+    this.mediaUploadService.uploadAndAttachMany(listingId, pendingItems.map(item => item.file), this.mediaItems()).subscribe({
       next: attachedImages => this.finishMediaUpload(listingId, attachedImages, draftJustCreated),
       error: error => {
         this.saving.set(false);
@@ -626,9 +822,10 @@ export class ListingDraftFormComponent implements OnInit {
     this.saving.set(false);
     this.uploadingMedia.set(false);
     this.mediaItems.set(attachedImages);
-    this.mediaMessage.set('Image attached to draft.');
+    this.mediaMessage.set('Images attached to listing.');
     this.clearSelectedMedia();
-    this.toastService.success(draftJustCreated ? 'Listing draft and image saved.' : 'Listing image saved.');
+    this.refreshDraftAfterMediaChange(listingId);
+    this.toastService.success(draftJustCreated ? 'Listing draft and images saved.' : 'Listing images saved.');
     if (draftJustCreated && !this.isEditMode()) {
       this.router.navigate(this.editListingPath(listingId));
     }
@@ -636,6 +833,35 @@ export class ListingDraftFormComponent implements OnInit {
 
   imageUrl(image: ListingImage): string {
     return this.listingService.mediaUrl(image.url || image.uploadUrl);
+  }
+
+  fieldInvalid(field: string): boolean {
+    if (!this.formSubmitted()) {
+      return false;
+    }
+    if (field === 'categoryId') {
+      return !this.categoryId;
+    }
+    if (field === 'title') {
+      return !this.title.trim();
+    }
+    if (field === 'description') {
+      return !this.description.trim();
+    }
+    if (field === 'price') {
+      return this.price === null || Number(this.price) < 0;
+    }
+    if (field === 'currency') {
+      return !/^[A-Za-z]{3}$/.test(this.currency.trim());
+    }
+    if (field === 'quantity') {
+      return this.quantity === null || Number(this.quantity) < 1;
+    }
+    return false;
+  }
+
+  marketplaceAccountMode(): boolean {
+    return this.router.url.startsWith('/account/listings') || this.router.url.startsWith('/listings');
   }
 
   // Keeps individual listing draft navigation inside the marketplace account surface.
@@ -649,6 +875,11 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   private validate(): boolean {
+    if (this.marketplaceAccountMode()) {
+      this.sellerType = 'INDIVIDUAL';
+      this.businessId = '';
+      this.sku = '';
+    }
     const result = validateListingDraftForm(this.formState());
     if (!result.valid) {
       this.errorMsg.set(result.message);
@@ -679,12 +910,15 @@ export class ListingDraftFormComponent implements OnInit {
     this.listingStatus.set(listing.status);
     this.applyFormState(state);
     this.mediaItems.set(listing.images || []);
+    this.clearSelectedMedia();
+    this.formSubmitted.set(false);
+    this.rememberCurrentFormSnapshot();
   }
 
   private formState(): ListingDraftFormState {
     return {
-      sellerType: this.sellerType,
-      businessId: this.businessId,
+      sellerType: this.marketplaceAccountMode() ? 'INDIVIDUAL' : this.sellerType,
+      businessId: this.marketplaceAccountMode() ? '' : this.businessId,
       categoryId: this.categoryId,
       title: this.title,
       description: this.description,
@@ -701,8 +935,8 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   private applyFormState(state: ListingDraftFormState): void {
-    this.sellerType = state.sellerType;
-    this.businessId = state.businessId;
+    this.sellerType = this.marketplaceAccountMode() ? 'INDIVIDUAL' : state.sellerType;
+    this.businessId = this.marketplaceAccountMode() ? '' : state.businessId;
     this.categoryId = state.categoryId;
     this.title = state.title;
     this.description = state.description;
@@ -714,7 +948,33 @@ export class ListingDraftFormComponent implements OnInit {
     this.publicRegion = state.publicRegion;
     this.negotiable = state.negotiable;
     this.sku = state.sku;
-    this.quantity = state.quantity;
+    this.quantity = state.quantity || 1;
+  }
+
+  private refreshDraftAfterMediaChange(listingId: string): void {
+    this.listingService.getListing(listingId).subscribe({
+      next: listing => {
+        this.currentVersion = listing.version;
+        this.listingStatus.set(listing.status);
+        this.mediaItems.set(listing.images || this.mediaItems());
+        this.rememberCurrentFormSnapshot();
+      },
+      error: () => {
+        this.errorMsg.set('Listing changed, but the latest version could not be refreshed.');
+      },
+    });
+  }
+
+  private hasUnsavedListingChanges(): boolean {
+    return this.formRequestSnapshot() !== this.lastLoadedRequestSnapshot;
+  }
+
+  private rememberCurrentFormSnapshot(): void {
+    this.lastLoadedRequestSnapshot = this.formRequestSnapshot();
+  }
+
+  private formRequestSnapshot(): string {
+    return JSON.stringify(buildListingDraftRequest(this.formState()));
   }
 
   private mediaUploadErrorMessage(error: unknown): string {

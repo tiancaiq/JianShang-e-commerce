@@ -22,7 +22,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
             <a routerLink="/account/profile">Account</a>
             <button type="button" (click)="authService.logout()">Logout</button>
           } @else {
-            <button type="button" (click)="authService.login()">Login</button>
+            <button type="button" (click)="authService.login('marketplace')">Login</button>
           }
         </nav>
       </header>

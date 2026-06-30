@@ -1,5 +1,6 @@
 package com.msb.ecom.api_gateway;
 
+import com.msb.ecom.api_gateway.auth.LoginReturnUrl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,8 +42,56 @@ class AuthBffControllerTests {
     }
 
     @Test
+    void loginStoresSafeRelativeReturnUrl() throws Exception {
+        var result = mockMvc.perform(get("/api/v1/auth/login")
+                        .param("client", "seller-portal")
+                        .param("returnUrl", "/seller/business/apply?draft=1"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/seller-portal")))
+                .andReturn();
+
+        assertThat(result.getRequest().getSession(false)).isNotNull();
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.SESSION_ATTRIBUTE))
+                .isEqualTo("/seller/business/apply?draft=1");
+    }
+
+    @Test
+    void loginIgnoresUnsafeReturnUrl() throws Exception {
+        var result = mockMvc.perform(get("/api/v1/auth/login")
+                        .param("client", "marketplace")
+                        .param("returnUrl", "https://evil.example/account"))
+                .andExpect(status().isFound())
+                .andReturn();
+
+        assertThat(result.getRequest().getSession(false)).isNotNull();
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.SESSION_ATTRIBUTE))
+                .isNull();
+    }
+
+    @Test
     void loginRejectsUnknownClient() throws Exception {
         mockMvc.perform(get("/api/v1/auth/login").param("client", "unknown"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void registerRedirectsToConfiguredOidcClientWithRegistrationAction() throws Exception {
+        var result = mockMvc.perform(get("/api/v1/auth/register")
+                        .param("client", "marketplace")
+                        .param("returnUrl", "/account/profile"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")))
+                .andExpect(header().string("Location", containsString("kc_action=register")))
+                .andReturn();
+
+        assertThat(result.getRequest().getSession(false)).isNotNull();
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.SESSION_ATTRIBUTE))
+                .isEqualTo("/account/profile");
+    }
+
+    @Test
+    void registerRejectsUnknownClient() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/register").param("client", "unknown"))
                 .andExpect(status().isNotFound());
     }
 
@@ -51,6 +101,14 @@ class AuthBffControllerTests {
                 .andExpect(status().is3xxRedirection())
                 .andExpect(header().string("Location", containsString("code_challenge=")))
                 .andExpect(header().string("Location", containsString("code_challenge_method=S256")));
+    }
+
+    @Test
+    void oidcAuthorizationRequestCanOpenKeycloakRegistration() throws Exception {
+        mockMvc.perform(get("/oauth2/authorization/marketplace").param("kc_action", "register"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", containsString("kc_action=register")))
+                .andExpect(header().string("Location", containsString("code_challenge=")));
     }
 
     @Test

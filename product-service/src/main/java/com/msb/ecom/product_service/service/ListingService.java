@@ -39,6 +39,7 @@ import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
 import com.msb.ecom.product_service.storage.ListingMediaStorageProperties;
 import com.msb.ecom.product_service.storage.StorageUploadTarget;
+import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -161,8 +162,8 @@ public class ListingService {
             long expectedVersion,
             CreateListingDraftRequest request) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
-        if (!"DRAFT".equals(listing.status())) {
-            throw new IllegalArgumentException("Only draft listings can be edited.");
+        if (!canSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Closed listings cannot be edited.");
         }
         if (!categoryRepository.activeCategoryExists(request.categoryId())) {
             throw new CategoryNotFoundException();
@@ -186,10 +187,27 @@ public class ListingService {
     }
 
     @Transactional
+    // Seller close removes a listing from any public/moderation queue without deleting its audit history.
+    public ListingDraftResponse closeListing(String listingId, long expectedVersion) {
+        ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        if (!canSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Only draft, pending-review, or active listings can be closed.");
+        }
+
+        int updated = listingDraftRepository.closeListing(listing.id(), expectedVersion, Instant.now());
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+
+        log.info("Closed listing id={} sellerType={}", listing.id(), listing.sellerType());
+        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+    }
+
+    @Transactional
     public ListingDraftResponse submitForReview(String listingId, long expectedVersion) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
         if (!"DRAFT".equals(listing.status())) {
-            throw new IllegalArgumentException("Only draft listings can be submitted for review.");
+            throw new IllegalArgumentException("Save listing changes before submitting for review.");
         }
         if (!listingMediaRepository.hasAttachedUploadedImage(listing.id())) {
             throw new IllegalArgumentException("At least one attached image is required before review submission.");
@@ -365,7 +383,7 @@ public class ListingService {
     public ListingMediaContent publicListingMediaContent(String imageId) {
         ListingMediaResponse media = listingMediaRepository.findPublicImageMediaByImageId(normalizedRequiredId("Image ID", imageId))
                 .orElseThrow(ListingMediaNotFoundException::new);
-        return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
+        return mediaContent(media);
     }
 
     @Transactional(readOnly = true)
@@ -376,7 +394,17 @@ public class ListingService {
         if (!"UPLOADED".equals(media.uploadStatus())) {
             throw new ListingMediaNotFoundException();
         }
-        return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
+        return mediaContent(media);
+    }
+
+    private ListingMediaContent mediaContent(ListingMediaResponse media) {
+        try {
+            return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
+        } catch (StorageObjectNotFoundException exception) {
+            log.warn("Listing media object missing listingId={} mediaId={} objectKey={}",
+                    media.listingId(), media.id(), media.objectKey());
+            throw new ListingMediaNotFoundException();
+        }
     }
 
     @Transactional
@@ -385,6 +413,9 @@ public class ListingService {
             UpdateListingImagesRequest request) {
         ListingOwnerSnapshot listing = draftListingForMedia(listingId);
         List<ListingImageRequest> requestedImages = request.images() == null ? List.of() : request.images();
+        if (requestedImages.size() > 10) {
+            throw new IllegalArgumentException("A listing can have up to 10 images.");
+        }
         Set<String> seenMediaIds = new HashSet<>();
         List<ListingImageInsert> inserts = new ArrayList<>();
         Instant now = Instant.now();
@@ -412,6 +443,7 @@ public class ListingService {
         }
 
         listingMediaRepository.replaceImages(listing.id(), inserts);
+        listingDraftRepository.markSellerEdited(listing.id(), now);
         List<ListingImageResponse> images = listingMediaRepository.findImagesByListingId(listing.id());
         log.info("Updated listing images listingId={} count={}", listing.id(), images.size());
         return images;
@@ -420,9 +452,6 @@ public class ListingService {
     private ListingDraftResponse createIndividualDraft(CreateListingDraftRequest request) {
         if (request.businessId() != null && !request.businessId().isBlank()) {
             throw new IllegalArgumentException("Individual listing must not include a business.");
-        }
-        if (request.quantity() != null && request.quantity() != 1) {
-            throw new IllegalArgumentException("Individual listing quantity must be 1.");
         }
         if (request.sku() != null && !request.sku().isBlank()) {
             throw new IllegalArgumentException("Individual listing must not include a SKU.");
@@ -446,7 +475,7 @@ public class ListingService {
                 request.price().currency().toUpperCase(Locale.ROOT),
                 Boolean.TRUE.equals(request.negotiable()),
                 null,
-                1,
+                listingQuantity(request.quantity()),
                 location.city(),
                 location.region(),
                 Instant.now()));
@@ -522,9 +551,6 @@ public class ListingService {
         if (request.businessId() != null && !request.businessId().isBlank()) {
             throw new IllegalArgumentException("Individual listing must not include a business.");
         }
-        if (request.quantity() != null && request.quantity() != 1) {
-            throw new IllegalArgumentException("Individual listing quantity must be 1.");
-        }
         if (request.sku() != null && !request.sku().isBlank()) {
             throw new IllegalArgumentException("Individual listing must not include a SKU.");
         }
@@ -544,7 +570,7 @@ public class ListingService {
                 request.price().currency().toUpperCase(Locale.ROOT),
                 Boolean.TRUE.equals(request.negotiable()),
                 null,
-                1,
+                listingQuantity(request.quantity()),
                 location.city(),
                 location.region());
     }
@@ -592,10 +618,18 @@ public class ListingService {
 
     private ListingOwnerSnapshot draftListingForMedia(String listingId) {
         ListingOwnerSnapshot listing = ownedListing(listingId);
-        if (!"DRAFT".equals(listing.status())) {
-            throw new IllegalArgumentException("Listing media can be changed only while listing is a draft.");
+        if (!canSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, or active.");
         }
         return listing;
+    }
+
+    private boolean canSellerEdit(String status) {
+        return "DRAFT".equals(status) || "PENDING_REVIEW".equals(status) || "ACTIVE".equals(status);
+    }
+
+    private int listingQuantity(Integer quantity) {
+        return quantity == null ? 1 : quantity;
     }
 
     private ListingOwnerSnapshot ownedListing(String listingId) {

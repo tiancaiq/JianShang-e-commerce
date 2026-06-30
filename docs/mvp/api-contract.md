@@ -120,19 +120,36 @@ Expected status codes:
 
 ## 3. Identity and Profile
 
-### `POST /auth/register` (`IAM-01`)
+### `GET /auth/register` (`SIGNUP-01`)
 
-Request:
+Starts Keycloak-hosted self-registration through the gateway BFF. The gateway
+stores no credentials, accepts no password JSON, and returns no access token,
+refresh token, ID token, or token type metadata.
 
-```json
-{"email": "user@example.com", "password": "secret", "displayName": "Alex"}
+Query:
+
+```text
+client=marketplace|seller-portal|admin-portal
+returnUrl=/safe/relative/path
 ```
 
-Response `201`: user ID, status, verification required.
+Rules:
 
-### `POST /auth/verify-email` (`IAM-01`)
+- `client` defaults to `marketplace`.
+- Unknown clients return `404`.
+- `returnUrl` must be a safe same-site relative path; unsafe values are
+  ignored.
+- The browser is redirected into the OIDC authorization flow with Keycloak's
+  registration action.
+- After registration/authentication, the gateway callback creates the BFF
+  session and returns to the safe destination.
+- The application-owned identity row is created or returned by the next
+  `GET /users/me` call.
 
-Request: `{"token": "single-use-token"}`.
+### Email verification (`SIGNUP-01`)
+
+Email verification is Keycloak-owned. Application services do not accept
+verification tokens or store verification secrets.
 
 ### `GET /auth/login` (`IAM-02`)
 

@@ -1,6 +1,7 @@
 package com.msb.ecom.api_gateway.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,14 +29,40 @@ public class AuthBffController {
     @GetMapping("/api/v1/auth/login")
     public ResponseEntity<Void> login(
             @RequestParam(defaultValue = "marketplace") String client,
+            @RequestParam(required = false) String returnUrl,
             HttpServletRequest request) {
+        return authorizationRedirect(client, returnUrl, request, false);
+    }
+
+    @GetMapping("/api/v1/auth/register")
+    public ResponseEntity<Void> register(
+            @RequestParam(defaultValue = "marketplace") String client,
+            @RequestParam(required = false) String returnUrl,
+            HttpServletRequest request) {
+        return authorizationRedirect(client, returnUrl, request, true);
+    }
+
+    private ResponseEntity<Void> authorizationRedirect(
+            String client,
+            String returnUrl,
+            HttpServletRequest request,
+            boolean registration) {
         if (!SUPPORTED_CLIENTS.contains(client)) {
             return ResponseEntity.notFound().build();
         }
 
-        URI authorizationUri = ServletUriComponentsBuilder.fromContextPath(request)
-                .path("/oauth2/authorization/{client}")
-                .build(client);
+        LoginReturnUrl.sanitize(returnUrl).ifPresent(safeReturnUrl -> {
+            HttpSession session = request.getSession(true);
+            session.setAttribute(LoginReturnUrl.SESSION_ATTRIBUTE, safeReturnUrl);
+        });
+
+        var builder = ServletUriComponentsBuilder.fromContextPath(request)
+                .path("/oauth2/authorization/{client}");
+        if (registration) {
+            builder.queryParam("kc_action", "register");
+        }
+
+        URI authorizationUri = builder.build(client);
         return ResponseEntity.status(HttpStatus.FOUND)
                 .location(authorizationUri)
                 .cacheControl(CacheControl.noStore())

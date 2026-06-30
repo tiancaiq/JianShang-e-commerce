@@ -13,6 +13,8 @@ import {
 import { environment } from '../../../environments/environment';
 import { unwrapData } from './api-response';
 
+export type LoginClient = 'marketplace' | 'seller-portal' | 'admin-portal';
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly gatewayUrl = environment.apiGatewayUrl;
@@ -55,12 +57,26 @@ export class AuthService {
     this.initialized.set(true);
   }
 
-  login(): void {
+  login(client: LoginClient = 'marketplace', returnUrl?: string | null): void {
+    this.redirectToAuthEndpoint('/api/v1/auth/login', client, returnUrl);
+  }
+
+  register(client: LoginClient = 'marketplace', returnUrl?: string | null): void {
+    this.redirectToAuthEndpoint('/api/v1/auth/register', client, returnUrl);
+  }
+
+  private redirectToAuthEndpoint(endpoint: string, client: LoginClient, returnUrl?: string | null): void {
     if (!isPlatformBrowser(this.platformId)) {
       return;
     }
 
-    this.document.defaultView?.location.assign(this.url('/api/v1/auth/login'));
+    const params = new URLSearchParams({ client });
+    const safeReturnUrl = this.safeReturnUrl(returnUrl);
+    if (safeReturnUrl) {
+      params.set('returnUrl', safeReturnUrl);
+    }
+
+    this.document.defaultView?.location.assign(this.url(`${endpoint}?${params.toString()}`));
   }
 
   logout(): void {
@@ -171,5 +187,12 @@ export class AuthService {
       return path;
     }
     return `${this.gatewayUrl}${path}`;
+  }
+
+  private safeReturnUrl(returnUrl?: string | null): string | null {
+    if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//') || returnUrl.includes('\\')) {
+      return null;
+    }
+    return returnUrl;
   }
 }

@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { take } from 'rxjs';
-import { AuthService } from '../../core/services/auth.service';
+import { AuthService, LoginClient } from '../../core/services/auth.service';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 
 @Component({
@@ -19,12 +19,17 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
             <defs><linearGradient id="lg" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#f98e07"/><stop offset="1" stop-color="#dd6802"/></linearGradient></defs>
           </svg>
           <h1 class="brand-title">MSB<span class="accent">Commerce</span></h1>
-          <p class="brand-subtitle">Sign in with your MSB account</p>
+          <p class="brand-subtitle">Sign in or create your MSB account</p>
         </div>
 
         <button type="button" class="submit-btn" (click)="handleLogin()">
           Continue to sign in
         </button>
+        @if (canCreateAccount()) {
+          <button type="button" class="secondary-btn" (click)="handleRegister()">
+            Create account
+          </button>
+        }
       </section>
       <app-toast-container />
     </div>
@@ -96,23 +101,69 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       box-shadow: 0 0 24px -4px rgba(249, 142, 7, 0.4);
       transform: translateY(-1px);
     }
+    .secondary-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      background: transparent;
+      color: var(--color-text-primary);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.9375rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .secondary-btn:hover {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
   `]
 })
 export class LoginComponent {
   private authService = inject(AuthService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
 
   constructor() {
     this.authService.ensureSession()
       .pipe(take(1))
       .subscribe(state => {
         if (state.authenticated) {
-          this.router.navigate(['/dashboard']);
+          this.router.navigateByUrl(this.returnUrl());
         }
       });
   }
 
   handleLogin(): void {
-    this.authService.login();
+    this.authService.login(this.client(), this.returnUrl());
+  }
+
+  handleRegister(): void {
+    this.authService.register(this.client(), this.returnUrl());
+  }
+
+  canCreateAccount(): boolean {
+    return this.client() !== 'admin-portal';
+  }
+
+  private client(): LoginClient {
+    const candidate = this.route.snapshot.queryParamMap.get('client');
+    if (candidate === 'seller-portal' || candidate === 'admin-portal') {
+      return candidate;
+    }
+    return 'marketplace';
+  }
+
+  private returnUrl(): string {
+    const candidate = this.route.snapshot.queryParamMap.get('returnUrl');
+    if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//') || candidate.includes('\\')) {
+      return '/';
+    }
+    return candidate;
   }
 }

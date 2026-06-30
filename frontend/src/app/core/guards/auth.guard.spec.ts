@@ -32,7 +32,7 @@ describe('authGuard', () => {
     });
 
     const result = TestBed.runInInjectionContext(() =>
-      authGuard({} as never, {} as never)
+      authGuard({} as never, { url: '/dashboard' } as never)
     );
 
     expect(await firstValueFrom(result as Observable<boolean | UrlTree>)).toBeTrue();
@@ -52,12 +52,40 @@ describe('authGuard', () => {
     });
 
     const result = TestBed.runInInjectionContext(() =>
-      authGuard({} as never, {} as never)
+      authGuard({} as never, { url: '/dashboard' } as never)
     );
     const value = await firstValueFrom(result as Observable<boolean | UrlTree>);
 
     expect(value instanceof UrlTree).toBeTrue();
-    expect(TestBed.inject(Router).serializeUrl(value as UrlTree)).toBe('/login');
+    expect(TestBed.inject(Router).serializeUrl(value as UrlTree))
+      .toBe('/login?client=marketplace&returnUrl=%2Fdashboard');
+  });
+
+  it('uses seller and admin login clients for matching protected route groups', async () => {
+    const authService = {
+      ensureSession: () => of({ authenticated: false, user: null }),
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        { provide: AuthService, useValue: authService },
+      ],
+    });
+
+    const sellerResult = TestBed.runInInjectionContext(() =>
+      authGuard({} as never, { url: '/seller/business/apply' } as never)
+    );
+    const adminResult = TestBed.runInInjectionContext(() =>
+      authGuard({} as never, { url: '/admin/business-applications' } as never)
+    );
+
+    const router = TestBed.inject(Router);
+    expect(router.serializeUrl(await firstValueFrom(sellerResult as Observable<UrlTree>)))
+      .toBe('/login?client=seller-portal&returnUrl=%2Fseller%2Fbusiness%2Fapply');
+    expect(router.serializeUrl(await firstValueFrom(adminResult as Observable<UrlTree>)))
+      .toBe('/login?client=admin-portal&returnUrl=%2Fadmin%2Fbusiness-applications');
   });
 
   it('prevents loading a protected frontend route without an authenticated session', async () => {
@@ -80,7 +108,7 @@ describe('authGuard', () => {
 
     await router.navigateByUrl('/dashboard');
 
-    expect(router.url).toBe('/login');
+    expect(router.url).toBe('/login?client=marketplace&returnUrl=%2Fdashboard');
   });
 
   it('loads a protected frontend route with an authenticated session', async () => {

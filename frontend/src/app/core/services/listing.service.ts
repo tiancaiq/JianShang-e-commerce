@@ -78,6 +78,13 @@ export class ListingService {
     });
   }
 
+  closeListing(listingId: string, version: number): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(`${this.baseUrl}/listings/${listingId}/close`, null, {
+      headers: { 'If-Match': String(version) },
+      withCredentials: true,
+    });
+  }
+
   requestMediaUpload(listingId: string, request: ListingMediaUploadRequest): Observable<ListingMedia> {
     return this.http.post<ListingMedia>(`${this.baseUrl}/listings/${listingId}/media/upload-request`, request, {
       withCredentials: true,

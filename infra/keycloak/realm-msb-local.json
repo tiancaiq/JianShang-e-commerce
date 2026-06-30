@@ -2,7 +2,7 @@
   "realm": "msb-local",
   "enabled": true,
   "displayName": "MSB Local",
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,

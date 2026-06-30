@@ -17,7 +17,7 @@ Individual listing ownership:
 - `seller_type = INDIVIDUAL`
 - `individual_seller_user_id` is required
 - `business_id` and `store_id` are null
-- `quantity = 1`
+- `quantity >= 1`
 - approximate public city/region is required
 
 Business listing ownership:

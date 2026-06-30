@@ -39,6 +39,9 @@ Phase 0 and Phase 1 are complete. MVP feature implementation has started.
 The current repository contains implementation work for:
 
 - Authentication and accounts: IAM-00 through IAM-06
+- Login/session UX stabilization: LOGIN-01 complete
+- Sign-up and external identity provider planning: SIGNUP-00 complete
+- Keycloak self-registration: SIGNUP-01 complete
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
 - Listing foundation, drafts, media, submit, admin decision, and public detail:
@@ -161,9 +164,25 @@ Completed slices:
 | IAM-05 Protected route test | Complete | `docs/mvp/iam/iam-05-protected-route-test.md` |
 | IAM-06 Profile view/edit | Complete | `docs/mvp/iam/iam-06-profile-view-edit.md` |
 
+Login/session stabilization:
+
+| Slice | Status | Reference |
+| --- | --- | --- |
+| LOGIN-01 Login and session UX | Complete | `docs/mvp/iam/login-01-login-session-ux-plan.md` |
+
+Sign-up and external identity providers:
+
+| Slice | Status | Reference |
+| --- | --- | --- |
+| SIGNUP-00 Sign-up and external identity provider plan | Complete | `docs/mvp/iam/signup-00-sign-up-external-identity-provider-plan.md` |
+| SIGNUP-01 Keycloak self-registration | Complete | `docs/mvp/iam/signup-01-keycloak-self-registration.md` |
+
 Remaining account work before MVP completion:
 
-- Verify the deployed demo auth/session flow with test users.
+- Keep the marketplace, seller portal, and admin login/session/logout
+  experience verified as future protected flows are added.
+- Implement SIGNUP-02 Google identity provider and SIGNUP-03 frontend polish
+  after SIGNUP-01 verification.
 - Keep registration/password recovery lifecycle owned by Keycloak.
 - Do not reintroduce browser token storage or custom JWT issuance.
 

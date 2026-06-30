@@ -22,10 +22,10 @@ describe('listing draft form helpers', () => {
     publicRegion: ' CA ',
     negotiable: true,
     sku: '',
-    quantity: 0,
+    quantity: 2,
   };
 
-  it('builds individual draft requests with trimmed public location and fixed quantity', () => {
+  it('builds individual draft requests with trimmed public location and seller-entered quantity', () => {
     expect(buildListingDraftRequest(baseState)).toEqual(jasmine.objectContaining({
       sellerType: 'INDIVIDUAL',
       businessId: null,
@@ -36,7 +36,7 @@ describe('listing draft form helpers', () => {
       negotiable: true,
       location: { city: 'Irvine', region: 'CA' },
       sku: null,
-      quantity: 1,
+      quantity: 2,
     }));
   });
 

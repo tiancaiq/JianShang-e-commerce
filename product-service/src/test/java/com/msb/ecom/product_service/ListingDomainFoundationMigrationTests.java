@@ -40,20 +40,22 @@ class ListingDomainFoundationMigrationTests {
     }
 
     @Test
-    void individualListingRequiresIndividualOwnerShapeAndQuantityOne() throws Exception {
+    void individualListingRequiresIndividualOwnerShapeAndPositiveQuantity() throws Exception {
         migrate();
 
         try (Connection connection = connection()) {
             insertCategory(connection);
             insertListing(connection, "01L00000000000000000000001", "INDIVIDUAL",
                     "01U00000000000000000000001", null, null, 1, null, true);
+            insertListing(connection, "01L00000000000000000000002", "INDIVIDUAL",
+                    "01U00000000000000000000001", null, null, 2, null, true);
 
-            assertThatThrownBy(() -> insertListing(connection, "01L00000000000000000000002", "INDIVIDUAL",
+            assertThatThrownBy(() -> insertListing(connection, "01L00000000000000000000003", "INDIVIDUAL",
                     "01U00000000000000000000001", "01B00000000000000000000001", null, 1, null, true))
                     .isInstanceOf(SQLException.class);
 
-            assertThatThrownBy(() -> insertListing(connection, "01L00000000000000000000003", "INDIVIDUAL",
-                    "01U00000000000000000000001", null, null, 2, null, true))
+            assertThatThrownBy(() -> insertListing(connection, "01L00000000000000000000004", "INDIVIDUAL",
+                    "01U00000000000000000000001", null, null, 0, null, true))
                     .isInstanceOf(SQLException.class);
         }
     }

@@ -381,7 +381,7 @@ Acceptance criteria:
 - Listing includes title, description, category, condition, asking price,
   negotiable flag, approximate location, payment preferences, and delivery
   preferences.
-- Individual quantity is exactly `1` in MVP.
+- Individual listing quantity is seller-entered and must be at least `1`.
 - Seller owns the draft.
 
 Depends on: `IND-01`, `LST-01`.

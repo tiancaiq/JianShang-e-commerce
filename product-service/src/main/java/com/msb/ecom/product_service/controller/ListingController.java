@@ -111,6 +111,15 @@ public class ListingController {
                 IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
     }
 
+    @PostMapping("/listings/{listingId}/close")
+    public ListingDraftResponse closeListing(
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.closeListing(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
+    }
+
     @PostMapping("/admin/listings/{listingId}/decision")
     public ListingModerationDecisionResponse decideListing(
             @PathVariable String listingId,

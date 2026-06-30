@@ -296,7 +296,7 @@ business membership through service APIs before inserting or changing rows.
 Constraints:
 
 - Exactly one seller reference matches `seller_type`.
-- Individual quantity equals 1.
+- Individual quantity is seller-entered and must be at least 1.
 - Business SKU unique within business when non-null.
 
 Indexes:

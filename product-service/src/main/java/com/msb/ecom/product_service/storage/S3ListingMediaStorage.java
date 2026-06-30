@@ -121,7 +121,11 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
                 .bucket(bucket)
                 .key(objectKey)
                 .build();
-        return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        try {
+            return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        } catch (NoSuchKeyException exception) {
+            throw new StorageObjectNotFoundException("Stored media object was not found.");
+        }
     }
 
     private String required(String field, String value) {

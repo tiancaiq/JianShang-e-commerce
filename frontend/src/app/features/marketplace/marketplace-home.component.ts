@@ -148,9 +148,6 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
                       } @else {
                         <span>{{ listing.categoryName }}</span>
                       }
-                      <strong class="seller-badge" [class.business]="listing.sellerType === 'BUSINESS'">
-                        {{ listing.sellerType === 'INDIVIDUAL' ? 'Individual' : 'Business' }}
-                      </strong>
                     </div>
                     <div class="listing-body">
                       <div class="listing-meta">
@@ -405,6 +402,76 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 0.9rem;
+    }
+
+    .listing-card {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(234, 215, 242, 0.95);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      color: inherit;
+      text-decoration: none;
+      box-shadow: 0 12px 26px rgba(143, 92, 144, 0.1);
+    }
+
+    .listing-image {
+      position: relative;
+      display: grid;
+      place-items: center;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      background: linear-gradient(135deg, #ffe5f0, #efe8ff);
+      color: var(--market-muted);
+      font-weight: 900;
+    }
+
+    .listing-image img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .listing-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      padding: 0.8rem;
+    }
+
+    .listing-meta,
+    .card-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      color: var(--market-muted);
+      font-size: 0.78rem;
+      font-weight: 850;
+    }
+
+    .listing-meta span:first-child,
+    .card-foot strong {
+      color: var(--market-accent-dark);
+    }
+
+    .listing-body h3 {
+      font-size: 1rem;
+      line-height: 1.2;
+    }
+
+    .listing-body p {
+      margin: 0;
+      color: var(--market-muted);
+      font-size: 0.88rem;
+      font-weight: 750;
+    }
+
+    .listing-price {
+      color: var(--market-ink);
+      font-size: 1.05rem;
+      font-weight: 950;
     }
 
     @media (max-width: 1180px) {

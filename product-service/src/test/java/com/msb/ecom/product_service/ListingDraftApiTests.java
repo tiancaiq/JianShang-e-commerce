@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.service.AuthServiceClient;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
+import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
 import com.msb.ecom.product_service.storage.StorageUploadTarget;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -117,13 +118,13 @@ class ListingDraftApiTests {
         mockMvc.perform(post("/api/v1/listings")
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(individualRequest()))
+                        .content(individualRequest(4)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id", notNullValue()))
                 .andExpect(jsonPath("$.sellerType", equalTo("INDIVIDUAL")))
                 .andExpect(jsonPath("$.individualSellerUserId", equalTo(USER_ID)))
                 .andExpect(jsonPath("$.businessId").doesNotExist())
-                .andExpect(jsonPath("$.quantity", equalTo(1)))
+                .andExpect(jsonPath("$.quantity", equalTo(4)))
                 .andExpect(jsonPath("$.status", equalTo("DRAFT")))
                 .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")));
     }
@@ -619,8 +620,10 @@ class ListingDraftApiTests {
                         .header("If-Match", "1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(individualRequest()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.version", equalTo(2)));
     }
 
     @Test
@@ -841,6 +844,45 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void sellerCanCloseActiveListingAndHideItFromPublicDetail() throws Exception {
+        String listingId = createApprovedIndividualListing();
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/close", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("CLOSED")))
+                .andExpect(jsonPath("$.version", equalTo(3)));
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
+    @Test
+    void sellerCanEditActiveListingBackToDraftAndHideItFromPublicDetail() throws Exception {
+        String listingId = createApprovedIndividualListing();
+
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.quantity", equalTo(2)))
+                .andExpect(jsonPath("$.version", equalTo(3)));
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
+    }
+
+    @Test
     void guestCanReadApprovedPublicListingImageThroughAppEndpoint() throws Exception {
         String listingId = createApprovedIndividualListing();
         String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
@@ -866,6 +908,25 @@ class ListingDraftApiTests {
                 .getResponse()
                 .getContentAsString();
         String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
+
+        mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_MEDIA_NOT_FOUND")));
+    }
+
+    @Test
+    void publicListingMediaReturnsNotFoundWhenStorageObjectIsMissing() throws Exception {
+        String listingId = createApprovedIndividualListing();
+        String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
+
+        doThrow(new StorageObjectNotFoundException("Stored media object was not found."))
+                .when(listingMediaStorage)
+                .readObject(anyString());
 
         mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
                 .andExpect(status().isNotFound())
@@ -995,6 +1056,10 @@ class ListingDraftApiTests {
     }
 
     private String individualRequest() {
+        return individualRequest(1);
+    }
+
+    private String individualRequest(int quantity) {
         return """
                 {
                   "sellerType": "INDIVIDUAL",
@@ -1005,9 +1070,9 @@ class ListingDraftApiTests {
                   "price": {"amount": 250.00, "currency": "USD"},
                   "negotiable": true,
                   "location": {"city": "Irvine", "region": "CA"},
-                  "quantity": 1
+                  "quantity": %d
                 }
-                """.formatted(CATEGORY_ID);
+                """.formatted(CATEGORY_ID, quantity);
     }
 
     private String businessRequest() {

@@ -67,6 +67,7 @@ come from a secret manager.
 The local realm enables:
 
 - email login
+- self-registration after `SIGNUP-01`
 - unique email addresses
 - email verification
 - password reset
@@ -168,6 +169,7 @@ application databases.
 - A versioned local realm export exists.
 - Marketplace, seller portal, and admin portal clients exist in the realm
   export.
+- Self-registration is enabled for local account creation after `SIGNUP-01`.
 - The setup is documented.
-- No login, registration, gateway BFF, frontend auth, or application behavior
-  is implemented in this slice.
+- IAM-01 itself did not implement login, registration, gateway BFF, frontend
+  auth, or application behavior.

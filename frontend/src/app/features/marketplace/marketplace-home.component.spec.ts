@@ -38,6 +38,15 @@ describe('MarketplaceHomeComponent', () => {
       sizeBytes: 1024,
       uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image.png',
       url: '/api/v1/public/listing-media/01I00000000000000000000001',
+    }, {
+      id: '01I00000000000000000000002',
+      displayOrder: 1,
+      altText: 'Bike side view',
+      originalFileName: 'bike-side.png',
+      contentType: 'image/png',
+      sizeBytes: 2048,
+      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image-side.png',
+      url: '/api/v1/public/listing-media/01I00000000000000000000002',
     }],
   };
 

@@ -210,10 +210,13 @@ public class ListingDraftRepository {
                     quantity = ?,
                     public_city = ?,
                     public_region = ?,
+                    status = 'DRAFT',
+                    moderation_status = 'NOT_SUBMITTED',
+                    published_at = null,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
-                  and status = 'DRAFT'
+                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE')
                   and version = ?
                 """,
                 update.categoryId(),
@@ -231,6 +234,37 @@ public class ListingDraftRepository {
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);
+    }
+
+    public int closeListing(String listingId, long expectedVersion, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'CLOSED',
+                    published_at = null,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE')
+                  and version = ?
+                """,
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int markSellerEdited(String listingId, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'DRAFT',
+                    moderation_status = 'NOT_SUBMITTED',
+                    published_at = null,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and status in ('PENDING_REVIEW', 'ACTIVE')
+                """,
+                Timestamp.from(now),
+                listingId);
     }
 
     public int submitForReview(String listingId, long expectedVersion, Instant now) {

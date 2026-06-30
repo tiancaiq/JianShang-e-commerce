@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { catchError, map, Observable, switchMap, throwError } from 'rxjs';
+import { catchError, concatMap, from, map, Observable, reduce, switchMap, tap, throwError } from 'rxjs';
 import { ListingImage, ListingMedia } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { appendConfirmedMediaToImages } from './listing-draft-form.helpers';
@@ -30,6 +30,19 @@ export class ListingMediaUploadService {
       switchMap(media => this.uploadBytes(file, media)),
       switchMap(media => this.confirmUpload(listingId, file, media)),
       switchMap(media => this.attachImage(listingId, currentImages, media)),
+    );
+  }
+
+  // Uploads files one-by-one so the ordered listing image set is updated predictably.
+  uploadAndAttachMany(listingId: string, files: File[], currentImages: ListingImage[]): Observable<ListingImage[]> {
+    let images = currentImages;
+    return from(files).pipe(
+      concatMap(file => this.uploadAndAttach(listingId, file, images).pipe(
+        tap(updatedImages => {
+          images = updatedImages;
+        }),
+      )),
+      reduce((_, updatedImages) => updatedImages, currentImages),
     );
   }
 

@@ -39,6 +39,15 @@ describe('PublicListingDetailComponent', () => {
       sizeBytes: 1024,
       uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image.png',
       url: '/api/v1/public/listing-media/01I00000000000000000000001',
+    }, {
+      id: '01I00000000000000000000002',
+      displayOrder: 1,
+      altText: 'Bike side view',
+      originalFileName: 'bike-side.png',
+      contentType: 'image/png',
+      sizeBytes: 2048,
+      uploadUrl: 'local-demo://listing-media-local/listings/01L00000000000000000000001/image-side.png',
+      url: '/api/v1/public/listing-media/01I00000000000000000000002',
     }],
   };
 
@@ -70,6 +79,32 @@ describe('PublicListingDetailComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Individual seller');
     expect(fixture.nativeElement.textContent).toContain('Payment and delivery are arranged directly');
     expect(fixture.nativeElement.querySelector('img')?.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000001');
+  });
+
+  it('changes the primary detail image from the dark next arrow', () => {
+    fixture.detectChanges();
+
+    const nextButton = fixture.nativeElement.querySelector('.primary-image .image-arrow.next') as HTMLButtonElement;
+    nextButton.click();
+    fixture.detectChanges();
+
+    const primaryImage = fixture.nativeElement.querySelector('.primary-image img') as HTMLImageElement;
+    expect(primaryImage.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000002');
+  });
+
+  it('auto-advances the primary detail image every five seconds', () => {
+    jasmine.clock().install();
+    try {
+      fixture.detectChanges();
+
+      jasmine.clock().tick(5000);
+      fixture.detectChanges();
+
+      const primaryImage = fixture.nativeElement.querySelector('.primary-image img') as HTMLImageElement;
+      expect(primaryImage.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000002');
+    } finally {
+      jasmine.clock().uninstall();
+    }
   });
 
   it('shows unavailable state when public listing cannot be loaded', () => {
