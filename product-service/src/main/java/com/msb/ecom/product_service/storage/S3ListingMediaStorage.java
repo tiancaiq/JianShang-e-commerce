@@ -41,6 +41,8 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
 
         S3Configuration s3Configuration = S3Configuration.builder()
                 .pathStyleAccessEnabled(s3.pathStyleAccess())
+                .checksumValidationEnabled(false)
+                .chunkedEncodingEnabled(false)
                 .build();
 
         S3ClientBuilder clientBuilder = S3Client.builder()
