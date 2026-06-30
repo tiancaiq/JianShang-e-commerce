@@ -11,6 +11,10 @@ This slice does not implement moderation case claiming, public listing detail,
 search, storefront pages, real image byte storage, inventory, checkout,
 payment, orders, or shipping.
 
+ADM-LIST-00 through ADM-LIST-03 later add the case-backed admin queue,
+claim/release, review detail, and case resolution flow used by the admin MVP
+site. The direct listing decision endpoint remains the basic LIST-06 contract.
+
 ## Backend
 
 Implemented endpoints:

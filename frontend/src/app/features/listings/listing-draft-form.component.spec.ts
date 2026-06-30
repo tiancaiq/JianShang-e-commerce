@@ -336,6 +336,28 @@ describe('ListingDraftFormComponent', () => {
     expect(toastService.success).toHaveBeenCalledWith('Listing submitted for review.');
   });
 
+  it('enables submit after an updated draft response includes an attached image', () => {
+    listingService.updateDraft.and.returnValue(of({
+      ...draft,
+      version: 1,
+      images: [image],
+    }));
+    fixture.detectChanges();
+    fillCommonFields();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = draft.version;
+    component.isEditMode.set(true);
+    component.mediaItems.set([]);
+
+    component.saveDraft();
+    fixture.detectChanges();
+
+    const submitButton = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('Submit for review')) as HTMLButtonElement;
+    expect(component.mediaItems()).toEqual([image]);
+    expect(submitButton.disabled).toBeFalse();
+  });
+
   it('requires an attached image before submitting for review', () => {
     fixture.detectChanges();
     fillCommonFields();

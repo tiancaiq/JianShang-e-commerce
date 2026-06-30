@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
@@ -24,11 +25,14 @@ export const routes: Routes = [
   {
     path: 'admin',
     loadComponent: () => import('./layout/admin-layout/admin-layout.component').then(m => m.AdminLayoutComponent),
-    canActivate: [authGuard],
+    canActivate: [adminGuard],
     children: [
-      { path: 'business-applications', loadComponent: () => import('./features/business/admin-business-application-decision.component').then(m => m.AdminBusinessApplicationDecisionComponent) },
+      { path: 'dashboard', loadComponent: () => import('./features/admin/admin-dashboard.component').then(m => m.AdminDashboardComponent) },
+      { path: 'business-applications', loadComponent: () => import('./features/business/admin-business-application-queue.component').then(m => m.AdminBusinessApplicationQueueComponent) },
+      { path: 'business-applications/:id', loadComponent: () => import('./features/business/admin-business-application-detail.component').then(m => m.AdminBusinessApplicationDetailComponent) },
       { path: 'listings/moderation', loadComponent: () => import('./features/listings/admin-listing-moderation.component').then(m => m.AdminListingModerationComponent) },
-      { path: '', redirectTo: 'business-applications', pathMatch: 'full' },
+      { path: 'listings/moderation/:caseId', loadComponent: () => import('./features/listings/admin-listing-moderation-detail.component').then(m => m.AdminListingModerationDetailComponent) },
+      { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },
   { path: 'dashboard', redirectTo: 'seller/dashboard', pathMatch: 'full' },
@@ -44,6 +48,7 @@ export const routes: Routes = [
       { path: 'seller/activate', redirectTo: '/account/seller-profile', pathMatch: 'full' },
       { path: 'business/apply', redirectTo: '/seller/business/apply', pathMatch: 'full' },
       { path: 'profile', redirectTo: '/account/profile', pathMatch: 'full' },
+      { path: 'admin/dashboard', redirectTo: '/admin/dashboard', pathMatch: 'full' },
       { path: 'admin/business-applications', redirectTo: '/admin/business-applications', pathMatch: 'full' },
       { path: 'admin/listings/moderation', redirectTo: '/admin/listings/moderation', pathMatch: 'full' },
       { path: '', redirectTo: '/seller/dashboard', pathMatch: 'full' },

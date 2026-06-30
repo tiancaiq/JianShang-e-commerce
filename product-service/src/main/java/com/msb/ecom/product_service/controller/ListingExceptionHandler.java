@@ -8,6 +8,8 @@ import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
 import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
+import com.msb.ecom.product_service.model.ModerationCaseNotFoundException;
+import com.msb.ecom.product_service.model.ModerationCaseVersionConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -86,6 +88,30 @@ public class ListingExceptionHandler {
                         "Listing draft was changed by another request.",
                         List.of(),
                         correlationId)));
+    }
+
+    @ExceptionHandler(ModerationCaseVersionConflictException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleModerationCaseVersionConflict(
+            ModerationCaseVersionConflictException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "MODERATION_CASE_VERSION_CONFLICT",
+                        "Moderation case was changed by another request.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(ModerationCaseNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleModerationCaseNotFound(
+            ModerationCaseNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "MODERATION_CASE_NOT_FOUND",
+                        "Moderation case was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

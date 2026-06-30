@@ -1,6 +1,11 @@
 package com.msb.ecom.product_service.controller;
 
 import com.msb.ecom.common.web.http.IfMatchVersion;
+import com.msb.ecom.product_service.dto.AdminActiveListingUpdateRequest;
+import com.msb.ecom.product_service.dto.AdminListingModerationCaseDetailResponse;
+import com.msb.ecom.product_service.dto.AdminListingModerationCaseResponse;
+import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
+import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
 import com.msb.ecom.product_service.service.ListingService;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
@@ -28,6 +33,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -89,6 +95,72 @@ public class ListingController {
     @GetMapping("/admin/listings/moderation")
     public List<ListingDraftResponse> pendingReviewListings() {
         return listingService.getPendingReviewListings();
+    }
+
+    @GetMapping("/admin/listings/{listingId}")
+    public ListingDraftResponse adminListing(@PathVariable String listingId) {
+        return listingService.getAdminListing(listingId);
+    }
+
+    @PatchMapping("/admin/listings/{listingId}")
+    public ListingDraftResponse updateActiveListingByAdmin(
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody AdminActiveListingUpdateRequest request) {
+        return listingService.updateActiveListingByAdmin(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
+                request);
+    }
+
+    @PostMapping("/admin/listings/{listingId}/remove")
+    public ListingDraftResponse removeActiveListingByAdmin(
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody AdminListingRemoveRequest request) {
+        return listingService.removeActiveListingByAdmin(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
+                request);
+    }
+
+    @GetMapping("/admin/listings/moderation/summary")
+    public AdminListingModerationSummaryResponse adminModerationSummary() {
+        return listingService.adminModerationSummary();
+    }
+
+    @GetMapping("/admin/moderation/listing-cases")
+    public List<AdminListingModerationCaseResponse> listingModerationCases(
+            @RequestParam(name = "filter", required = false, defaultValue = "open") String filter,
+            @RequestParam(name = "q", required = false) String query) {
+        return listingService.getListingModerationCases(filter, query);
+    }
+
+    @GetMapping("/admin/moderation/listing-cases/{caseId}")
+    public AdminListingModerationCaseDetailResponse listingModerationCaseDetail(@PathVariable String caseId) {
+        return listingService.getListingModerationCaseDetail(caseId);
+    }
+
+    @PostMapping("/admin/moderation/listing-cases/{caseId}/claim")
+    public AdminListingModerationCaseResponse claimListingModerationCase(
+            @PathVariable String caseId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.claimListingModerationCase(caseId, parseVersion(ifMatch));
+    }
+
+    @PostMapping("/admin/moderation/listing-cases/{caseId}/release")
+    public AdminListingModerationCaseResponse releaseListingModerationCase(
+            @PathVariable String caseId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.releaseListingModerationCase(caseId, parseVersion(ifMatch));
+    }
+
+    @PostMapping("/admin/moderation/listing-cases/{caseId}/resolve")
+    public AdminListingModerationCaseDetailResponse resolveListingModerationCase(
+            @PathVariable String caseId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody ListingModerationDecisionRequest request) {
+        return listingService.resolveListingModerationCase(caseId, parseVersion(ifMatch), request);
     }
 
     @PatchMapping("/listings/{listingId}")
@@ -174,6 +246,10 @@ public class ListingController {
             @PathVariable String listingId,
             @Valid @RequestBody UpdateListingImagesRequest request) {
         return listingService.updateListingImages(listingId, request);
+    }
+
+    private long parseVersion(String ifMatch) {
+        return IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED);
     }
 
 }

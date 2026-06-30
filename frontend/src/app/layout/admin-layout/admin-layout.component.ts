@@ -12,6 +12,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       <aside class="admin-sidebar">
         <a routerLink="/admin" class="brand">MSB<span>Admin</span></a>
         <nav aria-label="Admin navigation">
+          <a routerLink="/admin/dashboard" routerLinkActive="active">Dashboard</a>
           <a routerLink="/admin/business-applications" routerLinkActive="active">Business Review</a>
           <a routerLink="/admin/listings/moderation" routerLinkActive="active">Listing Review</a>
         </nav>

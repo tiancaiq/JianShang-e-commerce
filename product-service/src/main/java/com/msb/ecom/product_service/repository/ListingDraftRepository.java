@@ -195,6 +195,16 @@ public class ListingDraftRepository {
                 limit);
     }
 
+    public long countPendingReview() {
+        Long count = jdbcTemplate.queryForObject("""
+                select count(*)
+                from listings
+                where status = 'PENDING_REVIEW'
+                  and moderation_status = 'PENDING'
+                """, Long.class);
+        return count == null ? 0 : count;
+    }
+
     public int updateDraft(String listingId, long expectedVersion, ListingDraftUpdate update, Instant now) {
         return jdbcTemplate.update("""
                 update listings
@@ -245,6 +255,61 @@ public class ListingDraftRepository {
                     updated_at = ?
                 where id = ?
                   and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE')
+                  and version = ?
+                """,
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int updateActiveListingByAdmin(String listingId, long expectedVersion, ListingDraftUpdate update, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set category_id = ?,
+                    title = ?,
+                    description = ?,
+                    condition_code = ?,
+                    condition_notes = ?,
+                    price_amount = ?,
+                    currency = ?,
+                    negotiable = ?,
+                    sku = ?,
+                    quantity = ?,
+                    public_city = ?,
+                    public_region = ?,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and status = 'ACTIVE'
+                  and moderation_status = 'APPROVED'
+                  and version = ?
+                """,
+                update.categoryId(),
+                update.title(),
+                update.description(),
+                update.condition().name(),
+                update.conditionNotes(),
+                update.priceAmount(),
+                update.currency(),
+                update.negotiable(),
+                update.sku(),
+                update.quantity(),
+                update.publicCity(),
+                update.publicRegion(),
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int removeActiveListingByAdmin(String listingId, long expectedVersion, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'REMOVED_BY_ADMIN',
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and status = 'ACTIVE'
+                  and moderation_status = 'APPROVED'
                   and version = ?
                 """,
                 Timestamp.from(now),

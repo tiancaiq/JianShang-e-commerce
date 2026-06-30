@@ -656,6 +656,7 @@ class AuthServiceApplicationTests {
 
         mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
                         .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin")))
+                        .header(HttpHeaders.IF_MATCH, 1)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -693,6 +694,7 @@ class AuthServiceApplicationTests {
 
         mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
                         .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-reject")))
+                        .header(HttpHeaders.IF_MATCH, 1)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -720,6 +722,7 @@ class AuthServiceApplicationTests {
 
         mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
                         .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-info")))
+                        .header(HttpHeaders.IF_MATCH, 1)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -740,6 +743,7 @@ class AuthServiceApplicationTests {
 
         mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
                         .with(jwt().jwt(token -> token.subject("keycloak-sub-not-platform-admin")))
+                        .header(HttpHeaders.IF_MATCH, 1)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -749,6 +753,271 @@ class AuthServiceApplicationTests {
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void staleAdminBusinessApplicationDecisionReturns409() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-stale-admin-owner",
+                "Stale Admin Decision LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-stale-decision");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-stale-decision")))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "REJECT",
+                                  "reason": "Trying with a stale version"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("VERSION_CONFLICT"));
+    }
+
+    @Test
+    void missingAdminBusinessApplicationDecisionVersionReturns400() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-missing-version-owner",
+                "Missing Version LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-missing-version");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-missing-version")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "REJECT",
+                                  "reason": "Missing version"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void invalidAdminBusinessApplicationDecisionVersionReturns400() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-invalid-version-owner",
+                "Invalid Version LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-invalid-version");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-invalid-version")))
+                        .header(HttpHeaders.IF_MATCH, "latest")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "REJECT",
+                                  "reason": "Invalid version"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void invalidAdminBusinessApplicationDecisionValueReturns400() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-invalid-decision-owner",
+                "Invalid Decision LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-invalid-decision");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-invalid-decision")))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "ESCALATE",
+                                  "reason": "Unsupported decision"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void blankAdminBusinessApplicationDecisionReasonReturns400() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-blank-reason-owner",
+                "Blank Reason LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-blank-reason");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-blank-reason")))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "REJECT",
+                                  "reason": " "
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void nonAdminCannotListBusinessApplicationReviewQueue() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/business-applications")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-queue-not-admin"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void platformAdminCanListReviewableBusinessApplications() throws Exception {
+        String pendingId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-queue-pending",
+                "Queue Pending LLC");
+        String underReviewId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-queue-under-review",
+                "Queue Under Review LLC");
+        applyBusinessVerificationOutcome(underReviewId, "UNDER_REVIEW");
+        String draftId = createBusinessApplication(
+                "keycloak-sub-business-queue-draft",
+                "Queue Draft LLC");
+        grantPlatformAdmin("keycloak-sub-business-queue-admin");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-queue-admin"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.id == '%s')].legalName".formatted(pendingId))
+                        .value("Queue Pending LLC"))
+                .andExpect(jsonPath("$.data[?(@.id == '%s')].status".formatted(underReviewId))
+                        .value("UNDER_REVIEW"))
+                .andExpect(jsonPath("$.data[?(@.id == '%s')]".formatted(draftId)).isEmpty());
+    }
+
+    @Test
+    void platformAdminCanFilterBusinessApplicationReviewQueueByStatus() throws Exception {
+        String pendingId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-queue-filter-pending",
+                "Queue Filter Pending LLC");
+        String underReviewId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-queue-filter-under-review",
+                "Queue Filter Under Review LLC");
+        applyBusinessVerificationOutcome(underReviewId, "UNDER_REVIEW");
+        grantPlatformAdmin("keycloak-sub-business-queue-filter-admin");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications")
+                        .queryParam("status", "UNDER_REVIEW")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-queue-filter-admin"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.id == '%s')].legalName".formatted(underReviewId))
+                        .value("Queue Filter Under Review LLC"))
+                .andExpect(jsonPath("$.data[?(@.id == '%s')]".formatted(pendingId)).isEmpty());
+    }
+
+    @Test
+    void invalidBusinessApplicationReviewQueueStatusReturns400() throws Exception {
+        grantPlatformAdmin("keycloak-sub-business-queue-invalid-status-admin");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications")
+                        .queryParam("status", "APPROVED")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-queue-invalid-status-admin"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void nonAdminCannotReadAdminBusinessApplicationDetail() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-detail-owner",
+                "Detail Non Admin LLC");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-detail-not-admin"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void platformAdminCanReadBusinessApplicationDetail() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-detail-owner-admin",
+                "Detail Review LLC");
+        grantPlatformAdmin("keycloak-sub-business-detail-admin");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-detail-admin"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(applicationId))
+                .andExpect(jsonPath("$.data.legalName").value("Detail Review LLC"))
+                .andExpect(jsonPath("$.data.contactEmail").value("owner@example.com"))
+                .andExpect(jsonPath("$.data.status").value("PENDING_VERIFICATION"))
+                .andExpect(jsonPath("$.data.version").value(1));
+    }
+
+    @Test
+    void nonAdminCannotReadAdminDashboardSummary() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/dashboard-summary")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-dashboard-not-admin"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void platformAdminCanReadPendingBusinessApplicationCount() throws Exception {
+        Integer before = jdbcTemplate.queryForObject("""
+                select count(*)
+                from business_applications
+                where status in ('PENDING_VERIFICATION', 'UNDER_REVIEW')
+                """, Integer.class);
+        createAndSubmitBusinessApplication(
+                "keycloak-sub-dashboard-pending",
+                "Pending Dashboard LLC");
+        grantPlatformAdmin("keycloak-sub-dashboard-admin");
+
+        mockMvc.perform(get("/api/v1/admin/dashboard-summary")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-dashboard-admin"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pendingBusinessApplications").value(before + 1));
+    }
+
+    @Test
+    void platformAdminCanReadUserAndBusinessIdentityLabels() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-label-seller")
+                        .claim("email", "label-seller@example.com")
+                        .claim("name", "Alex Seller"))))
+                .andExpect(status().isOk());
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                "keycloak-sub-label-seller");
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-label-business-owner",
+                "Label Business LLC");
+        grantPlatformAdmin("keycloak-sub-label-business-admin");
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-label-business-admin")))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Business information verified"
+                                }
+                                """))
+                .andExpect(status().isOk());
+        String businessId = jdbcTemplate.queryForObject(
+                "select approved_business_id from business_applications where id = ?",
+                String.class,
+                applicationId);
+        grantPlatformAdmin("keycloak-sub-label-admin");
+
+        mockMvc.perform(get("/api/v1/admin/identity-labels")
+                        .queryParam("userIds", userId)
+                        .queryParam("businessIds", businessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-label-admin"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.users[?(@.id == '%s')].displayName".formatted(userId))
+                        .value("Alex Seller"))
+                .andExpect(jsonPath("$.data.businesses[?(@.id == '%s')].legalName".formatted(businessId))
+                        .value("Label Business LLC"));
     }
 
     @Test
@@ -899,6 +1168,17 @@ class AuthServiceApplicationTests {
                         .header(HttpHeaders.IF_MATCH, 0))
                 .andExpect(status().isOk());
         return applicationId;
+    }
+
+    private void applyBusinessVerificationOutcome(String applicationId, String outcome) throws Exception {
+        String body = """
+                {"eventId":"provider-event-%s","applicationId":"%s","outcome":"%s","reason":"Provider queued review"}
+                """.formatted(applicationId, applicationId, outcome);
+        mockMvc.perform(post("/api/v1/webhooks/business-verification")
+                        .header("X-MSB-Signature", "sha256=" + hmacSha256(body))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
     }
 
     private void grantPlatformAdmin(String subject) throws Exception {

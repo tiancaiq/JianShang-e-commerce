@@ -489,10 +489,92 @@ Rules:
   `business_verification_events`.
 - Invalid signatures return `403 FORBIDDEN`.
 
+### Admin business application queue (`ADM-BUS-01`)
+
+```text
+GET /admin/business-applications
+```
+
+Query:
+
+```text
+status=PENDING_VERIFICATION|UNDER_REVIEW
+```
+
+Rules:
+
+- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- When `status` is omitted, returns applications in `PENDING_VERIFICATION`
+  and `UNDER_REVIEW`.
+- Results are ordered by oldest `submittedAt` first.
+- Returns business application fields already safe for platform admin review.
+
+Response `200`:
+
+```json
+{
+  "data": [
+    {
+      "id": "01JY...",
+      "applicantUserId": "01JY...",
+      "legalName": "Acme Trading LLC",
+      "businessType": "LLC",
+      "country": "US",
+      "contactEmail": "owner@example.com",
+      "status": "PENDING_VERIFICATION",
+      "submittedAt": "2026-06-16T14:00:00Z",
+      "version": 1
+    }
+  ]
+}
+```
+
+### Admin business application detail (`ADM-BUS-02`)
+
+```text
+GET /admin/business-applications/{id}
+```
+
+Rules:
+
+- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- Does not require applicant ownership.
+- Returns the full business application review record visible to platform
+  staff, including status, version, submission time, reviewer metadata,
+  decision reason, and approved business ID when present.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "applicantUserId": "01JY...",
+    "legalName": "Acme Trading LLC",
+    "businessType": "LLC",
+    "country": "US",
+    "contactEmail": "owner@example.com",
+    "contactPhone": "+19495551234",
+    "publicCity": "Irvine",
+    "publicRegion": "CA",
+    "websiteUrl": "https://example.com",
+    "description": "Local seller",
+    "status": "PENDING_VERIFICATION",
+    "submittedAt": "2026-06-16T14:00:00Z",
+    "reviewerUserId": null,
+    "approvedBusinessId": null,
+    "decisionReason": null,
+    "decidedAt": null,
+    "version": 1
+  }
+}
+```
+
 ### Admin decision (`BUS-04`)
 
 ```text
 POST /admin/business-applications/{id}/decision
+If-Match: 1
 ```
 
 Request:
@@ -504,8 +586,10 @@ Request:
 Rules:
 
 - Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- Requires `If-Match` with the current business application `version`.
 - `reason` is required for every decision.
 - The application must be `PENDING_VERIFICATION` or `UNDER_REVIEW`.
+- Stale versions return `409 VERSION_CONFLICT`.
 - `APPROVE` changes application status to `APPROVED`, creates an active
   `businesses` row, and creates an active `OWNER` membership for the applicant.
 - `REJECT` changes application status to `REJECTED`.
@@ -638,21 +722,92 @@ LIST-04 implements owner draft read/list/edit: `GET /listings/{listingId}`,
 LIST-05 implements `POST /listings/{listingId}/submit`. The command requires
 the current version in `If-Match`, requires at least one attached uploaded
 image, moves the listing to `PENDING_REVIEW`, and moves listing/image
-moderation state to `PENDING`. Pause, relist, close, and public read paths
-remain later slices.
+moderation state to `PENDING`. It also creates or reuses one open
+`LISTING_REVIEW` moderation case for the submitted listing without changing
+the response body. A valid `DRAFT` listing can be submitted again after a
+previous non-approved review; if an active listing review case already exists,
+submission reopens it as `OPEN` and clears any admin assignment. Pause, relist,
+close, and public read paths remain later slices.
 
 ### Listing moderation (`LIST-06`, `LST-09`)
 
 ```text
 GET  /admin/listings/moderation
+GET  /admin/moderation/listing-cases?filter=open|unassigned|assigned_to_me|resolved
+GET  /admin/moderation/listing-cases/{caseId}
+POST /admin/moderation/listing-cases/{caseId}/claim
+POST /admin/moderation/listing-cases/{caseId}/release
+POST /admin/moderation/listing-cases/{caseId}/resolve
+GET  /admin/listings/{listingId}
+PATCH /admin/listings/{listingId}
+POST /admin/listings/{listingId}/remove
 POST /admin/listings/{listingId}/decision
 ```
 
-LIST-06 implements the basic decision path without case claiming. Both
-endpoints require authenticated platform admin role `PLATFORM_ADMIN`.
+LIST-06 implements the basic decision path without case claiming. ADM-LIST-03
+is the admin MVP queue workflow and should be used by the admin site for
+review detail and resolution. Both decision paths require authenticated
+platform admin role `PLATFORM_ADMIN`.
 
 Queue response returns submitted listings where `status=PENDING_REVIEW` and
 `moderationStatus=PENDING`.
+
+ADM-LIST-02 adds the case-backed admin queue. `GET
+/admin/moderation/listing-cases` returns `LISTING_REVIEW` cases joined with
+safe listing summary fields. Supported filters are:
+
+- `open`: open and claimed cases that are not resolved.
+- `unassigned`: open cases with no assigned admin.
+- `assigned_to_me`: claimed cases assigned to the current admin.
+- `resolved`: resolved cases.
+
+Case response fields include case ID, `caseStatus`, `priority`,
+`assignedAdminUserId`, optional `assignedAdminDisplayName`, case `version`,
+created/updated/resolved timestamps, `submittedByUserId`, `sellerId`, optional
+`sellerDisplayName`, listing ID, title, seller type, listing status, listing
+moderation status, price/currency, public location, SKU, and quantity.
+
+ADM-LIST-05 adds an optional `q` query parameter to the case queue:
+
+```http
+GET /admin/moderation/listing-cases?filter=open&q=bicycle
+```
+
+When `q` is blank or absent, queue behavior is unchanged. When present, search
+is applied within the selected filter and matches case ID, listing ID, listing
+title, submitted-by user ID, seller user/business ID, assigned admin user ID,
+and SKU. Display-name search is deferred until auth-service owns a stable
+identity search contract.
+
+Claim and release commands require `If-Match` with the current case version.
+Claim succeeds only for open unassigned cases and assigns the current admin.
+Release succeeds only for claimed cases assigned to the current admin. Stale
+versions or invalid assignment state return
+`409 MODERATION_CASE_VERSION_CONFLICT`.
+
+ADM-LIST-03 adds case detail and resolution. `GET
+/admin/moderation/listing-cases/{caseId}` returns the enriched case summary,
+the current listing draft including attached image metadata, and listing
+moderation decision history. `POST
+/admin/moderation/listing-cases/{caseId}/resolve` requires `If-Match` with the
+current case version and the same decision request body as the listing decision
+endpoint. The case must be claimed by the current admin. Resolution applies the
+listing decision and closes the case in one transaction. Invalid assignment,
+stale case version, non-claimed case state, or already-resolved case state
+returns `409 MODERATION_CASE_VERSION_CONFLICT`. The admin detail UI treats
+unclaimed, stale, non-pending, and resolved cases as read-only review context.
+
+ADM-LIST-04 adds active listing admin maintenance. `GET
+/admin/listings/{listingId}` returns the current listing draft-shaped response
+with image metadata for platform admins. `PATCH /admin/listings/{listingId}`
+edits active approved listing content fields only and requires `If-Match` with
+the current listing version plus a required `reason`. `POST
+/admin/listings/{listingId}/remove` removes an active approved listing from
+public marketplace visibility and requires `If-Match` plus a required `reason`.
+Removal sets listing status `REMOVED_BY_ADMIN`; it is not a physical delete.
+Both commands append moderation history decisions `ADMIN_EDIT` or
+`ADMIN_REMOVE`. Non-active listings return `400 LISTING_INVALID_REQUEST`; stale
+listing versions return `409 LISTING_VERSION_CONFLICT`.
 
 Decision command requires `If-Match` with the current listing version.
 
@@ -671,12 +826,19 @@ Rules:
 - `REJECT` sets listing status `REJECTED` and moderation status `REJECTED`.
 - `REQUEST_CHANGES` sets listing status `CHANGES_REQUESTED` and moderation
   status `CHANGES_REQUESTED`.
+- Admin removal sets listing status `REMOVED_BY_ADMIN` while preserving
+  moderation status and history.
 - Attached listing image/media moderation status is updated with the listing
   decision result.
-- Every decision is appended to listing moderation decision history.
+- Every decision and active listing admin action is appended to listing
+  moderation decision history.
 - A stale version returns `409 LISTING_VERSION_CONFLICT`.
 
-Moderation case claiming and assignment remain deferred.
+LIST-06 implements the basic decision endpoint. ADM-LIST-00 through
+ADM-LIST-02 add moderation cases plus claim/release. ADM-LIST-03 adds
+case-backed resolution for the admin MVP queue workflow; the direct listing
+decision endpoint remains for the basic LIST-06 contract and compatibility.
+ADM-LIST-04 adds active approved listing maintenance for admins.
 
 ### Public listing detail (`LIST-07`)
 
@@ -1049,9 +1211,12 @@ PATCH /notification-preferences
 
 ## 14. Administration and Support
 
-MVP includes only business application and listing moderation endpoints.
-User/business suspensions, reports, support cases, and operations queues are
-V3.
+MVP admin includes business application review and listing moderation only.
+User/business suspensions, reports, support cases, chat evidence review,
+payment/order/finance operations, advanced trust/disputes, and AI moderation
+assistance are admin roadmap scope but deferred until later release slices.
+The first planned report admin view is ADM-REP-01 user-reported listings, which
+depends on report submission and report persistence being implemented first.
 
 ```text
 GET  /admin/users
@@ -1076,6 +1241,9 @@ GET  /admin/audit-logs
 ```
 
 Admin list endpoints require bounded filters and cursor pagination.
+Future listing-report admin reads should filter `GET /admin/reports` to listing
+subjects rather than mixing user reports into the listing submission moderation
+queue.
 
 ## 15. Agent APIs and Tools (V3)
 

@@ -3,7 +3,15 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ListingService } from './listing.service';
-import { Category, ListingDraft, ListingImage, ListingMedia, PublicListing } from '../models/listing.model';
+import {
+  AdminListingModerationCase,
+  AdminListingModerationCaseDetail,
+  Category,
+  ListingDraft,
+  ListingImage,
+  ListingMedia,
+  PublicListing,
+} from '../models/listing.model';
 
 describe('ListingService', () => {
   let service: ListingService;
@@ -111,6 +119,50 @@ describe('ListingService', () => {
       uploadUrl: image.uploadUrl,
       url: '/api/v1/public/listing-media/01I00000000000000000000001',
     }],
+  };
+
+  const moderationCase: AdminListingModerationCase = {
+    id: '01MC0000000000000000000001',
+    caseStatus: 'OPEN',
+    priority: 'NORMAL',
+    assignedAdminUserId: null,
+    assignedAdminDisplayName: null,
+    version: 0,
+    createdAt: '2026-06-17T12:00:00Z',
+    updatedAt: '2026-06-17T12:00:00Z',
+    resolvedAt: null,
+    submittedByUserId: '01U00000000000000000000001',
+    sellerId: '01U00000000000000000000001',
+    sellerDisplayName: 'Alex Seller',
+    listingId: draft.id,
+    title: 'Used bicycle',
+    sellerType: 'INDIVIDUAL',
+    listingStatus: 'PENDING_REVIEW',
+    listingModerationStatus: 'PENDING',
+    priceAmount: 250,
+    currency: 'USD',
+    publicCity: 'Irvine',
+    publicRegion: 'CA',
+    sku: null,
+    quantity: 1,
+  };
+
+  const moderationCaseDetail: AdminListingModerationCaseDetail = {
+    moderationCase: {
+      ...moderationCase,
+      caseStatus: 'CLAIMED',
+      assignedAdminUserId: '01A00000000000000000000001',
+      assignedAdminDisplayName: 'Morgan Admin',
+      version: 1,
+    },
+    listing: {
+      ...draft,
+      status: 'PENDING_REVIEW',
+      moderationStatus: 'PENDING',
+      version: 1,
+      images: [{ ...image, moderationStatus: 'PENDING' }],
+    },
+    decisions: [],
   };
 
   beforeEach(() => {
@@ -230,6 +282,189 @@ describe('ListingService', () => {
     request.flush([pending]);
   });
 
+  it('loads admin listing detail through the gateway without browser tokens', () => {
+    const active = { ...draft, status: 'ACTIVE', moderationStatus: 'APPROVED', version: 2 };
+
+    service.getAdminListing(draft.id).subscribe(response => {
+      expect(response).toEqual(active);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/listings/${draft.id}`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush(active);
+  });
+
+  it('updates active listings as admin with optimistic locking through the gateway', () => {
+    const active = { ...draft, status: 'ACTIVE', moderationStatus: 'APPROVED', version: 2 };
+
+    service.updateActiveListingByAdmin(draft.id, 1, {
+      categoryId: draft.categoryId,
+      title: 'Admin edited bicycle',
+      description: 'Updated active listing.',
+      condition: 'GOOD',
+      conditionNotes: null,
+      price: { amount: 240, currency: 'USD' },
+      negotiable: false,
+      location: { city: 'Santa Ana', region: 'CA' },
+      sku: null,
+      quantity: 1,
+      reason: 'Removed unsafe wording',
+    }).subscribe(response => {
+      expect(response).toEqual(active);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/listings/${draft.id}`);
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.headers.get('If-Match')).toBe('1');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toEqual({
+      categoryId: draft.categoryId,
+      title: 'Admin edited bicycle',
+      description: 'Updated active listing.',
+      condition: 'GOOD',
+      conditionNotes: null,
+      price: { amount: 240, currency: 'USD' },
+      negotiable: false,
+      location: { city: 'Santa Ana', region: 'CA' },
+      sku: null,
+      quantity: 1,
+      reason: 'Removed unsafe wording',
+    });
+    request.flush(active);
+  });
+
+  it('removes active listings as admin with optimistic locking through the gateway', () => {
+    const removed = { ...draft, status: 'REMOVED_BY_ADMIN', moderationStatus: 'APPROVED', version: 2 };
+
+    service.removeActiveListingByAdmin(draft.id, 1, {
+      reason: 'Violates marketplace policy',
+    }).subscribe(response => {
+      expect(response).toEqual(removed);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/listings/${draft.id}/remove`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('If-Match')).toBe('1');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toEqual({
+      reason: 'Violates marketplace policy',
+    });
+    request.flush(removed);
+  });
+
+  it('loads admin listing moderation cases through the gateway without browser tokens', () => {
+    service.getListingModerationCases('assigned_to_me').subscribe(response => {
+      expect(response).toEqual([moderationCase]);
+    });
+
+    const request = httpMock.expectOne('/api/v1/admin/moderation/listing-cases?filter=assigned_to_me');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush([moderationCase]);
+  });
+
+  it('searches admin listing moderation cases through the gateway without browser tokens', () => {
+    service.getListingModerationCases('open', 'vintage camera').subscribe(response => {
+      expect(response).toEqual([moderationCase]);
+    });
+
+    const request = httpMock.expectOne('/api/v1/admin/moderation/listing-cases?filter=open&q=vintage%20camera');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush([moderationCase]);
+  });
+
+  it('claims listing moderation cases with optimistic locking through the gateway', () => {
+    service.claimListingModerationCase(moderationCase.id, 0).subscribe(response => {
+      expect(response.caseStatus).toBe('CLAIMED');
+      expect(response.assignedAdminUserId).toBe('01A00000000000000000000001');
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/moderation/listing-cases/${moderationCase.id}/claim`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('If-Match')).toBe('0');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toBeNull();
+    request.flush({
+      ...moderationCase,
+      caseStatus: 'CLAIMED',
+      assignedAdminUserId: '01A00000000000000000000001',
+      version: 1,
+    });
+  });
+
+  it('releases listing moderation cases with optimistic locking through the gateway', () => {
+    service.releaseListingModerationCase(moderationCase.id, 1).subscribe(response => {
+      expect(response.caseStatus).toBe('OPEN');
+      expect(response.assignedAdminUserId).toBeNull();
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/moderation/listing-cases/${moderationCase.id}/release`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('If-Match')).toBe('1');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toBeNull();
+    request.flush({
+      ...moderationCase,
+      version: 2,
+    });
+  });
+
+  it('loads a listing moderation case detail through the gateway', () => {
+    service.getListingModerationCaseDetail(moderationCase.id).subscribe(response => {
+      expect(response).toEqual(moderationCaseDetail);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/moderation/listing-cases/${moderationCase.id}`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush(moderationCaseDetail);
+  });
+
+  it('resolves listing moderation cases with optimistic locking through the gateway', () => {
+    service.resolveListingModerationCase(moderationCase.id, 1, {
+      decision: 'APPROVE',
+      reason: 'Listing looks good',
+    }).subscribe(response => {
+      expect(response.moderationCase.caseStatus).toBe('RESOLVED');
+      expect(response.listing.status).toBe('ACTIVE');
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/moderation/listing-cases/${moderationCase.id}/resolve`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('If-Match')).toBe('1');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toEqual({
+      decision: 'APPROVE',
+      reason: 'Listing looks good',
+    });
+    request.flush({
+      ...moderationCaseDetail,
+      moderationCase: {
+        ...moderationCaseDetail.moderationCase,
+        caseStatus: 'RESOLVED',
+        version: 2,
+        resolvedAt: '2026-06-17T12:30:00Z',
+      },
+      listing: {
+        ...moderationCaseDetail.listing,
+        status: 'ACTIVE',
+        moderationStatus: 'APPROVED',
+        version: 2,
+      },
+    });
+  });
+
   it('updates listing drafts with optimistic locking through the gateway', () => {
     service.updateDraft(draft.id, draft.version, {
       sellerType: 'INDIVIDUAL',
@@ -338,6 +573,17 @@ describe('ListingService', () => {
     expect(request.request.headers.get('Content-Type')).toBe('image/png');
     expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush(null);
+  });
+
+  it('treats local demo listing media uploads as already stored', () => {
+    const file = new File(['x'], 'bike.png', { type: 'image/png' });
+    const uploadUrl = 'local-demo://listing-media-local/listings/01L00000000000000000000001/01M00000000000000000000001/bike.png';
+
+    service.uploadMediaFile(uploadUrl, file).subscribe(response => {
+      expect(response).toBeUndefined();
+    });
+
+    httpMock.expectNone(uploadUrl);
   });
 
   it('updates listing image order through the gateway without browser tokens', () => {

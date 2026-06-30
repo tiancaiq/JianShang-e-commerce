@@ -34,6 +34,14 @@ Rules:
 - On success, listing `moderationStatus` becomes `PENDING`.
 - Attached listing images and their media metadata move to moderation
   `PENDING`.
+- On success, one open `LISTING_REVIEW` moderation case is created or reused
+  for the listing.
+- A valid `DRAFT` listing can always be submitted even when it was previously
+  not approved. If an active listing review case already exists from the prior
+  review cycle, submission reopens it as `OPEN` and clears any admin
+  assignment.
+- The moderation case stores the listing seller snapshot and authenticated
+  submitting user ID.
 - Normal draft edits are blocked while the listing is in `PENDING_REVIEW`.
 
 ## Frontend
@@ -49,7 +57,7 @@ submitted status.
 
 ## Persistence
 
-No migration was added. LIST-05 uses existing listing lifecycle fields:
+LIST-05 uses existing listing lifecycle fields:
 
 - `listings.status`
 - `listings.moderation_status`
@@ -57,8 +65,12 @@ No migration was added. LIST-05 uses existing listing lifecycle fields:
 - `listing_media_objects.moderation_status`
 - optimistic `version` columns
 
-Moderation case tables and reviewer decision history remain deferred to the
-listing moderation slice.
+ADM-LIST-00/01 add the case foundation used by submission:
+
+- `moderation_cases`
+- `moderation_cases.active_listing_review_key`
+
+Reviewer decision history remains in the listing moderation slice.
 
 ## Verification
 
@@ -74,7 +86,7 @@ npm.cmd run build
 ## Deferred
 
 - Admin listing moderation decision.
-- Moderation queue/case table.
+- Case-backed moderation queue claim/release.
 - Seller-facing decision reason for rejection or changes requested.
 - Approved public listing detail and search/browse.
 - Real image object storage and preview URLs.

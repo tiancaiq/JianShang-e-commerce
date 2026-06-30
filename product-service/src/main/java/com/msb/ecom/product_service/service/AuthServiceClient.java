@@ -3,6 +3,7 @@ package com.msb.ecom.product_service.service;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
+import java.util.Set;
 
 public interface AuthServiceClient {
 
@@ -11,6 +12,8 @@ public interface AuthServiceClient {
     BusinessMembershipAuthorization requireBusinessListingPermission(String bearerToken, String businessId);
 
     PlatformAdminAuthorization requirePlatformAdmin(String bearerToken);
+
+    AdminIdentityLabels lookupAdminIdentityLabels(String bearerToken, Set<String> userIds, Set<String> businessIds);
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record IndividualSellerAuthorization(
@@ -35,6 +38,27 @@ public interface AuthServiceClient {
     record PlatformAdminAuthorization(
             String userId,
             String role
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record AdminIdentityLabels(
+            List<UserIdentityLabel> users,
+            List<BusinessIdentityLabel> businesses
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record UserIdentityLabel(
+            String id,
+            String displayName
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BusinessIdentityLabel(
+            String id,
+            String legalName
     ) {
     }
 }

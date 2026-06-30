@@ -77,10 +77,32 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldRouteAuthOwnedAdminEndpointsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/admin/dashboard-summary")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldExposePublicListingMediaWithoutLogin() {
 		RestAssured.given()
 				.when()
 				.get("/api/v1/public/listing-media/01I00000000000000000000001")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteProductOwnedAdminModerationEndpointsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/admin/moderation/listing-cases")
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));

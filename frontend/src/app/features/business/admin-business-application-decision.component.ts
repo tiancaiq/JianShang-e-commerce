@@ -265,8 +265,8 @@ export class AdminBusinessApplicationDecisionComponent {
       decision: this.decision,
       reason,
     }).subscribe({
-      next: application => {
-        this.application.set(application);
+      next: response => {
+        this.application.set(response.data);
         this.saving.set(false);
         this.toastService.success('Business application decision saved.');
       },

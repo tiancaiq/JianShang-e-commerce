@@ -3,6 +3,10 @@ export type ListingCondition = 'NEW' | 'OPEN_BOX' | 'LIKE_NEW' | 'GOOD' | 'FAIR'
 export type ListingMediaUploadStatus = 'PENDING_UPLOAD' | 'UPLOADED' | 'FAILED';
 export type ListingMediaModerationStatus = 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
 export type ListingModerationDecision = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
+export type ListingModerationHistoryDecision = ListingModerationDecision | 'ADMIN_EDIT' | 'ADMIN_REMOVE';
+export type ListingModerationCaseFilter = 'open' | 'unassigned' | 'assigned_to_me' | 'resolved';
+export type ListingModerationCaseStatus = 'OPEN' | 'CLAIMED' | 'RESOLVED';
+export type ListingModerationCasePriority = 'LOW' | 'NORMAL' | 'HIGH';
 
 export interface Category {
   id: string;
@@ -43,6 +47,30 @@ export interface CreateListingDraftRequest {
   } | null;
   sku?: string | null;
   quantity?: number | null;
+}
+
+export interface AdminActiveListingUpdateRequest {
+  categoryId: string;
+  title: string;
+  description: string;
+  condition: ListingCondition;
+  conditionNotes?: string | null;
+  price: {
+    amount: number;
+    currency: string;
+  };
+  negotiable?: boolean;
+  location?: {
+    city?: string | null;
+    region?: string | null;
+  } | null;
+  sku?: string | null;
+  quantity?: number | null;
+  reason: string;
+}
+
+export interface AdminListingRemoveRequest {
+  reason: string;
 }
 
 export interface ListingDraft {
@@ -140,7 +168,7 @@ export interface ListingModerationDecisionRequest {
 export interface ListingModerationDecisionResponse {
   id: string;
   listingId: string;
-  decision: ListingModerationDecision;
+  decision: ListingModerationHistoryDecision;
   reason: string;
   reviewerUserId: string;
   listingVersion: number;
@@ -177,4 +205,36 @@ export interface PublicListing {
   publishedAt: string;
   transactionNotice: string | null;
   images: PublicListingImage[];
+}
+
+export interface AdminListingModerationCase {
+  id: string;
+  caseStatus: ListingModerationCaseStatus;
+  priority: ListingModerationCasePriority;
+  assignedAdminUserId: string | null;
+  assignedAdminDisplayName?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  submittedByUserId: string;
+  sellerId?: string | null;
+  sellerDisplayName?: string | null;
+  listingId: string;
+  title: string;
+  sellerType: ListingSellerType;
+  listingStatus: string;
+  listingModerationStatus: string;
+  priceAmount: number;
+  currency: string;
+  publicCity: string | null;
+  publicRegion: string | null;
+  sku: string | null;
+  quantity: number;
+}
+
+export interface AdminListingModerationCaseDetail {
+  moderationCase: AdminListingModerationCase;
+  listing: ListingDraft;
+  decisions: ListingModerationDecisionResponse[];
 }

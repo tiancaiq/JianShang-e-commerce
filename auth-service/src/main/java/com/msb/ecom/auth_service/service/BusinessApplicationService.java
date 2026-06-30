@@ -24,6 +24,7 @@ import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -38,6 +39,9 @@ public class BusinessApplicationService {
     private static final String UNDER_REVIEW = "UNDER_REVIEW";
     private static final String VERIFICATION_FAILED = "VERIFICATION_FAILED";
     private static final String PLATFORM_ADMIN_ROLE = "PLATFORM_ADMIN";
+    private static final String APPROVE = "APPROVE";
+    private static final String REJECT = "REJECT";
+    private static final String REQUEST_INFORMATION = "REQUEST_INFORMATION";
 
     private final AuthService authService;
     private final BusinessApplicationRepository businessApplicationRepository;
@@ -92,9 +96,7 @@ public class BusinessApplicationService {
         if (!DRAFT.equals(application.getStatus())) {
             throw new BusinessApplicationConflictException("Only draft business applications can be updated.");
         }
-        if (application.getVersion() != expectedVersion) {
-            throw new BusinessApplicationVersionConflictException();
-        }
+        requireCurrentVersion(application, expectedVersion);
 
         application.updateDraft(
                 requiredText("Legal name", request.legalName(), 200),
@@ -119,9 +121,7 @@ public class BusinessApplicationService {
         if (!DRAFT.equals(application.getStatus())) {
             throw new BusinessApplicationConflictException("Only draft business applications can be submitted.");
         }
-        if (application.getVersion() != expectedVersion) {
-            throw new BusinessApplicationVersionConflictException();
-        }
+        requireCurrentVersion(application, expectedVersion);
 
         requireCompleteForSubmit(application);
         application.submit(Instant.now());
@@ -167,30 +167,31 @@ public class BusinessApplicationService {
     }
 
     @Transactional
-    public BusinessApplicationResponse decide(String id, BusinessApplicationDecisionRequest request) {
+    public BusinessApplicationResponse decide(
+            String id,
+            Long expectedVersion,
+            BusinessApplicationDecisionRequest request) {
         User reviewer = authService.ensureUserEntity();
-        requirePlatformAdmin(reviewer.getId());
+        String reviewerUserId = requirePlatformAdminUserId(reviewer);
 
         BusinessApplication application = businessApplicationRepository.findById(id)
                 .orElseThrow(BusinessApplicationNotFoundException::new);
-        if (!PENDING_VERIFICATION.equals(application.getStatus()) && !UNDER_REVIEW.equals(application.getStatus())) {
-            throw new BusinessApplicationConflictException(
-                    "Only pending or under-review business applications can receive an admin decision.");
-        }
+        requireCurrentVersion(application, expectedVersion);
+        requireReviewableForAdminDecision(application);
 
         String decision = normalizedDecision(request.decision());
         String reason = requiredText("Reason", request.reason(), 1000);
         Instant now = Instant.now();
 
-        if ("APPROVE".equals(decision)) {
+        if (APPROVE.equals(decision)) {
             String businessId = ulidGenerator.next();
-            createApprovedBusiness(application, reviewer.getId(), businessId, now);
-            createOwnerMembership(businessId, application.getApplicantUserId(), reviewer.getId(), now);
-            application.approve(reviewer.getId(), businessId, reason, now);
-        } else if ("REJECT".equals(decision)) {
-            application.reject(reviewer.getId(), reason, now);
+            insertApprovedBusiness(application, reviewerUserId, businessId, now);
+            insertOwnerMembership(businessId, application.getApplicantUserId(), reviewerUserId, now);
+            application.approve(reviewerUserId, businessId, reason, now);
+        } else if (REJECT.equals(decision)) {
+            application.reject(reviewerUserId, reason, now);
         } else {
-            application.requestInformation(reviewer.getId(), reason, now);
+            application.requestInformation(reviewerUserId, reason, now);
         }
 
         insertVerificationEvent(
@@ -201,12 +202,34 @@ public class BusinessApplicationService {
                 decision,
                 reason,
                 null,
-                reviewer.getId());
+                reviewerUserId);
 
         BusinessApplication saved = businessApplicationRepository.saveAndFlush(application);
         log.info("Admin business application decision id={} reviewerUserId={} decision={}",
-                saved.getId(), reviewer.getId(), decision);
+                saved.getId(), reviewerUserId, decision);
         return BusinessApplicationResponse.from(saved);
+    }
+
+    @Transactional(readOnly = true)
+    // Lists only business applications that are active admin work for ADM-BUS-01.
+    public List<BusinessApplicationResponse> listAdminReviewQueue(String status) {
+        requirePlatformAdminUserId(authService.ensureUserEntity());
+
+        List<String> statuses = status == null || status.isBlank()
+                ? List.of(PENDING_VERIFICATION, UNDER_REVIEW)
+                : List.of(normalizedReviewQueueStatus(status));
+        return businessApplicationRepository.findByStatusInOrderBySubmittedAtAscIdAsc(statuses).stream()
+                .map(BusinessApplicationResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    // Provides the admin review detail record without requiring applicant ownership.
+    public BusinessApplicationResponse getAdminApplication(String id) {
+        requirePlatformAdminUserId(authService.ensureUserEntity());
+        return businessApplicationRepository.findById(id)
+                .map(BusinessApplicationResponse::from)
+                .orElseThrow(BusinessApplicationNotFoundException::new);
     }
 
     private void requireCompleteForSubmit(BusinessApplication application) {
@@ -246,10 +269,18 @@ public class BusinessApplicationService {
 
     private String normalizedDecision(String decision) {
         String normalized = requiredText("Decision", decision, 32).toUpperCase(Locale.ROOT);
-        if (!"APPROVE".equals(normalized)
-                && !"REJECT".equals(normalized)
-                && !"REQUEST_INFORMATION".equals(normalized)) {
+        if (!APPROVE.equals(normalized)
+                && !REJECT.equals(normalized)
+                && !REQUEST_INFORMATION.equals(normalized)) {
             throw new IllegalArgumentException("Decision must be APPROVE, REJECT, or REQUEST_INFORMATION");
+        }
+        return normalized;
+    }
+
+    private String normalizedReviewQueueStatus(String status) {
+        String normalized = requiredText("Status", status, 32).toUpperCase(Locale.ROOT);
+        if (!PENDING_VERIFICATION.equals(normalized) && !UNDER_REVIEW.equals(normalized)) {
+            throw new IllegalArgumentException("Status must be PENDING_VERIFICATION or UNDER_REVIEW");
         }
         return normalized;
     }
@@ -265,7 +296,25 @@ public class BusinessApplicationService {
         }
     }
 
-    private void createApprovedBusiness(
+    private String requirePlatformAdminUserId(User user) {
+        requirePlatformAdmin(user.getId());
+        return user.getId();
+    }
+
+    private void requireCurrentVersion(BusinessApplication application, Long expectedVersion) {
+        if (application.getVersion() != expectedVersion) {
+            throw new BusinessApplicationVersionConflictException();
+        }
+    }
+
+    private void requireReviewableForAdminDecision(BusinessApplication application) {
+        if (!PENDING_VERIFICATION.equals(application.getStatus()) && !UNDER_REVIEW.equals(application.getStatus())) {
+            throw new BusinessApplicationConflictException(
+                    "Only pending or under-review business applications can receive an admin decision.");
+        }
+    }
+
+    private void insertApprovedBusiness(
             BusinessApplication application,
             String reviewerUserId,
             String businessId,
@@ -288,7 +337,7 @@ public class BusinessApplicationService {
                 Timestamp.from(now));
     }
 
-    private void createOwnerMembership(String businessId, String ownerUserId, String reviewerUserId, Instant now) {
+    private void insertOwnerMembership(String businessId, String ownerUserId, String reviewerUserId, Instant now) {
         jdbcTemplate.update("""
                 insert into business_memberships (
                     business_id, user_id, role, status, invited_by, created_at, updated_at

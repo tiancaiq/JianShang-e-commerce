@@ -1,8 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
+  AdminActiveListingUpdateRequest,
+  AdminListingModerationCase,
+  AdminListingModerationCaseDetail,
+  AdminListingRemoveRequest,
   Category,
   CreateListingDraftRequest,
   ListingDraft,
@@ -10,6 +14,7 @@ import {
   ListingMedia,
   ListingMediaConfirmRequest,
   ListingMediaUploadRequest,
+  ListingModerationCaseFilter,
   ListingModerationDecisionRequest,
   ListingModerationDecisionResponse,
   PublicListing,
@@ -64,6 +69,95 @@ export class ListingService {
     });
   }
 
+  getAdminListing(listingId: string): Observable<ListingDraft> {
+    return this.http.get<ListingDraft>(`${this.baseUrl}/admin/listings/${listingId}`, {
+      withCredentials: true,
+    });
+  }
+
+  updateActiveListingByAdmin(
+    listingId: string,
+    version: number,
+    request: AdminActiveListingUpdateRequest,
+  ): Observable<ListingDraft> {
+    return this.http.patch<ListingDraft>(`${this.baseUrl}/admin/listings/${listingId}`, request, {
+      headers: { 'If-Match': String(version) },
+      withCredentials: true,
+    });
+  }
+
+  removeActiveListingByAdmin(
+    listingId: string,
+    version: number,
+    request: AdminListingRemoveRequest,
+  ): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(`${this.baseUrl}/admin/listings/${listingId}/remove`, request, {
+      headers: { 'If-Match': String(version) },
+      withCredentials: true,
+    });
+  }
+
+  getListingModerationCases(
+    filter: ListingModerationCaseFilter = 'open',
+    query = '',
+  ): Observable<AdminListingModerationCase[]> {
+    const normalizedQuery = query.trim();
+    const params: Record<string, string> = { filter };
+    if (normalizedQuery) {
+      params['q'] = normalizedQuery;
+    }
+    return this.http.get<AdminListingModerationCase[]>(`${this.baseUrl}/admin/moderation/listing-cases`, {
+      params,
+      withCredentials: true,
+    });
+  }
+
+  claimListingModerationCase(caseId: string, version: number): Observable<AdminListingModerationCase> {
+    return this.http.post<AdminListingModerationCase>(
+      `${this.baseUrl}/admin/moderation/listing-cases/${caseId}/claim`,
+      null,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
+  releaseListingModerationCase(caseId: string, version: number): Observable<AdminListingModerationCase> {
+    return this.http.post<AdminListingModerationCase>(
+      `${this.baseUrl}/admin/moderation/listing-cases/${caseId}/release`,
+      null,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
+  getListingModerationCaseDetail(caseId: string): Observable<AdminListingModerationCaseDetail> {
+    return this.http.get<AdminListingModerationCaseDetail>(
+      `${this.baseUrl}/admin/moderation/listing-cases/${caseId}`,
+      {
+        withCredentials: true,
+      },
+    );
+  }
+
+  resolveListingModerationCase(
+    caseId: string,
+    version: number,
+    request: ListingModerationDecisionRequest,
+  ): Observable<AdminListingModerationCaseDetail> {
+    return this.http.post<AdminListingModerationCaseDetail>(
+      `${this.baseUrl}/admin/moderation/listing-cases/${caseId}/resolve`,
+      request,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
   updateDraft(listingId: string, version: number, request: CreateListingDraftRequest): Observable<ListingDraft> {
     return this.http.patch<ListingDraft>(`${this.baseUrl}/listings/${listingId}`, request, {
       headers: { 'If-Match': String(version) },
@@ -92,6 +186,9 @@ export class ListingService {
   }
 
   uploadMediaFile(uploadUrl: string, file: File): Observable<void> {
+    if (uploadUrl.startsWith('local-demo://')) {
+      return of(undefined);
+    }
     const usesGateway = uploadUrl.startsWith('/api/');
     const targetUrl = usesGateway ? `${environment.apiGatewayUrl}${uploadUrl}` : uploadUrl;
     return this.http.put<void>(targetUrl, file, {

@@ -573,15 +573,17 @@ export class ListingDraftFormComponent implements OnInit {
     save.subscribe({
       next: listing => {
         this.editListingId = listing.id;
-        this.currentVersion = listing.version;
-        this.listingStatus.set(listing.status);
-        this.savedId.set(listing.id);
-        this.rememberCurrentFormSnapshot();
         if (this.pendingMediaItems().length > 0) {
+          this.currentVersion = listing.version;
+          this.listingStatus.set(listing.status);
+          this.savedId.set(listing.id);
+          this.mediaItems.set(listing.images || []);
+          this.rememberCurrentFormSnapshot();
           this.uploadPendingMediaForListing(listing.id, true);
           return;
         }
 
+        this.populateFromDraft(listing);
         this.saving.set(false);
         this.toastService.success(this.isEditMode() ? 'Listing draft updated.' : 'Listing draft saved.');
         if (!this.isEditMode()) {

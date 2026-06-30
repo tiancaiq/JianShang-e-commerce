@@ -48,11 +48,36 @@ export class BusinessApplicationService {
     }).pipe(map(unwrapData));
   }
 
-  decide(id: string, request: BusinessApplicationDecisionRequest): Observable<BusinessApplication> {
+  listAdminReviewQueue(status: string | null = null): Observable<ApiDataResponse<BusinessApplication[]>> {
+    const url = `${environment.apiGatewayUrl}/api/v1/admin/business-applications`;
+    return this.http.get<ApiDataResponse<BusinessApplication[]>>(url, {
+      params: status ? { status } : {},
+      withCredentials: true,
+    });
+  }
+
+  getAdminApplication(id: string): Observable<ApiDataResponse<BusinessApplication>> {
+    return this.http.get<ApiDataResponse<BusinessApplication>>(
+      `${environment.apiGatewayUrl}/api/v1/admin/business-applications/${id}`,
+      { withCredentials: true }
+    );
+  }
+
+  decide(
+    id: string,
+    request: BusinessApplicationDecisionRequest,
+    version?: number
+  ): Observable<ApiDataResponse<BusinessApplication>> {
+    const options = version === undefined
+      ? { withCredentials: true }
+      : {
+          headers: new HttpHeaders({ 'If-Match': String(version) }),
+          withCredentials: true,
+        };
     return this.http.post<ApiDataResponse<BusinessApplication>>(
       `${environment.apiGatewayUrl}/api/v1/admin/business-applications/${id}/decision`,
       request,
-      { withCredentials: true }
-    ).pipe(map(unwrapData));
+      options
+    );
   }
 }

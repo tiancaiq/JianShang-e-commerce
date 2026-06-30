@@ -287,7 +287,7 @@ business membership through service APIs before inserting or changing rows.
 | `sku` | Business only |
 | `quantity` | Individual fixed to 1 |
 | `public_city`, `public_region` | Individual discovery |
-| `status` | Draft/review/active lifecycle |
+| `status` | Draft/review/active lifecycle, including admin removal |
 | `moderation_status` | Moderation state |
 | `published_at` | Nullable |
 | `version` | Optimistic locking |
@@ -308,6 +308,10 @@ Indexes:
 
 LIST-07 public detail reads only listings where `status=ACTIVE` and
 `moderation_status=APPROVED`.
+
+ADM-LIST-04 adds `REMOVED_BY_ADMIN` as a stable listing status. Removed
+listings are not public, but their rows, versions, and moderation history stay
+authoritative.
 
 ### `listing_attributes`
 
@@ -626,6 +630,8 @@ remains authoritative.
 Release placement:
 
 - MVP: basic moderation cases and decisions for businesses/listings
+- ADM-LIST-04 listing decisions include `ADMIN_EDIT` and `ADMIN_REMOVE` history
+  rows for active listing maintenance.
 - V2: notifications
 - V3: reviews, reports, suspensions, and support cases
 
@@ -653,8 +659,23 @@ Derived count and average by subject/type. Rebuildable from reviews.
 
 ### `moderation_cases`
 
-Generic queue item with case type, subject type/ID, status, priority,
-assignment, version, and timestamps.
+MVP case workflow table for listing review. The initial supported case type is
+`LISTING_REVIEW`; reports, support cases, suspensions, and dispute tooling are
+later admin slices.
+
+Stores:
+
+- subject listing ID
+- seller snapshot: seller type plus individual seller user ID or business ID
+- submitting user ID
+- status: `OPEN`, `CLAIMED`, `RESOLVED`
+- priority: `LOW`, `NORMAL`, `HIGH`
+- assigned admin user ID
+- version, created time, updated time, and resolved time
+- generated active listing-review key used to prevent duplicate open/claimed
+  cases for the same listing
+
+Listing state remains authoritative for publication and moderation outcome.
 
 ### `moderation_evidence`
 

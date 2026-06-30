@@ -1,111 +1,183 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { ListingDraft, ListingModerationDecision } from '../../core/models/listing.model';
+import {
+  AdminListingModerationCase,
+  ListingModerationCaseFilter,
+} from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 
 @Component({
   selector: 'app-admin-listing-moderation',
   standalone: true,
-  imports: [DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, FormsModule],
   template: `
     <section class="moderation-page">
       <header class="page-header">
         <div>
-          <h1>Listing Review</h1>
+          <h1>Listing Review Cases</h1>
+          <p>Claim submitted listing cases before opening the review detail.</p>
         </div>
         <button type="button" class="secondary-btn" (click)="loadQueue()" [disabled]="loading()">Refresh</button>
       </header>
+
+      <div class="filter-bar" aria-label="Listing case filters">
+        @for (filter of filters; track filter.value) {
+          <button
+            type="button"
+            class="filter-btn"
+            [class.active]="selectedFilter() === filter.value"
+            (click)="setFilter(filter.value)"
+            [disabled]="loading()"
+          >
+            {{ filter.label }}
+          </button>
+        }
+      </div>
+
+      <form
+        class="search-bar"
+        data-testid="listing-case-search-form"
+        (ngSubmit)="searchQueue()"
+      >
+        <label>
+          <span>Search</span>
+          <input
+            name="listing-case-search"
+            data-testid="listing-case-search"
+            [(ngModel)]="searchQuery"
+            (ngModelChange)="onSearchInputChange($event)"
+            [disabled]="loading()"
+            placeholder="Case, listing, seller, admin, title, SKU"
+            maxlength="120"
+          >
+        </label>
+        <button type="submit" class="secondary-btn" [disabled]="loading()">Search</button>
+        @if (submittedSearch()) {
+          <button
+            type="button"
+            class="secondary-btn"
+            data-testid="listing-case-search-clear"
+            [disabled]="loading()"
+            (click)="clearSearch()"
+          >
+            Clear
+          </button>
+        }
+      </form>
 
       @if (errorMsg()) {
         <div class="error-message">{{ errorMsg() }}</div>
       }
 
       @if (loading()) {
-        <div class="empty-state">Loading listing review queue...</div>
-      } @else if (listings().length === 0) {
-        <div class="empty-state">No listings are waiting for review.</div>
+        <div class="empty-state">Loading listing moderation cases...</div>
+      } @else if (cases().length === 0) {
+        <div class="empty-state">{{ emptyStateMessage() }}</div>
       } @else {
-        <div class="listing-stack">
-          @for (listing of listings(); track listing.id) {
-            <article class="listing-panel">
-              <div class="listing-summary">
-                <div>
-                  <div class="eyebrow">{{ listing.sellerType }} - {{ listing.condition }}</div>
-                  <h2>{{ listing.title }}</h2>
-                  <p>{{ listing.description }}</p>
+        <div class="case-stack">
+          @for (moderationCase of cases(); track moderationCase.id) {
+            <article class="case-panel">
+              <div class="case-main">
+                <div class="case-title">
+                  <div class="eyebrow">{{ moderationCase.sellerType }} / {{ moderationCase.priority }}</div>
+                  <h2>{{ moderationCase.title }}</h2>
+                  <p>{{ locationFor(moderationCase) }} · {{ moderationCase.quantity }} available</p>
                 </div>
-                <div class="price-box">
-                  <strong>{{ listing.priceAmount | number: '1.2-2' }} {{ listing.currency }}</strong>
-                  <span>{{ listing.negotiable ? 'Negotiable' : 'Fixed price' }}</span>
+
+                <div class="case-badges">
+                  <span class="status-chip">{{ moderationCase.caseStatus }}</span>
+                  <span class="status-chip muted">{{ moderationCase.listingStatus }} / {{ moderationCase.listingModerationStatus }}</span>
                 </div>
               </div>
 
               <dl class="meta-grid">
                 <div>
+                  <dt>Case ID</dt>
+                  <dd>{{ moderationCase.id }}</dd>
+                </div>
+                <div>
                   <dt>Listing ID</dt>
-                  <dd>{{ listing.id }}</dd>
+                  <dd>{{ moderationCase.listingId }}</dd>
                 </div>
                 <div>
-                  <dt>Status</dt>
-                  <dd>{{ listing.status }} / {{ listing.moderationStatus }}</dd>
+                  <dt>Submitted By</dt>
+                  <dd class="identity-value">
+                    <span>{{ moderationCase.sellerDisplayName || moderationCase.sellerId || moderationCase.submittedByUserId }}</span>
+                    @if (moderationCase.sellerDisplayName) {
+                      <small>{{ moderationCase.sellerId || moderationCase.submittedByUserId }}</small>
+                    }
+                  </dd>
                 </div>
                 <div>
-                  <dt>Category</dt>
-                  <dd>{{ listing.categoryId }}</dd>
+                  <dt>Assigned Admin</dt>
+                  <dd class="identity-value">
+                    @if (moderationCase.assignedAdminUserId) {
+                      <span>{{ moderationCase.assignedAdminDisplayName || moderationCase.assignedAdminUserId }}</span>
+                    } @else {
+                      <span>Unassigned</span>
+                    }
+                  </dd>
                 </div>
                 <div>
-                  <dt>Location</dt>
-                  <dd>{{ listing.publicCity || 'Not set' }}{{ listing.publicRegion ? ', ' + listing.publicRegion : '' }}</dd>
+                  <dt>Submitted</dt>
+                  <dd>{{ moderationCase.createdAt | date: 'medium' }}</dd>
                 </div>
-                @if (listing.sku) {
+                <div>
+                  <dt>Price</dt>
+                  <dd>{{ moderationCase.priceAmount | number: '1.2-2' }} {{ moderationCase.currency }}</dd>
+                </div>
+                @if (moderationCase.sku) {
                   <div>
                     <dt>SKU</dt>
-                    <dd>{{ listing.sku }}</dd>
+                    <dd>{{ moderationCase.sku }}</dd>
                   </div>
                 }
                 <div>
-                  <dt>Quantity</dt>
-                  <dd>{{ listing.quantity }}</dd>
+                  <dt>Version</dt>
+                  <dd>{{ moderationCase.version }}</dd>
                 </div>
               </dl>
 
-              @if (listing.images?.length) {
-                <div class="media-list" aria-label="Submitted images">
-                  @for (image of listing.images; track image.id) {
-                    <div class="media-row">
-                      <span>{{ image.displayOrder + 1 }}</span>
-                      <strong>{{ image.originalFileName || image.mediaObjectId }}</strong>
-                      <small>{{ image.uploadStatus }} / {{ image.moderationStatus }}</small>
-                    </div>
-                  }
-                </div>
-              }
-
-              <label class="field">
-                <span>Decision reason</span>
-                <textarea
-                  [name]="'reason-' + listing.id"
-                  [ngModel]="reasonFor(listing.id)"
-                  (ngModelChange)="setReason(listing.id, $event)"
-                  maxlength="1000"
-                  rows="4"
-                  [disabled]="savingId() === listing.id"
-                ></textarea>
-              </label>
-
-              <div class="decision-bar">
-                <button type="button" class="approve-btn" (click)="decide(listing, 'APPROVE')" [disabled]="savingId() === listing.id">
-                  Approve
-                </button>
-                <button type="button" class="secondary-btn" (click)="decide(listing, 'REQUEST_CHANGES')" [disabled]="savingId() === listing.id">
-                  Request changes
-                </button>
-                <button type="button" class="danger-btn" (click)="decide(listing, 'REJECT')" [disabled]="savingId() === listing.id">
-                  Reject
-                </button>
+              <div class="action-bar">
+                @if (moderationCase.caseStatus === 'OPEN') {
+                  <button
+                    type="button"
+                    class="primary-btn"
+                    (click)="claim(moderationCase)"
+                    [disabled]="actionId() === moderationCase.id"
+                  >
+                    Claim
+                  </button>
+                }
+                @if (moderationCase.caseStatus === 'CLAIMED') {
+                  <button
+                    type="button"
+                    class="primary-btn"
+                    (click)="openDetail(moderationCase)"
+                  >
+                    Open review
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-btn"
+                    (click)="release(moderationCase)"
+                    [disabled]="actionId() === moderationCase.id"
+                  >
+                    Release
+                  </button>
+                }
+                @if (moderationCase.caseStatus === 'RESOLVED') {
+                  <button
+                    type="button"
+                    class="secondary-btn"
+                    (click)="openDetail(moderationCase)"
+                  >
+                    View detail
+                  </button>
+                }
               </div>
             </article>
           }
@@ -117,19 +189,22 @@ import { ToastService } from '../../core/services/toast.service';
     .moderation-page {
       display: flex;
       flex-direction: column;
-      gap: 1.25rem;
+      gap: 1rem;
       max-width: 1120px;
     }
 
     .page-header,
-    .listing-summary,
-    .decision-bar {
+    .case-main,
+    .action-bar,
+    .filter-bar,
+    .search-bar,
+    .case-badges {
       display: flex;
-      gap: 1rem;
+      gap: 0.75rem;
     }
 
     .page-header,
-    .listing-summary {
+    .case-main {
       justify-content: space-between;
       align-items: flex-start;
     }
@@ -147,7 +222,7 @@ import { ToastService } from '../../core/services/toast.service';
     }
 
     h2 {
-      font-size: 1.25rem;
+      font-size: 1.15rem;
     }
 
     p {
@@ -156,22 +231,49 @@ import { ToastService } from '../../core/services/toast.service';
       line-height: 1.5;
     }
 
-    .listing-stack {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
+    .filter-bar {
+      flex-wrap: wrap;
     }
 
-    .listing-panel,
+    .search-bar {
+      align-items: end;
+      flex-wrap: wrap;
+    }
+
+    .search-bar label {
+      display: grid;
+      gap: 0.35rem;
+      min-width: min(100%, 340px);
+      color: var(--color-text-secondary);
+      font-weight: 800;
+    }
+
+    input {
+      min-height: 40px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      padding: 0.65rem 0.75rem;
+      font: inherit;
+    }
+
+    .case-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+
+    .case-panel,
     .empty-state,
     .error-message {
       border: 1px solid var(--color-border);
       border-radius: var(--radius-lg);
       background: var(--color-bg-secondary);
-      padding: 1.25rem;
+      padding: 1.15rem;
     }
 
-    .listing-panel {
+    .case-panel {
       display: flex;
       flex-direction: column;
       gap: 1rem;
@@ -184,26 +286,28 @@ import { ToastService } from '../../core/services/toast.service';
       letter-spacing: 0.04em;
     }
 
-    .price-box {
-      min-width: 160px;
-      text-align: right;
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border-radius: var(--radius-md);
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--color-success);
+      padding: 0.25rem 0.6rem;
+      font-size: 0.78rem;
+      font-weight: 800;
+      white-space: nowrap;
     }
 
-    .price-box strong {
-      display: block;
-      color: var(--color-text-primary);
-      font-size: 1rem;
-    }
-
-    .price-box span,
-    .empty-state {
+    .status-chip.muted {
+      background: var(--color-bg-primary);
       color: var(--color-text-secondary);
     }
 
     .meta-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0.85rem;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
       margin: 0;
     }
 
@@ -219,54 +323,17 @@ import { ToastService } from '../../core/services/toast.service';
       overflow-wrap: anywhere;
     }
 
-    .media-list {
-      display: grid;
-      gap: 0.5rem;
-    }
-
-    .media-row {
-      display: grid;
-      grid-template-columns: 32px minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 0.75rem;
-      min-height: 44px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      padding: 0.55rem 0.75rem;
-      color: var(--color-text-primary);
-    }
-
-    .media-row span {
-      color: var(--color-accent);
-      font-weight: 800;
-    }
-
-    .media-row small {
-      color: var(--color-text-muted);
-    }
-
-    .field {
+    .identity-value {
       display: flex;
       flex-direction: column;
-      gap: 0.4rem;
+      gap: 0.15rem;
     }
 
-    .field span {
-      color: var(--color-text-secondary);
-      font-size: 0.8125rem;
-      font-weight: 700;
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 108px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      background: var(--color-bg-primary);
-      color: var(--color-text-primary);
-      padding: 0.75rem 0.85rem;
-      resize: vertical;
-      font: inherit;
+    .identity-value small {
+      color: var(--color-text-muted);
+      font-size: 0.75rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     button {
@@ -284,20 +351,26 @@ import { ToastService } from '../../core/services/toast.service';
       cursor: not-allowed;
     }
 
-    .approve-btn {
-      background: var(--color-success);
-      color: #07110b;
+    .primary-btn {
+      background: var(--color-accent);
+      color: #07111f;
     }
 
-    .secondary-btn {
+    .secondary-btn,
+    .filter-btn {
       border: 1px solid var(--color-border);
       background: var(--color-bg-secondary);
       color: var(--color-text-primary);
     }
 
-    .danger-btn {
-      background: var(--color-danger);
-      color: #16070a;
+    .filter-btn.active {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+      background: rgba(56, 189, 248, 0.1);
+    }
+
+    .empty-state {
+      color: var(--color-text-secondary);
     }
 
     .error-message {
@@ -306,27 +379,17 @@ import { ToastService } from '../../core/services/toast.service';
       background: rgba(244, 63, 94, 0.08);
     }
 
-    @media (max-width: 820px) {
+    @media (max-width: 900px) {
       .page-header,
-      .listing-summary,
-      .decision-bar {
+      .case-main,
+      .action-bar,
+      .search-bar,
+      .case-badges {
         flex-direction: column;
-      }
-
-      .price-box {
-        text-align: left;
       }
 
       .meta-grid {
         grid-template-columns: 1fr;
-      }
-
-      .media-row {
-        grid-template-columns: 28px minmax(0, 1fr);
-      }
-
-      .media-row small {
-        grid-column: 2;
       }
     }
   `],
@@ -336,12 +399,20 @@ export class AdminListingModerationComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
 
-  listings = signal<ListingDraft[]>([]);
-  loading = signal(false);
-  savingId = signal('');
-  errorMsg = signal('');
+  readonly filters: { value: ListingModerationCaseFilter; label: string }[] = [
+    { value: 'open', label: 'Open' },
+    { value: 'unassigned', label: 'Unassigned' },
+    { value: 'assigned_to_me', label: 'Assigned to me' },
+    { value: 'resolved', label: 'Resolved' },
+  ];
 
-  private reasons: Record<string, string> = {};
+  cases = signal<AdminListingModerationCase[]>([]);
+  selectedFilter = signal<ListingModerationCaseFilter>('open');
+  submittedSearch = signal('');
+  loading = signal(false);
+  actionId = signal('');
+  errorMsg = signal('');
+  searchQuery = '';
 
   ngOnInit(): void {
     this.loadQueue();
@@ -351,48 +422,108 @@ export class AdminListingModerationComponent implements OnInit {
     this.loading.set(true);
     this.errorMsg.set('');
 
-    this.listingService.getPendingModerationListings().subscribe({
-      next: listings => {
-        this.listings.set(listings);
+    this.listingService.getListingModerationCases(this.selectedFilter(), this.submittedSearch()).subscribe({
+      next: cases => {
+        this.cases.set(cases);
         this.loading.set(false);
       },
       error: error => {
         this.loading.set(false);
-        this.handleError(error, 'Listing review queue could not be loaded.');
+        this.handleError(error, 'Listing moderation cases could not be loaded.');
       },
     });
   }
 
-  reasonFor(listingId: string): string {
-    return this.reasons[listingId] || '';
-  }
-
-  setReason(listingId: string, reason: string): void {
-    this.reasons[listingId] = reason;
-  }
-
-  decide(listing: ListingDraft, decision: ListingModerationDecision): void {
-    const reason = this.reasonFor(listing.id).trim().replace(/\s+/g, ' ');
-    if (!reason) {
-      this.errorMsg.set('Decision reason is required.');
+  setFilter(filter: ListingModerationCaseFilter): void {
+    if (this.selectedFilter() === filter) {
       return;
     }
+    this.selectedFilter.set(filter);
+    this.loadQueue();
+  }
 
-    this.savingId.set(listing.id);
+  searchQueue(): void {
+    this.submittedSearch.set(this.searchQuery.trim());
+    this.loadQueue();
+  }
+
+  onSearchInputChange(query: string): void {
+    if (query.trim() || !this.submittedSearch()) {
+      return;
+    }
+    this.submittedSearch.set('');
+    this.loadQueue();
+  }
+
+  clearSearch(): void {
+    this.searchQuery = '';
+    this.submittedSearch.set('');
+    this.loadQueue();
+  }
+
+  claim(moderationCase: AdminListingModerationCase): void {
+    this.actionId.set(moderationCase.id);
     this.errorMsg.set('');
 
-    this.listingService.decideListing(listing.id, listing.version, { decision, reason }).subscribe({
-      next: () => {
-        this.listings.update(items => items.filter(item => item.id !== listing.id));
-        delete this.reasons[listing.id];
-        this.savingId.set('');
-        this.toastService.success('Listing moderation decision saved.');
+    this.listingService.claimListingModerationCase(moderationCase.id, moderationCase.version).subscribe({
+      next: updatedCase => {
+        this.replaceCase(updatedCase);
+        this.actionId.set('');
+        this.toastService.success('Listing moderation case claimed.');
       },
       error: error => {
-        this.savingId.set('');
-        this.handleError(error, 'Listing moderation decision could not be saved.');
+        this.actionId.set('');
+        this.handleError(error, 'Listing moderation case could not be claimed.');
       },
     });
+  }
+
+  release(moderationCase: AdminListingModerationCase): void {
+    this.actionId.set(moderationCase.id);
+    this.errorMsg.set('');
+
+    this.listingService.releaseListingModerationCase(moderationCase.id, moderationCase.version).subscribe({
+      next: updatedCase => {
+        this.replaceCase(updatedCase);
+        this.actionId.set('');
+        this.toastService.success('Listing moderation case released.');
+      },
+      error: error => {
+        this.actionId.set('');
+        this.handleError(error, 'Listing moderation case could not be released.');
+      },
+    });
+  }
+
+  openDetail(moderationCase: AdminListingModerationCase): void {
+    this.router.navigate(['/admin/listings/moderation', moderationCase.id]);
+  }
+
+  locationFor(moderationCase: AdminListingModerationCase): string {
+    if (!moderationCase.publicCity && !moderationCase.publicRegion) {
+      return 'Location not set';
+    }
+    return [moderationCase.publicCity, moderationCase.publicRegion].filter(Boolean).join(', ');
+  }
+
+  emptyStateMessage(): string {
+    if (this.submittedSearch()) {
+      return 'No listing moderation cases match this search.';
+    }
+    switch (this.selectedFilter()) {
+      case 'assigned_to_me':
+        return 'No listing review cases are assigned to you.';
+      case 'unassigned':
+        return 'No unassigned listing review cases.';
+      case 'resolved':
+        return 'No resolved listing review cases.';
+      default:
+        return 'No open listing review cases.';
+    }
+  }
+
+  private replaceCase(updatedCase: AdminListingModerationCase): void {
+    this.cases.update(items => items.map(item => item.id === updatedCase.id ? updatedCase : item));
   }
 
   private handleError(error: { status?: number }, fallback: string): void {
@@ -404,12 +535,8 @@ export class AdminListingModerationComponent implements OnInit {
       this.errorMsg.set('You need platform admin access for this action.');
       return;
     }
-    if (error.status === 404) {
-      this.errorMsg.set('Listing was not found.');
-      return;
-    }
     if (error.status === 409) {
-      this.errorMsg.set('Listing changed while you were reviewing it. Refresh the queue and try again.');
+      this.errorMsg.set('Case changed while you were working. Refresh the queue and try again.');
       return;
     }
     this.errorMsg.set(fallback);

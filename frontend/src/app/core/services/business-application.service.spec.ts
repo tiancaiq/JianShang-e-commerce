@@ -111,12 +111,12 @@ describe('BusinessApplicationService', () => {
     request.flush({ data: application });
   });
 
-  it('sends an admin decision through the gateway', () => {
+  it('sends an admin decision through the gateway with If-Match version', () => {
     service.decide(application.id, {
       decision: 'APPROVE',
       reason: 'Business information verified',
-    }).subscribe(response => {
-      expect(response).toEqual(application);
+    }, 1).subscribe(response => {
+      expect(response.data).toEqual(application);
     });
 
     const request = httpMock.expectOne(
@@ -124,11 +124,36 @@ describe('BusinessApplicationService', () => {
     );
     expect(request.request.method).toBe('POST');
     expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.get('If-Match')).toBe('1');
     expect(request.request.headers.has('Authorization')).toBeFalse();
     expect(request.request.body).toEqual({
       decision: 'APPROVE',
       reason: 'Business information verified',
     });
+    request.flush({ data: application });
+  });
+
+  it('lists admin business applications waiting for review', () => {
+    service.listAdminReviewQueue('UNDER_REVIEW').subscribe(response => {
+      expect(response.data).toEqual([application]);
+    });
+
+    const request = httpMock.expectOne('/api/v1/admin/business-applications?status=UNDER_REVIEW');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush({ data: [application] });
+  });
+
+  it('loads an admin business application detail through the gateway', () => {
+    service.getAdminApplication(application.id).subscribe(response => {
+      expect(response.data).toEqual(application);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/admin/business-applications/${application.id}`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush({ data: application });
   });
 });

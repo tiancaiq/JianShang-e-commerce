@@ -13,25 +13,23 @@ describe('AdminLayoutComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        {
-          provide: AuthService,
-          useValue: {
-            logout: jasmine.createSpy('logout'),
-          },
-        },
+        { provide: AuthService, useValue: { logout: jasmine.createSpy('logout') } },
       ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(AdminLayoutComponent);
+    fixture.detectChanges();
   });
 
-  it('shows MVP admin moderation navigation without V2 commerce links', () => {
-    fixture.detectChanges();
+  it('shows only MVP admin navigation', () => {
+    const text = fixture.nativeElement.textContent;
 
-    const text = (fixture.nativeElement as HTMLElement).textContent || '';
-
+    expect(text).toContain('Dashboard');
     expect(text).toContain('Business Review');
     expect(text).toContain('Listing Review');
+    expect(text).not.toContain('Reports');
+    expect(text).not.toContain('Support');
+    expect(text).not.toContain('Suspensions');
     expect(text).not.toContain('Cart');
     expect(text).not.toContain('Checkout');
     expect(text).not.toContain('Orders');

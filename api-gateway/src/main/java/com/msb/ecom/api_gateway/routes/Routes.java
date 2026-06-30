@@ -44,7 +44,8 @@ public class Routes {
                                                 .or(RequestPredicates.path("/api/v1/listings"))
                                                 .or(RequestPredicates.path("/api/v1/listings/**"))
                                                 .or(RequestPredicates.path("/api/v1/users/me/listings"))
-                                                .or(RequestPredicates.path("/api/v1/admin/listings/**")),
+                                                .or(RequestPredicates.path("/api/v1/admin/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/moderation/**")),
                                                 http(productServiceUrl))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("productServiceCircuitBreaker",
@@ -115,6 +116,8 @@ public class Routes {
                                                 .or(RequestPredicates.path("/api/v1/individual-seller/**"))
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/membership/me"))
                                                 .or(RequestPredicates.path("/api/v1/business-applications/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/me"))
+                                                .or(RequestPredicates.path("/api/v1/admin/dashboard-summary"))
                                                 .or(RequestPredicates.path("/api/v1/admin/business-applications/**")),
                                                 http(authServiceUrl))
                                 .filter(tokenRelay())

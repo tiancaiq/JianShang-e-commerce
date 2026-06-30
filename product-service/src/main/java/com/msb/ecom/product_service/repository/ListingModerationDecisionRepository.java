@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.util.List;
 
 @Repository
 @RequiredArgsConstructor
@@ -36,5 +37,23 @@ public class ListingModerationDecisionRepository {
                 decision.reviewerUserId(),
                 decision.listingVersion(),
                 decision.now());
+    }
+
+    public List<ListingModerationDecisionResponse> findByListingId(String listingId) {
+        return jdbcTemplate.query("""
+                select id, listing_id, decision, reason, reviewer_user_id, listing_version, created_at
+                from listing_moderation_decisions
+                where listing_id = ?
+                order by created_at desc, id desc
+                """,
+                (rs, rowNum) -> new ListingModerationDecisionResponse(
+                        rs.getString("id"),
+                        rs.getString("listing_id"),
+                        rs.getString("decision"),
+                        rs.getString("reason"),
+                        rs.getString("reviewer_user_id"),
+                        rs.getLong("listing_version"),
+                        rs.getTimestamp("created_at").toInstant()),
+                listingId);
     }
 }

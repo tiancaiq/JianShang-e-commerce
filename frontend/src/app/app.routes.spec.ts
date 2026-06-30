@@ -1,4 +1,5 @@
 import { routes } from './app.routes';
+import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 
 describe('app routes', () => {
@@ -28,7 +29,20 @@ describe('app routes', () => {
     const adminRoute = routes.find(route => route.path === 'admin');
 
     expect(sellerRoute?.canActivate).toContain(authGuard);
-    expect(adminRoute?.canActivate).toContain(authGuard);
+    expect(adminRoute?.canActivate).toContain(adminGuard);
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'dashboard',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'business-applications/:id',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'listings/moderation/:caseId',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: '',
+      redirectTo: 'dashboard',
+    }));
   });
 
   it('protects marketplace account listing routes', () => {

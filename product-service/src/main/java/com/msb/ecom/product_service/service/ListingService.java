@@ -10,6 +10,8 @@ import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
 import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingSellerType;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
+import com.msb.ecom.product_service.model.ModerationCaseNotFoundException;
+import com.msb.ecom.product_service.model.ModerationCaseVersionConflictException;
 import com.msb.ecom.product_service.service.AuthServiceClient;
 import com.msb.ecom.product_service.service.AuthServiceClient.BusinessMembershipAuthorization;
 import com.msb.ecom.product_service.service.AuthServiceClient.IndividualSellerAuthorization;
@@ -23,7 +25,15 @@ import com.msb.ecom.product_service.repository.ListingMediaInsert;
 import com.msb.ecom.product_service.repository.ListingMediaRepository;
 import com.msb.ecom.product_service.repository.ListingModerationDecisionInsert;
 import com.msb.ecom.product_service.repository.ListingModerationDecisionRepository;
+import com.msb.ecom.product_service.repository.ModerationCaseInsert;
+import com.msb.ecom.product_service.repository.ModerationCaseRepository;
+import com.msb.ecom.product_service.repository.ModerationCaseRepository.ModerationCaseEnsureResult;
 import com.msb.ecom.product_service.service.UlidGenerator;
+import com.msb.ecom.product_service.dto.AdminActiveListingUpdateRequest;
+import com.msb.ecom.product_service.dto.AdminListingModerationCaseDetailResponse;
+import com.msb.ecom.product_service.dto.AdminListingModerationCaseResponse;
+import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
+import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
@@ -47,11 +57,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.ArrayList;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
 @Service
@@ -70,6 +84,7 @@ public class ListingService {
     private final ListingDraftRepository listingDraftRepository;
     private final ListingMediaRepository listingMediaRepository;
     private final ListingModerationDecisionRepository listingModerationDecisionRepository;
+    private final ModerationCaseRepository moderationCaseRepository;
     private final AuthServiceClient authServiceClient;
     private final UlidGenerator ulidGenerator;
     private final CurrentActorProvider currentActorProvider;
@@ -205,7 +220,8 @@ public class ListingService {
 
     @Transactional
     public ListingDraftResponse submitForReview(String listingId, long expectedVersion) {
-        ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        OwnedListingSubmission submission = ownedListingSubmission(normalizedRequiredId("Listing ID", listingId));
+        ListingOwnerSnapshot listing = submission.listing();
         if (!"DRAFT".equals(listing.status())) {
             throw new IllegalArgumentException("Save listing changes before submitting for review.");
         }
@@ -219,8 +235,19 @@ public class ListingService {
             throw new ListingVersionConflictException();
         }
         listingMediaRepository.markImagesPendingReview(listing.id(), Timestamp.from(now));
+        ModerationCaseEnsureResult moderationCase = moderationCaseRepository.createOrReuseListingReviewCase(
+                new ModerationCaseInsert(
+                        ulidGenerator.next(),
+                        listing.id(),
+                        listing.sellerType(),
+                        listing.individualSellerUserId(),
+                        listing.businessId(),
+                        submission.submittedByUserId(),
+                        now));
 
-        log.info("Submitted listing for review id={} sellerType={}", listing.id(), listing.sellerType());
+        log.info("Submitted listing for review id={} sellerType={} moderationCaseId={} moderationCaseCreated={} submittedByUserId={}",
+                listing.id(), listing.sellerType(), moderationCase.id(), moderationCase.created(),
+                submission.submittedByUserId());
         return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
     }
 
@@ -229,6 +256,153 @@ public class ListingService {
     public List<ListingDraftResponse> getPendingReviewListings() {
         requirePlatformAdmin();
         return withImages(listingDraftRepository.findPendingReview());
+    }
+
+    @Transactional(readOnly = true)
+    // Lets platform admins inspect active listings before live marketplace edits/removal.
+    public ListingDraftResponse getAdminListing(String listingId) {
+        requirePlatformAdmin();
+        return withImages(listingDraftRepository.findOptionalById(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new));
+    }
+
+    @Transactional
+    // Applies a limited admin edit to an active approved listing and records reviewer history.
+    public ListingDraftResponse updateActiveListingByAdmin(
+            String listingId,
+            long expectedVersion,
+            AdminActiveListingUpdateRequest request) {
+        AuthServiceClient.PlatformAdminAuthorization admin = requirePlatformAdmin();
+        String normalizedListingId = normalizedRequiredId("Listing ID", listingId);
+        ListingDraftResponse listing = activeApprovedListing(normalizedListingId);
+        if (!categoryRepository.activeCategoryExists(request.categoryId())) {
+            throw new CategoryNotFoundException();
+        }
+
+        ListingDraftUpdate update = adminActiveListingUpdate(listing, request);
+        Instant now = Instant.now();
+        int updated = listingDraftRepository.updateActiveListingByAdmin(
+                listing.id(),
+                expectedVersion,
+                update,
+                now);
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        recordAdminListingAction(listing.id(), "ADMIN_EDIT", request.reason(), admin.userId(), expectedVersion + 1, now);
+        log.info("Admin edited active listing listingId={} adminUserId={}", listing.id(), admin.userId());
+        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+    }
+
+    @Transactional
+    // Removes an active approved listing from public marketplace visibility without deleting history.
+    public ListingDraftResponse removeActiveListingByAdmin(
+            String listingId,
+            long expectedVersion,
+            AdminListingRemoveRequest request) {
+        AuthServiceClient.PlatformAdminAuthorization admin = requirePlatformAdmin();
+        ListingDraftResponse listing = activeApprovedListing(normalizedRequiredId("Listing ID", listingId));
+        Instant now = Instant.now();
+        int updated = listingDraftRepository.removeActiveListingByAdmin(listing.id(), expectedVersion, now);
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        recordAdminListingAction(listing.id(), "ADMIN_REMOVE", request.reason(), admin.userId(), expectedVersion + 1, now);
+        log.info("Admin removed active listing listingId={} adminUserId={}", listing.id(), admin.userId());
+        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+    }
+
+    @Transactional(readOnly = true)
+    // Provides ADM-00 dashboard counts without exposing the full moderation queue.
+    public AdminListingModerationSummaryResponse adminModerationSummary() {
+        AuthServiceClient.PlatformAdminAuthorization admin = requirePlatformAdmin();
+        return new AdminListingModerationSummaryResponse(
+                listingDraftRepository.countPendingReview(),
+                moderationCaseRepository.countAssignedListingReviewCases(admin.userId()));
+    }
+
+    @Transactional(readOnly = true)
+    // Reads the case-backed listing moderation queue used by platform admins.
+    public List<AdminListingModerationCaseResponse> getListingModerationCases(String filter, String query) {
+        AdminActor admin = requirePlatformAdminActor();
+        return withAdminIdentityLabels(
+                moderationCaseRepository.findListingReviewCases(
+                        normalizedCaseFilter(filter),
+                        admin.authorization().userId(),
+                        normalizedOptionalSearchQuery(query)),
+                admin.accessToken());
+    }
+
+    @Transactional(readOnly = true)
+    // Reads all review context needed by the admin listing detail page.
+    public AdminListingModerationCaseDetailResponse getListingModerationCaseDetail(String caseId) {
+        AdminActor admin = requirePlatformAdminActor();
+        AdminListingModerationCaseResponse moderationCase = loadListingReviewCase(caseId);
+        return buildListingModerationCaseDetail(enrichListingReviewCase(moderationCase, admin));
+    }
+
+    @Transactional
+    // Claims an open listing review case for the current admin using the case version as the lock.
+    public AdminListingModerationCaseResponse claimListingModerationCase(String caseId, long expectedVersion) {
+        AdminActor admin = requirePlatformAdminActor();
+        String normalizedCaseId = normalizedRequiredId("Case ID", caseId);
+        int updated = moderationCaseRepository.claimListingReviewCase(
+                normalizedCaseId,
+                expectedVersion,
+                admin.authorization().userId(),
+                Instant.now());
+        if (updated == 0) {
+            throw new ModerationCaseVersionConflictException();
+        }
+        log.info("Admin claimed listing moderation case caseId={} adminUserId={}",
+                normalizedCaseId, admin.authorization().userId());
+        return enrichListingReviewCase(loadListingReviewCase(normalizedCaseId), admin);
+    }
+
+    @Transactional
+    // Releases a claimed listing review case only when it is still assigned to the current admin.
+    public AdminListingModerationCaseResponse releaseListingModerationCase(String caseId, long expectedVersion) {
+        AdminActor admin = requirePlatformAdminActor();
+        String normalizedCaseId = normalizedRequiredId("Case ID", caseId);
+        int updated = moderationCaseRepository.releaseListingReviewCase(
+                normalizedCaseId,
+                expectedVersion,
+                admin.authorization().userId(),
+                Instant.now());
+        if (updated == 0) {
+            throw new ModerationCaseVersionConflictException();
+        }
+        log.info("Admin released listing moderation case caseId={} adminUserId={}",
+                normalizedCaseId, admin.authorization().userId());
+        return enrichListingReviewCase(loadListingReviewCase(normalizedCaseId), admin);
+    }
+
+    @Transactional
+    // Resolves a claimed review case and applies the listing moderation decision atomically.
+    public AdminListingModerationCaseDetailResponse resolveListingModerationCase(
+            String caseId,
+            long expectedCaseVersion,
+            ListingModerationDecisionRequest request) {
+        AdminActor admin = requirePlatformAdminActor();
+        String normalizedCaseId = normalizedRequiredId("Case ID", caseId);
+        AdminListingModerationCaseResponse moderationCase = loadListingReviewCase(normalizedCaseId);
+        requireResolvableListingReviewCase(moderationCase, admin.authorization().userId(), expectedCaseVersion);
+
+        ListingDraftResponse listing = listingDraftRepository.findOptionalById(moderationCase.listingId())
+                .orElseThrow(ListingNotFoundException::new);
+        Instant now = Instant.now();
+        applyListingModerationDecision(listing, request, admin.authorization().userId(), now);
+        int resolved = moderationCaseRepository.resolveListingReviewCase(
+                normalizedCaseId,
+                expectedCaseVersion,
+                admin.authorization().userId(),
+                now);
+        if (resolved == 0) {
+            throw new ModerationCaseVersionConflictException();
+        }
+        log.info("Admin resolved listing moderation case caseId={} listingId={} adminUserId={}",
+                normalizedCaseId, listing.id(), admin.authorization().userId());
+        return buildListingModerationCaseDetail(enrichListingReviewCase(loadListingReviewCase(normalizedCaseId), admin));
     }
 
     @Transactional
@@ -241,6 +415,49 @@ public class ListingService {
         String normalizedListingId = normalizedRequiredId("Listing ID", listingId);
         ListingDraftResponse listing = listingDraftRepository.findOptionalById(normalizedListingId)
                 .orElseThrow(ListingNotFoundException::new);
+        ListingModerationDecisionResponse response =
+                applyListingModerationDecision(listing, expectedVersion, request, reviewer.userId(), Instant.now());
+        log.info("Admin listing moderation decision listingId={} reviewerUserId={} decision={}",
+                listing.id(), reviewer.userId(), response.decision());
+        return response;
+    }
+
+    private AdminListingModerationCaseResponse loadListingReviewCase(String caseId) {
+        return moderationCaseRepository.findListingReviewCaseById(normalizedRequiredId("Case ID", caseId))
+                .orElseThrow(ModerationCaseNotFoundException::new);
+    }
+
+    private AdminListingModerationCaseResponse enrichListingReviewCase(
+            AdminListingModerationCaseResponse moderationCase,
+            AdminActor admin) {
+        return withAdminIdentityLabels(moderationCase, admin.accessToken());
+    }
+
+    private void requireResolvableListingReviewCase(
+            AdminListingModerationCaseResponse moderationCase,
+            String adminUserId,
+            long expectedCaseVersion) {
+        if (!adminUserId.equals(moderationCase.assignedAdminUserId())
+                || !"CLAIMED".equals(moderationCase.caseStatus())
+                || moderationCase.version() != expectedCaseVersion) {
+            throw new ModerationCaseVersionConflictException();
+        }
+    }
+
+    private ListingModerationDecisionResponse applyListingModerationDecision(
+            ListingDraftResponse listing,
+            ListingModerationDecisionRequest request,
+            String reviewerUserId,
+            Instant now) {
+        return applyListingModerationDecision(listing, listing.version(), request, reviewerUserId, now);
+    }
+
+    private ListingModerationDecisionResponse applyListingModerationDecision(
+            ListingDraftResponse listing,
+            long expectedVersion,
+            ListingModerationDecisionRequest request,
+            String reviewerUserId,
+            Instant now) {
         if (!"PENDING_REVIEW".equals(listing.status()) || !"PENDING".equals(listing.moderationStatus())) {
             log.warn("Rejected listing moderation decision listingId={} status={} moderationStatus={} reason=invalid_state",
                     listing.id(), listing.status(), listing.moderationStatus());
@@ -262,7 +479,6 @@ public class ListingService {
             default -> throw new IllegalArgumentException("Decision must be APPROVE, REJECT, or REQUEST_CHANGES.");
         };
 
-        Instant now = Instant.now();
         Instant publishedAt = "APPROVE".equals(decision) ? now : null;
         int updated = listingDraftRepository.applyModerationDecision(
                 listing.id(),
@@ -284,12 +500,36 @@ public class ListingService {
                         listing.id(),
                         decision,
                         reason,
-                        reviewer.userId(),
+                        reviewerUserId,
                         expectedVersion + 1,
                         now));
-        log.info("Admin listing moderation decision listingId={} reviewerUserId={} decision={}",
-                listing.id(), reviewer.userId(), decision);
         return response;
+    }
+
+    private ListingDraftResponse activeApprovedListing(String listingId) {
+        ListingDraftResponse listing = listingDraftRepository.findOptionalById(listingId)
+                .orElseThrow(ListingNotFoundException::new);
+        if (!"ACTIVE".equals(listing.status()) || !"APPROVED".equals(listing.moderationStatus())) {
+            throw new IllegalArgumentException("Only active approved listings can use this admin action.");
+        }
+        return listing;
+    }
+
+    private void recordAdminListingAction(
+            String listingId,
+            String decision,
+            String reason,
+            String adminUserId,
+            long listingVersion,
+            Instant now) {
+        listingModerationDecisionRepository.insert(new ListingModerationDecisionInsert(
+                ulidGenerator.next(),
+                listingId,
+                decision,
+                normalizedRequiredText("Reason", reason, 1000),
+                adminUserId,
+                listingVersion,
+                now));
     }
 
     @Transactional
@@ -514,6 +754,16 @@ public class ListingService {
                 listingMediaRepository.findImagesByListingId(listing.id()));
     }
 
+    private AdminListingModerationCaseDetailResponse buildListingModerationCaseDetail(
+            AdminListingModerationCaseResponse moderationCase) {
+        ListingDraftResponse listing = withImages(listingDraftRepository.findOptionalById(moderationCase.listingId())
+                .orElseThrow(ListingNotFoundException::new));
+        return new AdminListingModerationCaseDetailResponse(
+                moderationCase,
+                listing,
+                listingModerationDecisionRepository.findByListingId(listing.id()));
+    }
+
     private ListingDraftResponse createBusinessDraft(CreateListingDraftRequest request) {
         String businessId = normalizedRequiredId("Business ID", request.businessId());
         if (Boolean.TRUE.equals(request.negotiable())) {
@@ -602,6 +852,66 @@ public class ListingService {
                 null);
     }
 
+    private ListingDraftUpdate adminActiveListingUpdate(
+            ListingDraftResponse listing,
+            AdminActiveListingUpdateRequest request) {
+        if ("INDIVIDUAL".equals(listing.sellerType())) {
+            return adminIndividualActiveListingUpdate(request);
+        }
+        return adminBusinessActiveListingUpdate(request);
+    }
+
+    private ListingDraftUpdate adminIndividualActiveListingUpdate(AdminActiveListingUpdateRequest request) {
+        if (request.quantity() != null && request.quantity() != 1) {
+            throw new IllegalArgumentException("Individual listing quantity must be 1.");
+        }
+        if (request.sku() != null && !request.sku().isBlank()) {
+            throw new IllegalArgumentException("Individual listing must not include a SKU.");
+        }
+        if (request.location() == null) {
+            throw new IllegalArgumentException("Individual listing location is required.");
+        }
+        String city = normalizedRequiredText("Public city", request.location().city(), 120);
+        String region = normalizedRequiredText("Public region", request.location().region(), 120);
+
+        return new ListingDraftUpdate(
+                request.categoryId(),
+                normalizedText("Title", request.title(), 160),
+                normalizedText("Description", request.description(), 5000),
+                request.condition(),
+                normalizedOptionalText("Condition notes", request.conditionNotes(), 1000),
+                request.price().amount(),
+                request.price().currency().toUpperCase(Locale.ROOT),
+                Boolean.TRUE.equals(request.negotiable()),
+                null,
+                1,
+                city,
+                region);
+    }
+
+    private ListingDraftUpdate adminBusinessActiveListingUpdate(AdminActiveListingUpdateRequest request) {
+        if (Boolean.TRUE.equals(request.negotiable())) {
+            throw new IllegalArgumentException("Business listings are not negotiable.");
+        }
+        if (request.quantity() == null) {
+            throw new IllegalArgumentException("Business listing quantity is required.");
+        }
+
+        return new ListingDraftUpdate(
+                request.categoryId(),
+                normalizedText("Title", request.title(), 160),
+                normalizedText("Description", request.description(), 5000),
+                request.condition(),
+                normalizedOptionalText("Condition notes", request.conditionNotes(), 1000),
+                request.price().amount(),
+                request.price().currency().toUpperCase(Locale.ROOT),
+                false,
+                normalizedRequiredText("SKU", request.sku(), 64),
+                request.quantity(),
+                null,
+                null);
+    }
+
     private ListingLocation individualLocation(
             CreateListingDraftRequest request,
             IndividualSellerAuthorization seller) {
@@ -639,9 +949,117 @@ public class ListingService {
         return listing;
     }
 
+    private OwnedListingSubmission ownedListingSubmission(String listingId) {
+        ListingOwnerSnapshot listing = listingDraftRepository.findOwnerSnapshot(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new);
+        return new OwnedListingSubmission(listing, requireListingOwner(listing));
+    }
+
     private AuthServiceClient.PlatformAdminAuthorization requirePlatformAdmin() {
         CurrentActor actor = currentActorProvider.currentActor();
         return authServiceClient.requirePlatformAdmin(actor.accessToken());
+    }
+
+    private AdminActor requirePlatformAdminActor() {
+        CurrentActor actor = currentActorProvider.currentActor();
+        return new AdminActor(actor.accessToken(), authServiceClient.requirePlatformAdmin(actor.accessToken()));
+    }
+
+    private List<AdminListingModerationCaseResponse> withAdminIdentityLabels(
+            List<AdminListingModerationCaseResponse> cases,
+            String accessToken) {
+        if (cases.isEmpty()) {
+            return cases;
+        }
+
+        LinkedHashSet<String> userIds = new LinkedHashSet<>();
+        LinkedHashSet<String> businessIds = new LinkedHashSet<>();
+        for (AdminListingModerationCaseResponse moderationCase : cases) {
+            addIdentityId(moderationCase.assignedAdminUserId(), userIds);
+            if ("BUSINESS".equals(moderationCase.sellerType())) {
+                addIdentityId(moderationCase.sellerId(), businessIds);
+            } else {
+                addIdentityId(moderationCase.sellerId(), userIds);
+            }
+        }
+
+        AuthServiceClient.AdminIdentityLabels labels =
+                authServiceClient.lookupAdminIdentityLabels(accessToken, userIds, businessIds);
+        if (labels == null) {
+            labels = new AuthServiceClient.AdminIdentityLabels(List.of(), List.of());
+        }
+        List<AuthServiceClient.UserIdentityLabel> userLabels = labels.users() == null ? List.of() : labels.users();
+        List<AuthServiceClient.BusinessIdentityLabel> businessLabels =
+                labels.businesses() == null ? List.of() : labels.businesses();
+        Map<String, AuthServiceClient.UserIdentityLabel> users = userLabels.stream()
+                .collect(Collectors.toMap(
+                        AuthServiceClient.UserIdentityLabel::id,
+                        Function.identity(),
+                        (first, ignored) -> first));
+        Map<String, AuthServiceClient.BusinessIdentityLabel> businesses = businessLabels.stream()
+                .collect(Collectors.toMap(
+                        AuthServiceClient.BusinessIdentityLabel::id,
+                        Function.identity(),
+                        (first, ignored) -> first));
+
+        return cases.stream()
+                .map(moderationCase -> moderationCase.withIdentityLabels(
+                        sellerDisplayName(moderationCase, users, businesses),
+                        adminDisplayName(moderationCase, users)))
+                .toList();
+    }
+
+    private AdminListingModerationCaseResponse withAdminIdentityLabels(
+            AdminListingModerationCaseResponse moderationCase,
+            String accessToken) {
+        return withAdminIdentityLabels(List.of(moderationCase), accessToken).getFirst();
+    }
+
+    private String sellerDisplayName(
+            AdminListingModerationCaseResponse moderationCase,
+            Map<String, AuthServiceClient.UserIdentityLabel> users,
+            Map<String, AuthServiceClient.BusinessIdentityLabel> businesses) {
+        if ("BUSINESS".equals(moderationCase.sellerType())) {
+            AuthServiceClient.BusinessIdentityLabel business = businesses.get(moderationCase.sellerId());
+            return business == null ? null : business.legalName();
+        }
+        AuthServiceClient.UserIdentityLabel user = users.get(moderationCase.sellerId());
+        return user == null ? null : user.displayName();
+    }
+
+    private String adminDisplayName(
+            AdminListingModerationCaseResponse moderationCase,
+            Map<String, AuthServiceClient.UserIdentityLabel> users) {
+        AuthServiceClient.UserIdentityLabel user = users.get(moderationCase.assignedAdminUserId());
+        return user == null ? null : user.displayName();
+    }
+
+    private void addIdentityId(String id, Set<String> ids) {
+        if (id != null && !id.isBlank()) {
+            ids.add(id);
+        }
+    }
+
+    private String normalizedCaseFilter(String filter) {
+        if (filter == null || filter.isBlank()) {
+            return "open";
+        }
+        String normalized = filter.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "open", "unassigned", "assigned_to_me", "resolved" -> normalized;
+            default -> throw new IllegalArgumentException("Case filter must be open, unassigned, assigned_to_me, or resolved.");
+        };
+    }
+
+    private String normalizedOptionalSearchQuery(String query) {
+        String normalized = TextInputs.collapseWhitespaceToNull(query);
+        if (normalized == null) {
+            return null;
+        }
+        if (normalized.length() > 120) {
+            throw new IllegalArgumentException("Search query is too long.");
+        }
+        return normalized;
     }
 
     private String normalizedDecision(String decision) {
@@ -661,7 +1079,7 @@ public class ListingService {
         return null;
     }
 
-    private void requireListingOwner(ListingOwnerSnapshot listing) {
+    private String requireListingOwner(ListingOwnerSnapshot listing) {
         CurrentActor actor = currentActorProvider.currentActor();
         if (listing.sellerType() == ListingSellerType.INDIVIDUAL) {
             IndividualSellerAuthorization seller = authServiceClient.requireActiveIndividualSeller(actor.accessToken());
@@ -670,7 +1088,7 @@ public class ListingService {
                         listing.id(), listing.sellerType(), listing.individualSellerUserId(), seller.userId());
                 throw new ListingAuthorizationException("Listing belongs to another seller.");
             }
-            return;
+            return seller.userId();
         }
 
         BusinessMembershipAuthorization membership =
@@ -680,6 +1098,10 @@ public class ListingService {
                     listing.id(), listing.sellerType(), listing.businessId(), membership.businessId());
             throw new ListingAuthorizationException("Listing belongs to another business.");
         }
+        return membership.userId();
+    }
+
+    private record OwnedListingSubmission(ListingOwnerSnapshot listing, String submittedByUserId) {
     }
 
     // Adds listing/media context around storage verification failures without logging upload URLs or tokens.
@@ -805,5 +1227,11 @@ public class ListingService {
     }
 
     private record ListingLocation(String city, String region) {
+    }
+
+    private record AdminActor(
+            String accessToken,
+            AuthServiceClient.PlatformAdminAuthorization authorization
+    ) {
     }
 }

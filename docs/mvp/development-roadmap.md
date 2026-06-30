@@ -299,17 +299,31 @@ Individual trade creation and completion remain V3.
 
 ### 5.7 Basic Admin Moderation
 
-Status: business application admin decision and basic listing moderation
-decision are complete.
+Status: ADM-00 admin shell, ADM-BUS-01 business application queue, and
+ADM-BUS-02 business application detail are complete; ADM-BUS-03 decision UX,
+business application admin decision, and basic listing moderation decision are
+also complete.
+
+Reference: `docs/mvp/adm/admin-mvp-plan.md`
 
 Recommended slices:
 
-1. ADM-LIST-00 moderation case foundation for richer listing review queues.
-2. ADM-LIST-01 listing submission creates a moderation case.
-3. ADM-LIST-03 seller-facing decision reason/status.
+1. ADM-00 admin portal shell hardening.
+2. ADM-BUS-01 business application queue.
+3. ADM-BUS-02 business application review detail.
+4. ADM-BUS-03 business application decision UX.
+5. ADM-LIST-00 moderation case foundation for richer listing review queues.
+6. ADM-LIST-01 listing submission creates a moderation case.
+7. ADM-LIST-02 listing moderation queue upgrade with claim/release.
+8. ADM-LIST-03 listing review detail and case resolution.
+9. ADM-LIST-04 active listing admin edit and removal.
+10. ADM-LIST-05 listing review search.
+11. ADM-AUD-01 minimal admin audit visibility for MVP workflows.
 
-Advanced reports, suspensions, support cases, operations queues, and disputes
-remain V3.
+Reports, starting with ADM-REP-01 user-reported listing queue,
+suspensions/restores, support cases, chat evidence review, payment/order/finance
+operations, advanced trust/disputes, and AI moderation assistance are admin
+roadmap scope but deferred until after the MVP admin foundation is stable.
 
 ## 6. Immediate Next Work
 
