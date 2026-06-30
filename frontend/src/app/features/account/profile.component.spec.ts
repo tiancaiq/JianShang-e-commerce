@@ -34,8 +34,8 @@ describe('ProfileComponent', () => {
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
-    userProfileService.getMe.and.returnValue(of({ data: user }));
-    userProfileService.updateMe.and.returnValue(of({ data: { ...user, displayName: 'Alex Profile', version: 4 } }));
+    userProfileService.getMe.and.returnValue(of(user));
+    userProfileService.updateMe.and.returnValue(of({ ...user, displayName: 'Alex Profile', version: 4 }));
 
     await TestBed.configureTestingModule({
       imports: [ProfileComponent],
@@ -57,6 +57,7 @@ describe('ProfileComponent', () => {
     expect(userProfileService.getMe).toHaveBeenCalled();
     expect(component.user()).toEqual(user);
     expect(component.displayName).toBe('Alex');
+    expect(fixture.nativeElement.textContent).toContain('Marketplace account');
   });
 
   it('saves only allowed profile fields', () => {

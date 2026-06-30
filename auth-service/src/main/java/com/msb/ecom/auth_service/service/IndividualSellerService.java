@@ -5,6 +5,7 @@ import com.msb.ecom.auth_service.dto.IndividualSellerProfileResponse;
 import com.msb.ecom.auth_service.model.IndividualSellerProfile;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.auth_service.repository.IndividualSellerProfileRepository;
+import com.msb.ecom.common.core.validation.TextInputs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -67,14 +68,7 @@ public class IndividualSellerService {
     }
 
     private String normalizedLocation(String fieldName, String value) {
-        String trimmed = value == null ? "" : value.trim().replaceAll("\\s+", " ");
-        if (trimmed.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " is required");
-        }
-        if (trimmed.length() > 120) {
-            throw new IllegalArgumentException(fieldName + " is too long");
-        }
-        return trimmed;
+        return TextInputs.requireCollapsed(fieldName, value, 120);
     }
 
     private String normalizedTermsVersion(String termsVersion) {

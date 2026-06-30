@@ -9,6 +9,7 @@ import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
 import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -17,18 +18,22 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
 
 @RestControllerAdvice
+@Slf4j
 public class ListingExceptionHandler {
 
     @ExceptionHandler(ListingAuthorizationException.class)
     public ResponseEntity<ApiErrorEnvelope> handleListingAuthorization(
             ListingAuthorizationException exception,
             HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Denied listing action path={} correlationId={} reason={}",
+                request.getRequestURI(), correlationId, exception.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ApiErrorEnvelope(new ApiError(
                         "LISTING_FORBIDDEN",
                         exception.getMessage(),
                         List.of(),
-                        CorrelationIdFilter.current(request))));
+                        correlationId)));
     }
 
     @ExceptionHandler(CategoryNotFoundException.class)
@@ -59,24 +64,28 @@ public class ListingExceptionHandler {
     public ResponseEntity<ApiErrorEnvelope> handleListingMediaNotFound(
             ListingMediaNotFoundException exception,
             HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Listing media lookup failed path={} correlationId={}", request.getRequestURI(), correlationId);
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiErrorEnvelope(new ApiError(
                         "LISTING_MEDIA_NOT_FOUND",
                         "Listing media was not found.",
                         List.of(),
-                        CorrelationIdFilter.current(request))));
+                        correlationId)));
     }
 
     @ExceptionHandler(ListingVersionConflictException.class)
     public ResponseEntity<ApiErrorEnvelope> handleListingVersionConflict(
             ListingVersionConflictException exception,
             HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Listing version conflict path={} correlationId={}", request.getRequestURI(), correlationId);
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiErrorEnvelope(new ApiError(
                         "LISTING_VERSION_CONFLICT",
                         "Listing draft was changed by another request.",
                         List.of(),
-                        CorrelationIdFilter.current(request))));
+                        correlationId)));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

@@ -11,6 +11,7 @@ import {
   SessionResponse,
 } from '../models/auth.model';
 import { environment } from '../../../environments/environment';
+import { unwrapData } from './api-response';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -110,8 +111,9 @@ export class AuthService {
         return this.http.get<ApiDataResponse<CurrentUser>>(this.url('/api/v1/users/me'), {
           withCredentials: true,
         }).pipe(
-          map(response => {
-            this.currentUser.set(response.data);
+          map(unwrapData),
+          map(user => {
+            this.currentUser.set(user);
             return this.snapshot();
           }),
           catchError(() => {

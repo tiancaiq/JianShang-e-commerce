@@ -67,13 +67,34 @@ MVP application responsibilities:
 
 | Application | MVP responsibility | Deferred |
 |---|---|---|
-| Marketplace user site | Guest browsing, search, listing detail, buyer account flows, individual seller listing/chat flows | Business checkout, buyer orders, reviews, AI |
-| Business seller portal | Business onboarding status, basic store profile, basic business listing management | Inventory, order management, fulfillment, payments, staff management, analytics |
+| Marketplace user site | Guest browsing, search, listing detail, buyer account flows, individual seller profile/listing/chat flows | Business checkout, buyer orders, reviews, AI |
+| Business seller portal | Business onboarding status, basic store profile, basic business listing management | Individual personal listing management, inventory, order management, fulfillment, payments, staff management, analytics |
 | Admin portal | Business application review and listing moderation | Reports, disputes, suspensions, support operations, finance operations |
 
 Guests must be able to browse approved public listings without authentication.
 Authentication is required for profile management, selling, business portal
 access, chat, and admin actions.
+
+Individual seller tools live in the marketplace account experience, not in the
+business seller portal. A user who is both an individual seller and a business
+member may use both surfaces, but each surface only exposes the matching
+workflow.
+
+UI strategy:
+
+| Application | UI style | Primary interaction pattern |
+|---|---|---|
+| Marketplace user site | Commerce marketplace UI inspired by familiar shopping experiences | Search, category browse, listing cards, listing detail, seller contact |
+| Business seller portal | Merchant management dashboard | Forms, tables, listing/store status, operational task flows |
+| Admin portal | Internal operations dashboard | Review queues, filters, decision forms, audit context |
+
+The marketplace UI should feel like a shopping site. The seller and admin
+portals should feel like management systems. Shared components are allowed,
+but navigation, information density, and page layout should follow the user's
+task context.
+
+Detailed marketplace UI rules live in
+`docs/mvp/ui/marketplace-ui-redesign.md`.
 
 ## 2.1 Shared Code Libraries
 
@@ -251,7 +272,8 @@ Redis may coordinate connections and presence.
 
 ### 4.5 Commerce service (V2)
 
-Evolution path: coordinate `inventory-service` and `order-service`.
+Evolution path: reintroduce inventory/order modules from the archived V2
+tutorial stubs only after an approved V2 slice defines the real contracts.
 
 Responsibilities:
 
@@ -263,8 +285,8 @@ Responsibilities:
 - Fulfillment groups
 - Shipment records
 
-Inventory ownership remains in `inventory-service`. Order state remains in
-`order-service`. Cross-service flow uses explicit orchestration and idempotent
+Inventory and order state ownership will be decided in the V2 architecture
+slice. Cross-service flow must use explicit orchestration and idempotent
 commands; no service writes another service's tables.
 
 These capabilities are intentionally outside the MVP business seller portal.
@@ -272,7 +294,8 @@ MVP merchants manage business profile and basic listings only.
 
 ### 4.6 Payment service (V2)
 
-Existing module: `payment-service`.
+Archived V2 tutorial stub: `payment-service`. It is not part of the active MVP
+Maven build or CI validation.
 
 Responsibilities:
 
@@ -287,7 +310,8 @@ The payment service never receives raw card data.
 
 ### 4.7 Notification service (V2)
 
-Existing module: `notification-service`.
+Archived V2 tutorial stub: `notification-service`. It is not part of the
+active MVP Maven build or CI validation.
 
 Responsibilities:
 

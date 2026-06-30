@@ -63,7 +63,7 @@ describe('BusinessApplicationService', () => {
     };
 
     service.createDraft(body).subscribe(response => {
-      expect(response.data).toEqual(application);
+      expect(response).toEqual(application);
     });
 
     const request = httpMock.expectOne('/api/v1/business-applications');
@@ -86,7 +86,7 @@ describe('BusinessApplicationService', () => {
       websiteUrl: 'https://example.com',
       description: 'Local seller',
     }, 0).subscribe(response => {
-      expect(response.data).toEqual(application);
+      expect(response).toEqual(application);
     });
 
     const request = httpMock.expectOne(`/api/v1/business-applications/${application.id}`);
@@ -99,7 +99,7 @@ describe('BusinessApplicationService', () => {
 
   it('submits a draft with If-Match version', () => {
     service.submit(application.id, 0).subscribe(response => {
-      expect(response.data).toEqual(application);
+      expect(response).toEqual(application);
     });
 
     const request = httpMock.expectOne(`/api/v1/business-applications/${application.id}/submit`);
@@ -116,7 +116,7 @@ describe('BusinessApplicationService', () => {
       decision: 'APPROVE',
       reason: 'Business information verified',
     }).subscribe(response => {
-      expect(response.data).toEqual(application);
+      expect(response).toEqual(application);
     });
 
     const request = httpMock.expectOne(

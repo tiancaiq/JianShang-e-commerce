@@ -1,9 +1,17 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Category, ListingCondition, ListingDraft, ListingImage, ListingMedia, ListingSellerType } from '../../core/models/listing.model';
+import { Category, ListingCondition, ListingDraft, ListingImage, ListingSellerType } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import {
+  buildListingDraftRequest,
+  listingDraftToFormState,
+  ListingDraftFormState,
+  validateListingDraftForm,
+  validateSelectedListingImage,
+} from './listing-draft-form.helpers';
+import { ListingMediaUploadError, ListingMediaUploadService } from './listing-media-upload.service';
 
 @Component({
   selector: 'app-listing-draft-form',
@@ -14,7 +22,7 @@ import { ToastService } from '../../core/services/toast.service';
       <header class="page-header">
         <div>
           <h1>{{ isEditMode() ? 'Edit Listing Draft' : 'New Listing Draft' }}</h1>
-          <p>{{ isEditMode() ? 'Edit a saved draft before moderation.' : 'Save a draft for later review. Publishing and search are not enabled yet.' }}</p>
+          <p>{{ isEditMode() ? 'Update your marketplace draft before review.' : 'Build a marketplace draft, add photos, and submit it for review.' }}</p>
         </div>
       </header>
 
@@ -170,7 +178,7 @@ import { ToastService } from '../../core/services/toast.service';
         }
 
         <div class="actions">
-          <button type="button" class="secondary-btn" (click)="router.navigate(['/seller/listings'])" [disabled]="saving() || submitting()">Cancel</button>
+          <button type="button" class="secondary-btn" (click)="router.navigate([listingBasePath()])" [disabled]="saving() || submitting()">Cancel</button>
           @if (isEditMode()) {
             <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="saving() || submitting()">
               {{ submitting() ? 'Submitting' : 'Submit for review' }}
@@ -186,20 +194,26 @@ import { ToastService } from '../../core/services/toast.service';
     </section>
   `,
   styles: [`
+    :host {
+      display: block;
+    }
+
     .listing-page {
       max-width: 960px;
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
+      margin: 0 auto;
     }
 
     .page-header h1 {
       font-size: 1.75rem;
       margin-bottom: 0.25rem;
+      color: var(--listing-text);
     }
 
     .page-header p {
-      color: var(--color-text-muted);
+      color: var(--listing-subtle);
       font-size: 0.875rem;
     }
 
@@ -208,10 +222,11 @@ import { ToastService } from '../../core/services/toast.service';
       flex-direction: column;
       gap: 1rem;
       max-width: 760px;
-      background: var(--color-bg-secondary);
-      border: 1px solid var(--color-border);
+      background: var(--listing-surface);
+      border: 1px solid var(--listing-border);
       border-radius: var(--radius-lg);
       padding: 1.25rem;
+      box-shadow: var(--listing-shadow);
     }
 
     .form-grid {
@@ -230,32 +245,33 @@ import { ToastService } from '../../core/services/toast.service';
     .checkbox-row span {
       font-size: 0.8125rem;
       font-weight: 600;
-      color: var(--color-text-secondary);
+      color: var(--listing-muted);
     }
 
     .field input,
     .field select,
     .field textarea {
       width: 100%;
-      min-height: 64px;
+      min-height: 42px;
       padding: 0.625rem 0.75rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
+      background: var(--listing-field);
+      border: 1px solid var(--listing-border);
       border-radius: var(--radius-md);
-      color: var(--color-text-primary);
+      color: var(--listing-text);
       font-size: 0.875rem;
       outline: none;
     }
 
     .field textarea {
+      min-height: 120px;
       resize: vertical;
     }
 
     .field input:focus,
     .field select:focus,
     .field textarea:focus {
-      border-color: var(--color-accent);
-      box-shadow: 0 0 0 3px var(--color-accent-muted);
+      border-color: var(--listing-accent);
+      box-shadow: 0 0 0 3px var(--listing-accent-muted);
     }
 
     .checkbox-row {
@@ -287,7 +303,7 @@ import { ToastService } from '../../core/services/toast.service';
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
-      border-top: 1px solid var(--color-border);
+      border-top: 1px solid var(--listing-border);
       padding-top: 1rem;
     }
 
@@ -307,15 +323,24 @@ import { ToastService } from '../../core/services/toast.service';
       align-items: center;
       min-height: 64px;
       padding: 0.625rem 0.75rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
+      background: var(--listing-field);
+      border: 1px solid var(--listing-border);
       border-radius: var(--radius-md);
       font-size: 0.8125rem;
     }
 
+    .media-list img {
+      width: 56px;
+      height: 42px;
+      flex: 0 0 auto;
+      object-fit: cover;
+      border-radius: var(--radius-sm);
+      background: var(--listing-surface);
+    }
+
     .media-list span {
       overflow-wrap: anywhere;
-      color: var(--color-text-secondary);
+      color: var(--listing-muted);
     }
 
     .media-list strong {
@@ -331,10 +356,10 @@ import { ToastService } from '../../core/services/toast.service';
       gap: 0.75rem;
       min-height: 40px;
       padding: 0.625rem 0.75rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
+      background: var(--listing-field);
+      border: 1px solid var(--listing-border);
       border-radius: var(--radius-md);
-      color: var(--color-text-secondary);
+      color: var(--listing-muted);
       font-size: 0.8125rem;
     }
 
@@ -345,7 +370,7 @@ import { ToastService } from '../../core/services/toast.service';
     .text-btn {
       border: 0;
       background: transparent;
-      color: var(--color-accent);
+      color: var(--listing-accent);
       font-weight: 700;
       cursor: pointer;
     }
@@ -372,14 +397,14 @@ import { ToastService } from '../../core/services/toast.service';
 
     .primary-btn {
       border: 1px solid transparent;
-      background: var(--color-accent);
-      color: #0c0c0e;
+      background: var(--listing-primary-bg);
+      color: var(--listing-primary-text);
     }
 
     .secondary-btn {
-      border: 1px solid var(--color-border);
-      background: var(--color-bg-tertiary);
-      color: var(--color-text-secondary);
+      border: 1px solid var(--listing-border);
+      background: var(--listing-field);
+      color: var(--listing-muted);
     }
 
     .primary-btn:disabled,
@@ -400,10 +425,8 @@ import { ToastService } from '../../core/services/toast.service';
   `]
 })
 export class ListingDraftFormComponent implements OnInit {
-  private static readonly MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-  private static readonly ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-
   private listingService = inject(ListingService);
+  private mediaUploadService = inject(ListingMediaUploadService);
   private toastService = inject(ToastService);
   private route = inject(ActivatedRoute);
   router = inject(Router);
@@ -482,25 +505,7 @@ export class ListingDraftFormComponent implements OnInit {
     this.mediaError.set('');
     this.mediaMessage.set('');
 
-    const request = {
-      sellerType: this.sellerType,
-      businessId: this.sellerType === 'BUSINESS' ? this.businessId.trim() : null,
-      categoryId: this.categoryId,
-      title: this.title.trim(),
-      description: this.description.trim(),
-      condition: this.condition,
-      conditionNotes: this.conditionNotes.trim() || null,
-      price: {
-        amount: Number(this.price),
-        currency: this.currency.trim().toUpperCase(),
-      },
-      negotiable: this.sellerType === 'INDIVIDUAL' ? this.negotiable : false,
-      location: this.sellerType === 'INDIVIDUAL'
-        ? { city: this.publicCity.trim() || null, region: this.publicRegion.trim() || null }
-        : null,
-      sku: this.sellerType === 'BUSINESS' ? this.sku.trim() : null,
-      quantity: this.sellerType === 'BUSINESS' ? Number(this.quantity) : 1,
-    };
+    const request = buildListingDraftRequest(this.formState());
 
     const save = this.isEditMode()
       ? this.listingService.updateDraft(this.editListingId, this.currentVersion, request)
@@ -519,7 +524,7 @@ export class ListingDraftFormComponent implements OnInit {
         this.saving.set(false);
         this.toastService.success(this.isEditMode() ? 'Listing draft updated.' : 'Listing draft saved.');
         if (!this.isEditMode()) {
-          this.router.navigate(['/seller/listings', listing.id, 'edit']);
+          this.router.navigate(this.editListingPath(listing.id));
         }
       },
       error: error => {
@@ -549,12 +554,9 @@ export class ListingDraftFormComponent implements OnInit {
     if (!file) {
       return;
     }
-    if (!ListingDraftFormComponent.ALLOWED_IMAGE_TYPES.has(file.type)) {
-      this.mediaError.set('Use a JPEG, PNG, or WebP image.');
-      return;
-    }
-    if (file.size <= 0 || file.size > ListingDraftFormComponent.MAX_IMAGE_SIZE_BYTES) {
-      this.mediaError.set('Image must be 10 MB or less.');
+    const mediaValidationError = validateSelectedListingImage(file);
+    if (mediaValidationError) {
+      this.mediaError.set(mediaValidationError);
       return;
     }
 
@@ -610,116 +612,47 @@ export class ListingDraftFormComponent implements OnInit {
     this.mediaError.set('');
     this.mediaMessage.set('');
 
-    this.listingService.requestMediaUpload(listingId, {
-      contentType: file.type,
-      fileName: file.name,
-      sizeBytes: file.size,
-    }).subscribe({
-      next: media => this.uploadMediaBytes(listingId, file, media, draftJustCreated),
+    this.mediaUploadService.uploadAndAttach(listingId, file, this.mediaItems()).subscribe({
+      next: attachedImages => this.finishMediaUpload(listingId, attachedImages, draftJustCreated),
       error: error => {
         this.saving.set(false);
         this.uploadingMedia.set(false);
-        this.mediaError.set(error.error?.error?.message || 'Image upload could not be requested.');
+        this.mediaError.set(this.mediaUploadErrorMessage(error));
       },
     });
   }
 
-  private uploadMediaBytes(listingId: string, file: File, media: ListingMedia, draftJustCreated: boolean): void {
-    this.listingService.uploadMediaFile(media.uploadUrl, file).subscribe({
-      next: () => this.confirmMedia(listingId, file, media, draftJustCreated),
-      error: () => {
-        this.saving.set(false);
-        this.uploadingMedia.set(false);
-        this.mediaError.set('Image bytes could not be uploaded to storage.');
-      },
-    });
-  }
-
-  private confirmMedia(listingId: string, file: File, media: ListingMedia, draftJustCreated: boolean): void {
-    this.listingService.confirmMediaUpload(listingId, media.id, {
-      sizeBytes: file.size,
-    }).subscribe({
-      next: confirmed => {
-        this.attachConfirmedMedia(listingId, confirmed, draftJustCreated);
-      },
-      error: error => {
-        this.saving.set(false);
-        this.uploadingMedia.set(false);
-        this.mediaError.set(error.error?.error?.message || 'Image upload could not be confirmed.');
-      },
-    });
-  }
-
-  private attachConfirmedMedia(listingId: string, media: ListingMedia, draftJustCreated: boolean): void {
-    const images = [
-      ...this.mediaItems().map(item => ({
-        mediaId: item.mediaObjectId,
-        altText: item.altText,
-      })),
-      {
-        mediaId: media.id,
-        altText: media.originalFileName,
-      },
-    ];
-
-    this.listingService.updateListingImages(listingId, { images }).subscribe({
-      next: attachedImages => {
-        this.saving.set(false);
-        this.uploadingMedia.set(false);
-        this.mediaItems.set(attachedImages);
-        this.mediaMessage.set('Image attached to draft.');
-        this.clearSelectedMedia();
-        this.toastService.success(draftJustCreated ? 'Listing draft and image saved.' : 'Listing image saved.');
-        if (draftJustCreated && !this.isEditMode()) {
-          this.router.navigate(['/seller/listings', listingId, 'edit']);
-        }
-      },
-      error: error => {
-        this.saving.set(false);
-        this.uploadingMedia.set(false);
-        this.mediaError.set(error.error?.error?.message || 'Image could not be attached to the draft.');
-      },
-    });
+  private finishMediaUpload(listingId: string, attachedImages: ListingImage[], draftJustCreated: boolean): void {
+    this.saving.set(false);
+    this.uploadingMedia.set(false);
+    this.mediaItems.set(attachedImages);
+    this.mediaMessage.set('Image attached to draft.');
+    this.clearSelectedMedia();
+    this.toastService.success(draftJustCreated ? 'Listing draft and image saved.' : 'Listing image saved.');
+    if (draftJustCreated && !this.isEditMode()) {
+      this.router.navigate(this.editListingPath(listingId));
+    }
   }
 
   imageUrl(image: ListingImage): string {
     return this.listingService.mediaUrl(image.url || image.uploadUrl);
   }
 
+  // Keeps individual listing draft navigation inside the marketplace account surface.
+  listingBasePath(): string {
+    return '/account/listings';
+  }
+
+  // Builds the edit route used after draft creation and media attachment.
+  private editListingPath(listingId: string): string[] {
+    return [this.listingBasePath(), listingId, 'edit'];
+  }
+
   private validate(): boolean {
-    if (!this.categoryId) {
-      this.errorMsg.set('Category is required.');
+    const result = validateListingDraftForm(this.formState());
+    if (!result.valid) {
+      this.errorMsg.set(result.message);
       return false;
-    }
-    if (!this.title.trim()) {
-      this.errorMsg.set('Title is required.');
-      return false;
-    }
-    if (!this.description.trim()) {
-      this.errorMsg.set('Description is required.');
-      return false;
-    }
-    if (this.price === null || Number(this.price) < 0) {
-      this.errorMsg.set('Price must be zero or greater.');
-      return false;
-    }
-    if (!/^[A-Za-z]{3}$/.test(this.currency.trim())) {
-      this.errorMsg.set('Currency must be a 3-letter code.');
-      return false;
-    }
-    if (this.sellerType === 'BUSINESS') {
-      if (this.businessId.trim().length !== 26) {
-        this.errorMsg.set('Business ID is required.');
-        return false;
-      }
-      if (!this.sku.trim()) {
-        this.errorMsg.set('SKU is required for business listings.');
-        return false;
-      }
-      if (this.quantity === null || Number(this.quantity) < 0) {
-        this.errorMsg.set('Quantity must be zero or greater.');
-        return false;
-      }
     }
 
     return true;
@@ -740,23 +673,64 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   private populateFromDraft(listing: ListingDraft): void {
+    const state = listingDraftToFormState(listing);
     this.savedId.set(listing.id);
     this.currentVersion = listing.version;
     this.listingStatus.set(listing.status);
-    this.sellerType = listing.sellerType;
-    this.businessId = listing.businessId || '';
-    this.categoryId = listing.categoryId;
-    this.title = listing.title;
-    this.description = listing.description;
-    this.condition = listing.condition;
-    this.conditionNotes = listing.conditionNotes || '';
-    this.price = Number(listing.priceAmount);
-    this.currency = listing.currency;
-    this.publicCity = listing.publicCity || '';
-    this.publicRegion = listing.publicRegion || '';
-    this.negotiable = listing.negotiable;
-    this.sku = listing.sku || '';
-    this.quantity = listing.quantity;
+    this.applyFormState(state);
     this.mediaItems.set(listing.images || []);
+  }
+
+  private formState(): ListingDraftFormState {
+    return {
+      sellerType: this.sellerType,
+      businessId: this.businessId,
+      categoryId: this.categoryId,
+      title: this.title,
+      description: this.description,
+      condition: this.condition,
+      conditionNotes: this.conditionNotes,
+      price: this.price,
+      currency: this.currency,
+      publicCity: this.publicCity,
+      publicRegion: this.publicRegion,
+      negotiable: this.negotiable,
+      sku: this.sku,
+      quantity: this.quantity,
+    };
+  }
+
+  private applyFormState(state: ListingDraftFormState): void {
+    this.sellerType = state.sellerType;
+    this.businessId = state.businessId;
+    this.categoryId = state.categoryId;
+    this.title = state.title;
+    this.description = state.description;
+    this.condition = state.condition;
+    this.conditionNotes = state.conditionNotes;
+    this.price = state.price;
+    this.currency = state.currency;
+    this.publicCity = state.publicCity;
+    this.publicRegion = state.publicRegion;
+    this.negotiable = state.negotiable;
+    this.sku = state.sku;
+    this.quantity = state.quantity;
+  }
+
+  private mediaUploadErrorMessage(error: unknown): string {
+    if (!(error instanceof ListingMediaUploadError)) {
+      return 'Image upload could not be completed.';
+    }
+    const originalError = error.originalError as { error?: { error?: { message?: string } } } | undefined;
+    if (error.step === 'request') {
+      return originalError?.error?.error?.message || 'Image upload could not be requested.';
+    }
+    if (error.step === 'upload') {
+      return 'Image bytes could not be uploaded to storage.';
+    }
+    if (error.step === 'confirm') {
+      return originalError?.error?.error?.message || 'Image upload could not be confirmed.';
+    }
+    return originalError?.error?.error?.message || 'Image could not be attached to the draft.';
   }
 }

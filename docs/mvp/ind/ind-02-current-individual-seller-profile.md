@@ -13,9 +13,15 @@ Implemented behavior:
 - returns active seller profile fields from `individual_seller_profiles`
 - returns `404 INDIVIDUAL_SELLER_NOT_FOUND` for authenticated non-sellers
 - returns `401` for unauthenticated callers
-- Angular `/seller/activate` loads this endpoint on page entry and shows the
+- Legacy Angular `/seller/activate` loads this endpoint on page entry and shows the
   active seller summary instead of the activation form when the user is already
   activated
+
+MVP target UI:
+
+- individual seller profile status should move to the marketplace account
+  route `/account/seller-profile`
+- see `docs/mvp/ind/ind-03-marketplace-individual-selling-plan.md`
 
 ## Non-goals
 

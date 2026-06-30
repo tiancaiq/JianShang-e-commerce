@@ -92,6 +92,17 @@ Error:
 }
 ```
 
+Current MVP implementation note (`STAB-P1-03`):
+
+- Identity/auth-service endpoints currently return the single-resource
+  `{"data": ...}` envelope.
+- Product/listing endpoints currently return raw resources or arrays.
+- Angular core services unwrap enveloped responses before component code sees
+  them. Components should consume domain objects and collections directly,
+  not transport envelopes.
+- Changing product/listing endpoints to the standard envelope is deferred to a
+  separate contract-change slice with backend and frontend tests.
+
 Expected status codes:
 
 - `200` read/update success
@@ -716,6 +727,18 @@ SEARCH-01 implements the initial database-backed public browse path:
 `GET /public/listings`. It returns newest approved active listings using the
 same safe public projection as `GET /public/listings/{listingId}`. It has a
 server-side cap and no client filters yet.
+
+SEARCH-00 defines the MVP read-model direction: public browse and storefront
+reads start from MySQL source tables and expose only safe public fields.
+OpenSearch is deferred until the database-backed browse, storefront, filters,
+sorting, and cursor pagination contracts are stable.
+
+Public listing cards may expose listing ID, seller type, category display
+data, title, condition, price, public location, published time, negotiable
+state, transaction notice, and approved image URLs. They must not expose owner
+user IDs, business staff/member data, internal status, moderation state,
+versions, media bucket/key, exact individual locations, or private contact
+data.
 
 Maximum `limit` is server-controlled. Search result includes seller type and
 checkout/off-platform disclosure.

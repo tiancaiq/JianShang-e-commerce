@@ -1,5 +1,6 @@
 package com.msb.ecom.product_service.controller;
 
+import com.msb.ecom.common.web.http.IfMatchVersion;
 import com.msb.ecom.product_service.service.ListingService;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
@@ -33,6 +34,8 @@ import java.util.List;
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
 public class ListingController {
+
+    private static final String LISTING_VERSION_REQUIRED = "If-Match must contain the current listing version.";
 
     private final ListingService listingService;
 
@@ -89,14 +92,19 @@ public class ListingController {
             @PathVariable String listingId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody CreateListingDraftRequest request) {
-        return listingService.updateDraft(listingId, parseVersion(ifMatch), request);
+        return listingService.updateDraft(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
+                request);
     }
 
     @PostMapping("/listings/{listingId}/submit")
     public ListingDraftResponse submitForReview(
             @PathVariable String listingId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch) {
-        return listingService.submitForReview(listingId, parseVersion(ifMatch));
+        return listingService.submitForReview(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
     }
 
     @PostMapping("/admin/listings/{listingId}/decision")
@@ -104,7 +112,10 @@ public class ListingController {
             @PathVariable String listingId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody ListingModerationDecisionRequest request) {
-        return listingService.decideListing(listingId, parseVersion(ifMatch), request);
+        return listingService.decideListing(
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
+                request);
     }
 
     @PostMapping("/listings/{listingId}/media/upload-request")
@@ -139,18 +150,4 @@ public class ListingController {
         return listingService.updateListingImages(listingId, request);
     }
 
-    private long parseVersion(String ifMatch) {
-        if (ifMatch == null || ifMatch.isBlank()) {
-            throw new IllegalArgumentException("If-Match must contain the current listing version.");
-        }
-        String value = ifMatch.trim();
-        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
-            value = value.substring(1, value.length() - 1);
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("If-Match must contain the current listing version.");
-        }
-    }
 }

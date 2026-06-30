@@ -4,19 +4,21 @@ import { Router } from '@angular/router';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { ToastService } from '../../core/services/toast.service';
 import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.model';
+import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
 
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, StatusPillComponent],
   template: `
     <section class="profile-page">
       <header class="profile-header">
         <div>
+          <p class="eyebrow">Marketplace account</p>
           <h1>Profile</h1>
-          <p>{{ user()?.email || 'Signed in account' }}</p>
+          <p class="profile-subtitle">{{ user()?.email || 'Signed in account' }}</p>
         </div>
-        <span class="status-pill">{{ user()?.status || 'LOADING' }}</span>
+        <app-ui-status-pill>{{ user()?.status || 'LOADING' }}</app-ui-status-pill>
       </header>
 
       <form class="profile-form" (ngSubmit)="save()">
@@ -74,11 +76,41 @@ import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.mo
     </section>
   `,
   styles: [`
+    :host {
+      display: block;
+      --profile-surface: var(--color-bg-secondary);
+      --profile-field: var(--color-bg-tertiary);
+      --profile-border: var(--color-border);
+      --profile-text: var(--color-text-primary);
+      --profile-muted: var(--color-text-secondary);
+      --profile-subtle: var(--color-text-muted);
+      --profile-accent: var(--color-accent);
+      --profile-accent-muted: var(--color-accent-muted);
+      --profile-primary-bg: var(--color-accent);
+      --profile-primary-text: #0c0c0e;
+      --profile-shadow: none;
+    }
+
+    :host-context(.marketplace-shell) {
+      --profile-surface: rgba(255, 255, 255, 0.92);
+      --profile-field: #fff8fc;
+      --profile-border: var(--market-line);
+      --profile-text: var(--market-ink);
+      --profile-muted: var(--market-muted);
+      --profile-subtle: var(--market-muted);
+      --profile-accent: var(--market-accent-dark);
+      --profile-accent-muted: rgba(244, 114, 182, 0.16);
+      --profile-primary-bg: linear-gradient(135deg, #ff85bd, #8b6fe8);
+      --profile-primary-text: #fff;
+      --profile-shadow: 0 14px 34px rgba(143, 92, 144, 0.1);
+    }
+
     .profile-page {
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
       max-width: 860px;
+      margin: 0 auto;
     }
 
     .profile-header {
@@ -86,38 +118,44 @@ import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.mo
       align-items: flex-start;
       justify-content: space-between;
       gap: 1rem;
+      padding: 1.25rem;
+      border: 1px solid var(--profile-border);
+      border-radius: var(--radius-lg);
+      background: var(--profile-surface);
+      box-shadow: var(--profile-shadow);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.35rem;
+      color: var(--profile-accent);
+      font-size: 0.75rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     .profile-header h1 {
       font-size: 1.75rem;
       margin-bottom: 0.25rem;
+      color: var(--profile-text);
     }
 
-    .profile-header p {
-      color: var(--color-text-muted);
+    .profile-subtitle {
+      margin: 0;
+      color: var(--profile-subtle);
       font-size: 0.875rem;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 0 0.625rem;
-      border-radius: var(--radius-md);
-      background: var(--color-accent-muted);
-      color: var(--color-accent);
-      font-size: 0.75rem;
-      font-weight: 700;
+      font-weight: 650;
     }
 
     .profile-form {
-      background: var(--color-bg-secondary);
-      border: 1px solid var(--color-border);
+      background: var(--profile-surface);
+      border: 1px solid var(--profile-border);
       border-radius: var(--radius-lg);
       padding: 1.25rem;
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
+      box-shadow: var(--profile-shadow);
     }
 
     .form-grid {
@@ -135,24 +173,24 @@ import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.mo
     .field span {
       font-size: 0.8125rem;
       font-weight: 600;
-      color: var(--color-text-secondary);
+      color: var(--profile-muted);
     }
 
     .field input {
       width: 100%;
       min-height: 40px;
       padding: 0.625rem 0.75rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
+      background: var(--profile-field);
+      border: 1px solid var(--profile-border);
       border-radius: var(--radius-md);
-      color: var(--color-text-primary);
+      color: var(--profile-text);
       font-size: 0.875rem;
       outline: none;
     }
 
     .field input:focus {
-      border-color: var(--color-accent);
-      box-shadow: 0 0 0 3px var(--color-accent-muted);
+      border-color: var(--profile-accent);
+      box-shadow: 0 0 0 3px var(--profile-accent-muted);
     }
 
     .field input:disabled {
@@ -187,14 +225,14 @@ import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.mo
     }
 
     .primary-btn {
-      background: var(--color-accent);
-      color: #0c0c0e;
+      background: var(--profile-primary-bg);
+      color: var(--profile-primary-text);
     }
 
     .secondary-btn {
-      background: transparent;
-      color: var(--color-text-secondary);
-      border-color: var(--color-border);
+      background: var(--profile-field);
+      color: var(--profile-muted);
+      border-color: var(--profile-border);
     }
 
     .primary-btn:disabled,
@@ -246,8 +284,8 @@ export class ProfileComponent implements OnInit {
     this.errorMsg.set('');
 
     this.userProfileService.getMe().subscribe({
-      next: response => {
-        this.applyUser(response.data);
+      next: user => {
+        this.applyUser(user);
         this.loading.set(false);
       },
       error: error => {
@@ -271,8 +309,8 @@ export class ProfileComponent implements OnInit {
     this.errorMsg.set('');
 
     this.userProfileService.updateMe(this.toRequest(), current.version).subscribe({
-      next: response => {
-        this.applyUser(response.data);
+      next: user => {
+        this.applyUser(user);
         this.saving.set(false);
         this.toastService.success('Profile saved.');
       },

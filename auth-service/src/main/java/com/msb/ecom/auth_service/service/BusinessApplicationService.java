@@ -7,6 +7,7 @@ import com.msb.ecom.auth_service.dto.BusinessVerificationWebhookRequest;
 import com.msb.ecom.auth_service.model.BusinessApplication;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.auth_service.repository.BusinessApplicationRepository;
+import com.msb.ecom.common.core.validation.TextInputs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -223,12 +224,14 @@ public class BusinessApplicationService {
             value = value.substring("sha256=".length());
         }
         if (!value.matches("^[0-9a-fA-F]{64}$")) {
+            log.warn("Denied business verification webhook reason=invalid_signature_format");
             throw new BusinessApplicationForbiddenException();
         }
         String expected = hmacSha256Hex(rawBody);
         if (!MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.US_ASCII),
                 value.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII))) {
+            log.warn("Denied business verification webhook reason=signature_mismatch");
             throw new BusinessApplicationForbiddenException();
         }
     }
@@ -257,6 +260,7 @@ public class BusinessApplicationService {
                 where user_id = ? and role_id = ?
                 """, Integer.class, userId, PLATFORM_ADMIN_ROLE);
         if (count == null || count == 0) {
+            log.warn("Denied business application admin action userId={} reason=missing_platform_admin_role", userId);
             throw new BusinessApplicationForbiddenException();
         }
     }
@@ -354,11 +358,8 @@ public class BusinessApplicationService {
     }
 
     private String optionalText(String fieldName, String value, int maxLength) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim().replaceAll("\\s+", " ");
-        if (trimmed.isBlank()) {
+        String trimmed = TextInputs.collapseWhitespaceToNull(value);
+        if (trimmed == null) {
             return null;
         }
         if (trimmed.length() > maxLength) {

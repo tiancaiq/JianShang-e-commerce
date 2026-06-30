@@ -20,11 +20,7 @@
 		<module>common-web</module>
 		<module>common-testing</module>
 		<module>product-service</module>
-		<module>order-service</module>
-		<module>inventory-service</module>
 		<module>api-gateway</module>
-		<module>notification-service</module>
-		<module>payment-service</module>
 		<module>auth-service</module>
 	</modules>
 

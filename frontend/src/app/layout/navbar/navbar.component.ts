@@ -2,6 +2,8 @@ import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 
+// Quarantined V2/tutorial navbar for the legacy shell. Active MVP surfaces use
+// marketplace, seller, and admin layout headers instead.
 @Component({
   selector: 'app-navbar',
   standalone: true,
@@ -115,11 +117,13 @@ export class NavbarComponent {
   authService = inject(AuthService);
   private router = inject(Router);
 
+  // Derives the legacy demo shell page title from the current URL.
   getPageTitle(): string {
     const path = this.router.url.split('/')[1] || 'dashboard';
     return path.charAt(0).toUpperCase() + path.slice(1);
   }
 
+  // Returns an initial for the legacy demo shell user menu.
   getUserInitial(): string {
     const user = this.authService.user();
     if (!user) return '?';
@@ -127,6 +131,7 @@ export class NavbarComponent {
     return name.charAt(0).toUpperCase();
   }
 
+  // Delegates logout from the legacy demo shell header.
   handleLogout() {
     this.authService.logout();
   }

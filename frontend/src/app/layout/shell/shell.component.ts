@@ -4,6 +4,8 @@ import { SidebarComponent } from '../sidebar/sidebar.component';
 import { NavbarComponent } from '../navbar/navbar.component';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 
+// Quarantined V2/tutorial shell. Do not wire this into active MVP routes;
+// use marketplace, seller, and admin layouts instead.
 @Component({
   selector: 'app-shell',
   standalone: true,
@@ -61,6 +63,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 export class ShellComponent {
   sidebarCollapsed = signal(false);
 
+  // Tracks the legacy demo sidebar width state for the quarantined shell.
   onSidebarCollapse(collapsed: boolean) {
     this.sidebarCollapsed.set(collapsed);
   }

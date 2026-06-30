@@ -15,7 +15,6 @@ import { ToastService } from '../../core/services/toast.service';
       <header class="page-header">
         <div>
           <h1>Listing Review</h1>
-          <p>Review submitted listing drafts before public marketplace visibility.</p>
         </div>
         <button type="button" class="secondary-btn" (click)="loadQueue()" [disabled]="loading()">Refresh</button>
       </header>

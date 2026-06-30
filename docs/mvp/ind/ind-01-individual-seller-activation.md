@@ -14,7 +14,13 @@ Implemented behavior:
 - stores public city and region only
 - requires current terms version `2026-01`
 - rejects duplicate activation, exact address fields, internal IDs, status, and role fields
-- adds Angular route `/seller/activate`
+- adds legacy Angular route `/seller/activate`
+
+MVP target UI:
+
+- individual seller activation should move to the marketplace account route
+  `/account/seller-profile`
+- see `docs/mvp/ind/ind-03-marketplace-individual-selling-plan.md`
 
 ## Non-goals
 

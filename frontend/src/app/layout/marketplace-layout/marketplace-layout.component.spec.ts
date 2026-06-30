@@ -39,4 +39,27 @@ describe('MarketplaceLayoutComponent', () => {
     expect(text).not.toContain('Admin');
     expect(text).not.toContain('Business Review');
   });
+
+  it('does not expose V2 commerce navigation on the public marketplace', () => {
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+
+    expect(text).not.toContain('Cart');
+    expect(text).not.toContain('Checkout');
+    expect(text).not.toContain('Orders');
+    expect(text).not.toContain('Payments');
+    expect(text).not.toContain('Inventory');
+    expect(text).not.toContain('Wallet');
+    expect(text).not.toContain('Notifications');
+  });
+
+  it('keeps marketplace selling inside account listing creation', () => {
+    fixture.detectChanges();
+
+    const sellLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'Sell');
+
+    expect(sellLink?.getAttribute('href')).toBe('/account/listings/new');
+  });
 });

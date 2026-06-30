@@ -113,9 +113,13 @@ docker compose config --quiet
 
    ```bash
    cd product-service && ../mvnw spring-boot:run
-   cd order-service && ../mvnw spring-boot:run
-   # ... repeat for other services
+   cd auth-service && ../mvnw spring-boot:run
+   cd api-gateway && ../mvnw spring-boot:run
    ```
+
+   `order-service`, `inventory-service`, `payment-service`, and
+   `notification-service` are archived V2/tutorial stubs and are not part of
+   the active MVP build.
 
 4. **Run Frontend**
    ```bash

@@ -62,6 +62,25 @@ The product has three user-facing surfaces:
 The MVP must make these surfaces visible as separate product areas, but it
 does not need the full V2 commerce back office yet.
 
+UI direction:
+
+- The public marketplace should use a commerce browsing style similar to
+  familiar large marketplace patterns: prominent search, category navigation,
+  listing cards, image-forward detail pages, seller type labels, and clear
+  calls to action.
+- The business seller portal should use a management dashboard style focused
+  on forms, tables, status badges, store/listing workflows, and operational
+  clarity.
+- The admin portal should use an internal operations style focused on queues,
+  filters, decisions, audit context, and safe moderation actions.
+
+Do not force the business seller portal or admin portal to look like the
+public marketplace. Their users are doing operational work, not casual
+shopping.
+
+Detailed marketplace UI direction is maintained in
+`docs/mvp/ui/marketplace-ui-redesign.md`.
+
 ### 2.1 Marketplace application
 
 Audience:
@@ -73,9 +92,12 @@ Audience:
 Responsibilities:
 
 - Let guests browse, search, and view approved listings without signing in
+- Present listings with shopping-oriented cards, images, search, categories,
+  and detail pages
 - Display business and individual seller types clearly
 - Manage buyer accounts
-- Create individual listings
+- Activate and manage the user's individual seller profile
+- Create, edit, submit, and track the user's individual listings
 - Let signed-in buyers and individual sellers use basic text chat to
   negotiate individual deals
 
@@ -97,6 +119,10 @@ Responsibilities:
 - Complete business onboarding
 - Manage basic store profile
 - Manage basic business listings
+- Use dashboard-style pages for merchant work rather than shopping-style
+  browsing pages
+- Exclude personal individual-seller listing tools; those belong in the
+  marketplace account experience
 
 Deferred:
 
@@ -120,6 +146,7 @@ Responsibilities:
 
 - Review and decide business applications
 - Review and moderate listing submissions
+- Use dashboard-style queues, tables, filters, and decision forms
 
 Deferred to V3:
 

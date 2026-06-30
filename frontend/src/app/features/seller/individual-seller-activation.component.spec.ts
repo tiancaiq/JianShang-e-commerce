@@ -33,7 +33,7 @@ describe('IndividualSellerActivationComponent', () => {
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
     individualSellerService.getMe.and.returnValue(throwError(() => ({ status: 404 })));
-    individualSellerService.activate.and.returnValue(of({ data: profile }));
+    individualSellerService.activate.and.returnValue(of(profile));
 
     await TestBed.configureTestingModule({
       imports: [IndividualSellerActivationComponent],
@@ -50,7 +50,7 @@ describe('IndividualSellerActivationComponent', () => {
   });
 
   it('loads active individual seller profile on init', () => {
-    individualSellerService.getMe.and.returnValue(of({ data: profile }));
+    individualSellerService.getMe.and.returnValue(of(profile));
 
     fixture.detectChanges();
 

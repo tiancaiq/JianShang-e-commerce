@@ -377,8 +377,8 @@ export class BusinessApplicationComponent {
       websiteUrl: this.trimOrNull(this.websiteUrl),
       description: this.trimOrNull(this.description),
     }).subscribe({
-      next: response => {
-        this.application.set(response.data);
+      next: application => {
+        this.application.set(application);
         this.saving.set(false);
         this.toastService.success('Business application draft saved.');
       },
@@ -407,8 +407,8 @@ export class BusinessApplicationComponent {
     this.errorMsg.set('');
 
     this.businessApplicationService.submit(current.id, current.version).subscribe({
-      next: response => {
-        this.application.set(response.data);
+      next: application => {
+        this.application.set(application);
         this.submitting.set(false);
         this.toastService.success('Business application submitted.');
       },

@@ -103,6 +103,7 @@ describe('ListingDraftFormComponent', () => {
     ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
+    (router as unknown as { url: string }).url = '/account/listings/new';
 
     listingService.getCategories.and.returnValue(of([category]));
     listingService.createDraft.and.returnValue(of(draft));
@@ -169,6 +170,16 @@ describe('ListingDraftFormComponent', () => {
     }));
     expect(component.savedId()).toBe(draft.id);
     expect(toastService.success).toHaveBeenCalledWith('Listing draft saved.');
+  });
+
+  it('redirects new marketplace account drafts to the account edit route', () => {
+    (router as unknown as { url: string }).url = '/account/listings/new';
+    fixture.detectChanges();
+    fillCommonFields();
+
+    component.saveDraft();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/account/listings', draft.id, 'edit']);
   });
 
   it('saves the selected image immediately after creating the draft', () => {

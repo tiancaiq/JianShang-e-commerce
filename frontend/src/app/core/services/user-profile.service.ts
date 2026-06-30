@@ -1,9 +1,10 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ApiDataResponse } from '../models/auth.model';
 import { CurrentUser, UpdateCurrentUserRequest } from '../models/user.model';
+import { unwrapData } from './api-response';
 import { AuthService } from './auth.service';
 
 @Injectable({ providedIn: 'root' })
@@ -15,19 +16,21 @@ export class UserProfileService {
     private authService: AuthService
   ) {}
 
-  getMe(): Observable<ApiDataResponse<CurrentUser>> {
+  getMe(): Observable<CurrentUser> {
     return this.http.get<ApiDataResponse<CurrentUser>>(this.baseUrl, { withCredentials: true }).pipe(
-      tap(response => this.authService.setCurrentUser(response.data))
+      map(unwrapData),
+      tap(user => this.authService.setCurrentUser(user))
     );
   }
 
-  updateMe(request: UpdateCurrentUserRequest, version: number): Observable<ApiDataResponse<CurrentUser>> {
+  updateMe(request: UpdateCurrentUserRequest, version: number): Observable<CurrentUser> {
     const headers = new HttpHeaders({ 'If-Match': String(version) });
     return this.http.patch<ApiDataResponse<CurrentUser>>(this.baseUrl, request, {
       headers,
       withCredentials: true,
     }).pipe(
-      tap(response => this.authService.setCurrentUser(response.data))
+      map(unwrapData),
+      tap(user => this.authService.setCurrentUser(user))
     );
   }
 }

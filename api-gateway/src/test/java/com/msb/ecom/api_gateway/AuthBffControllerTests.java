@@ -96,6 +96,7 @@ class AuthBffControllerTests {
                         .with(csrf())
                         .with(oidcLogin()))
                 .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", "http://localhost:4200/"))
                 .andExpect(header().string("Set-Cookie", containsString("JSESSIONID=;")));
     }
 }

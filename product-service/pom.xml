@@ -15,6 +15,11 @@
 	<dependencies>
 		<dependency>
 			<groupId>com.msb.ecom</groupId>
+			<artifactId>common-core</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.msb.ecom</groupId>
 			<artifactId>common-web</artifactId>
 			<version>${project.version}</version>
 		</dependency>
