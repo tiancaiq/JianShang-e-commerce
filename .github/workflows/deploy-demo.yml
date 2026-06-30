@@ -21,4 +21,6 @@ jobs:
             git checkout dev
             git pull --ff-only origin dev
             git log --oneline -1
+            chmod +x mvnw
+            ./mvnw -DskipTests package
             docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
