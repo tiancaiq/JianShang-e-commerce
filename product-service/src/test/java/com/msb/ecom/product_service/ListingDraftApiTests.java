@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.service.AuthServiceClient;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
+import com.msb.ecom.product_service.storage.StorageObjectAccessDeniedException;
 import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
 import com.msb.ecom.product_service.storage.StorageUploadTarget;
 import org.junit.jupiter.api.BeforeEach;
@@ -629,6 +630,41 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void sellerCanEditPendingReviewListingBackToDraftForResubmission() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.quantity", equalTo(2)))
+                .andExpect(jsonPath("$.version", equalTo(2)));
+    }
+
+    @Test
+    void sellerCanClosePendingReviewListing() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/close", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("CLOSED")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("PENDING")))
+                .andExpect(jsonPath("$.version", equalTo(2)));
+    }
+
+    @Test
     void individualSubmitCreatesListingReviewCaseWithSellerSnapshot() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -812,7 +848,7 @@ class ListingDraftApiTests {
                         "01A00000000000000000000001", "PLATFORM_ADMIN"));
         when(authServiceClient.lookupAdminIdentityLabels(eq("admin-token"), anySet(), anySet()))
                 .thenReturn(new AuthServiceClient.AdminIdentityLabels(
-                        List.of(new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller")),
+                        List.of(new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", null)),
                         List.of()));
 
         mockMvc.perform(get("/api/v1/admin/moderation/listing-cases")
@@ -939,8 +975,8 @@ class ListingDraftApiTests {
                 anySet()))
                 .thenReturn(new AuthServiceClient.AdminIdentityLabels(
                         List.of(
-                                new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller"),
-                                new AuthServiceClient.UserIdentityLabel("01A00000000000000000000001", "Morgan Admin")),
+                                new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", null),
+                                new AuthServiceClient.UserIdentityLabel("01A00000000000000000000001", "Morgan Admin", null)),
                         List.of()));
 
         mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
@@ -973,7 +1009,7 @@ class ListingDraftApiTests {
                         "01A00000000000000000000001", "PLATFORM_ADMIN"));
         when(authServiceClient.lookupAdminIdentityLabels(eq("admin-token"), anySet(), anySet()))
                 .thenReturn(new AuthServiceClient.AdminIdentityLabels(
-                        List.of(new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller")),
+                        List.of(new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", null)),
                         List.of()));
 
         mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}", caseId)
@@ -1012,8 +1048,8 @@ class ListingDraftApiTests {
         when(authServiceClient.lookupAdminIdentityLabels(eq("admin-token"), anySet(), anySet()))
                 .thenReturn(new AuthServiceClient.AdminIdentityLabels(
                         List.of(
-                                new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller"),
-                                new AuthServiceClient.UserIdentityLabel("01A00000000000000000000001", "Morgan Admin")),
+                                new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", null),
+                                new AuthServiceClient.UserIdentityLabel("01A00000000000000000000001", "Morgan Admin", null)),
                         List.of()));
 
         mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
@@ -1880,6 +1916,25 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void publicListingMediaReturnsBadGatewayWhenStorageReadIsDenied() throws Exception {
+        String listingId = createApprovedIndividualListing();
+        String response = mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String imageId = objectMapper.readTree(response).get("images").get(0).get("id").asText();
+
+        doThrow(new StorageObjectAccessDeniedException("Stored media object could not be read."))
+                .when(listingMediaStorage)
+                .readObject(anyString());
+
+        mockMvc.perform(get("/api/v1/public/listing-media/{imageId}", imageId))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_MEDIA_STORAGE_ACCESS_DENIED")));
+    }
+
+    @Test
     void sellerCanPreviewOwnedDraftImageThroughAppEndpoint() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -1889,6 +1944,24 @@ class ListingDraftApiTests {
 
         mockMvc.perform(get("/api/v1/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.IMAGE_PNG))
+                .andExpect(content().bytes(new byte[]{1, 2, 3}));
+    }
+
+    @Test
+    void platformAdminCanPreviewUploadedListingImageForModeration() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        "01A00000000000000000000001", "PLATFORM_ADMIN"));
+        String listingId = createIndividualDraft();
+        String mediaId = createConfirmedMedia(listingId, "bike.png");
+
+        mockMvc.perform(get("/api/v1/admin/listings/{listingId}/media/{mediaId}/content", listingId, mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token"))))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.IMAGE_PNG))
                 .andExpect(content().bytes(new byte[]{1, 2, 3}));
@@ -1917,13 +1990,20 @@ class ListingDraftApiTests {
         String approvedListingId = createApprovedIndividualListing();
         String pendingListingId = createSubmittedListingForAdminDecision();
         String rejectedListingId = createRejectedIndividualListing();
+        when(authServiceClient.lookupPublicSellerLabels(anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(
+                        List.of(new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", "https://example.com/alex.png")),
+                        List.of()));
 
         mockMvc.perform(get("/api/v1/public/listings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[*].id", hasItem(approvedListingId)))
+                .andExpect(jsonPath("$[?(@.id == '%s')].sellerDisplayName".formatted(approvedListingId), hasItem("Alex Seller")))
+                .andExpect(jsonPath("$[?(@.id == '%s')].sellerAvatarUrl".formatted(approvedListingId), hasItem("https://example.com/alex.png")))
                 .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.not(hasItem(pendingListingId))))
                 .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.not(hasItem(rejectedListingId))))
                 .andExpect(jsonPath("$[0].individualSellerUserId").doesNotExist())
+                .andExpect(jsonPath("$[0].sellerId").doesNotExist())
                 .andExpect(jsonPath("$[0].status").doesNotExist())
                 .andExpect(jsonPath("$[0].moderationStatus").doesNotExist());
     }

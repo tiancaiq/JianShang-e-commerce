@@ -176,7 +176,7 @@ Approved example tone:
 
 ```text
 Find it. List it. Trade safely.
-Browse individual and business listings in one marketplace.
+Browse individual listings in the marketplace, with business stores separated.
 ```
 
 Call to action examples:

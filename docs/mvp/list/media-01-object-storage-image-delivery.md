@@ -8,10 +8,9 @@ MEDIA-01 connects listing images to S3-compatible object storage. The MVP
 configuration targets Google Cloud Storage through its S3-compatible XML API
 using HMAC credentials and bucket `jianshang`.
 
-The storage bucket should remain private. Browsers receive short-lived signed
-URLs for upload and read access; no bucket-wide public access is required.
-The bucket must allow CORS from the local frontend origin for browser uploads
-and image reads.
+The storage bucket should remain private. Browsers receive application media
+URLs, and product-service reads approved media from object storage. No
+bucket-wide public access is required.
 
 ## Backend
 
@@ -24,8 +23,8 @@ Implemented behavior:
   as `UPLOADED`.
 - `GET /api/v1/listings/{listingId}/media/{mediaId}/content` returns a signed
   read redirect for the owning seller preview.
-- `GET /api/v1/public/listing-media/{imageId}` returns a signed read redirect
-  only for approved images attached to approved active public listings.
+- `GET /api/v1/public/listing-media/{imageId}` reads approved images attached
+  to approved active public listings through product-service.
 
 Rules:
 

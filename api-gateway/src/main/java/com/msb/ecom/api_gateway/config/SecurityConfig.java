@@ -5,27 +5,38 @@ import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenDecoderFactory;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
-import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.security.web.authentication.logout.LogoutHandler;
+import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.IOException;
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,14 +47,17 @@ public class SecurityConfig {
     private final List<String> allowedOrigins;
     private final String logoutRedirectUri;
     private final String loginSuccessBaseUri;
+    private final String oidcLogoutUri;
 
     public SecurityConfig(
             @Value("${msb.gateway.cors.allowed-origins:http://localhost:4200}") List<String> allowedOrigins,
             @Value("${msb.gateway.auth.logout-redirect-uri:http://localhost:4200/}") String logoutRedirectUri,
-            @Value("${msb.gateway.auth.login-success-base-uri:http://localhost:4200}") String loginSuccessBaseUri) {
+            @Value("${msb.gateway.auth.login-success-base-uri:http://localhost:4200}") String loginSuccessBaseUri,
+            @Value("${msb.gateway.auth.oidc-logout-uri}") String oidcLogoutUri) {
         this.allowedOrigins = allowedOrigins;
         this.logoutRedirectUri = logoutRedirectUri;
         this.loginSuccessBaseUri = loginSuccessBaseUri;
+        this.oidcLogoutUri = oidcLogoutUri;
     }
 
     @Bean
@@ -61,7 +75,8 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(csrfRequestHandler)
-                        .ignoringRequestMatchers(new AntPathRequestMatcher("/api/v1/webhooks/business-verification")))
+                        .ignoringRequestMatchers(
+                                new AntPathRequestMatcher("/api/v1/webhooks/business-verification")))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
                                 "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**",
@@ -72,6 +87,7 @@ public class SecurityConfig {
                                 "/api/v1/public/listings", "/api/v1/public/listings/**",
                                 "/api/v1/public/listing-media/**",
                                 "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/session",
+                                "/api/v1/auth/native/login", "/api/v1/auth/native/register",
                                 "/api/v1/auth/callback/**", "/oauth2/authorization/**",
                                 "/login/oauth2/code/**")
                         .permitAll()
@@ -86,14 +102,28 @@ public class SecurityConfig {
                         .successHandler(loginSuccessHandler()))
                 .oauth2Client(Customizer.withDefaults())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
+                .securityContext(securityContext -> securityContext.securityContextRepository(securityContextRepository()))
+                .exceptionHandling(exceptions -> exceptions
+                        .defaultAuthenticationEntryPointFor(
+                                new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+                                new AntPathRequestMatcher("/api/**")))
                 .logout(logout -> logout
                         .logoutUrl("/api/v1/auth/logout")
-                        .addLogoutHandler(oauth2AuthorizedClientLogoutHandler(authorizedClientService))
-                        .logoutSuccessHandler(oidcLogoutSuccessHandler(clientRegistrationRepository))
+                        .logoutSuccessHandler(oidcLogoutSuccessHandler(authorizedClientService))
                         .clearAuthentication(true)
                         .invalidateHttpSession(true)
                         .deleteCookies("JSESSIONID"))
                 .build();
+    }
+
+    @Bean
+    public SecurityContextRepository securityContextRepository() {
+        return new HttpSessionSecurityContextRepository();
+    }
+
+    @Bean
+    public JwtDecoderFactory<ClientRegistration> idTokenDecoderFactory() {
+        return new OidcIdTokenDecoderFactory();
     }
 
     private OAuth2AuthorizationRequestResolver pkceAuthorizationRequestResolver(
@@ -105,18 +135,31 @@ public class SecurityConfig {
         return new OAuth2AuthorizationRequestResolver() {
             @Override
             public OAuth2AuthorizationRequest resolve(jakarta.servlet.http.HttpServletRequest request) {
-                return withRegistrationAction(resolver.resolve(request), request.getParameter("kc_action"));
+                return withAuthHints(
+                        resolver.resolve(request),
+                        request.getParameter("kc_action"),
+                        request.getParameter("kc_idp_hint"));
             }
 
             @Override
             public OAuth2AuthorizationRequest resolve(
                     jakarta.servlet.http.HttpServletRequest request,
                     String clientRegistrationId) {
-                return withRegistrationAction(
+                return withAuthHints(
                         resolver.resolve(request, clientRegistrationId),
-                        request.getParameter("kc_action"));
+                        request.getParameter("kc_action"),
+                        request.getParameter("kc_idp_hint"));
             }
         };
+    }
+
+    private OAuth2AuthorizationRequest withAuthHints(
+            OAuth2AuthorizationRequest authorizationRequest,
+            String keycloakAction,
+            String identityProviderHint) {
+        OAuth2AuthorizationRequest withRegistrationAction =
+                withRegistrationAction(authorizationRequest, keycloakAction);
+        return withIdentityProviderHint(withRegistrationAction, identityProviderHint);
     }
 
     private OAuth2AuthorizationRequest withRegistrationAction(
@@ -134,42 +177,129 @@ public class SecurityConfig {
                 .build();
     }
 
+    private OAuth2AuthorizationRequest withIdentityProviderHint(
+            OAuth2AuthorizationRequest authorizationRequest,
+            String identityProviderHint) {
+        if (authorizationRequest == null || !"google".equals(identityProviderHint)) {
+            return authorizationRequest;
+        }
+
+        Map<String, Object> additionalParameters =
+                new LinkedHashMap<>(authorizationRequest.getAdditionalParameters());
+        additionalParameters.put("kc_idp_hint", "google");
+        return OAuth2AuthorizationRequest.from(authorizationRequest)
+                .additionalParameters(additionalParameters)
+                .build();
+    }
+
     private AuthenticationSuccessHandler loginSuccessHandler() {
         return (request, response, authentication) -> {
             String returnUrl = "/";
+            boolean popup = false;
             HttpSession session = request.getSession(false);
             if (session != null) {
                 Object candidate = session.getAttribute(LoginReturnUrl.SESSION_ATTRIBUTE);
+                Object popupCandidate = session.getAttribute(LoginReturnUrl.POPUP_SESSION_ATTRIBUTE);
                 session.removeAttribute(LoginReturnUrl.SESSION_ATTRIBUTE);
+                session.removeAttribute(LoginReturnUrl.POPUP_SESSION_ATTRIBUTE);
+                popup = Boolean.TRUE.equals(popupCandidate);
                 if (candidate instanceof String value) {
                     returnUrl = LoginReturnUrl.sanitize(value).orElse("/");
                 }
             }
-            response.sendRedirect(LoginReturnUrl.joinWithBaseUri(loginSuccessBaseUri, returnUrl));
+            String targetUrl = LoginReturnUrl.joinWithBaseUri(loginSuccessBaseUri, returnUrl);
+            if (popup) {
+                sendPopupCompletion(response, targetUrl, returnUrl);
+                return;
+            }
+            response.sendRedirect(targetUrl);
         };
     }
 
-    private OidcClientInitiatedLogoutSuccessHandler oidcLogoutSuccessHandler(
-            ClientRegistrationRepository clientRegistrationRepository) {
-        OidcClientInitiatedLogoutSuccessHandler successHandler =
-                new OidcClientInitiatedLogoutSuccessHandler(clientRegistrationRepository);
-        successHandler.setPostLogoutRedirectUri(logoutRedirectUri);
-        successHandler.setDefaultTargetUrl(logoutRedirectUri);
-        return successHandler;
+    private void sendPopupCompletion(
+            jakarta.servlet.http.HttpServletResponse response,
+            String targetUrl,
+            String returnUrl) throws IOException {
+        response.setStatus(200);
+        response.setContentType("text/html;charset=UTF-8");
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache");
+        String targetOrigin = originOf(loginSuccessBaseUri);
+        response.getWriter().write("""
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <meta charset="utf-8">
+                  <title>MSB Commerce sign-in complete</title>
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                </head>
+                <body>
+                  <p>Sign-in complete. You can close this window.</p>
+                  <script>
+                    (function () {
+                      var message = { type: 'MSB_AUTH_COMPLETE', returnUrl: '%s' };
+                      if (window.opener && !window.opener.closed) {
+                        window.opener.postMessage(message, '%s');
+                        window.close();
+                      }
+                      window.location.replace('%s');
+                    })();
+                  </script>
+                </body>
+                </html>
+                """.formatted(
+                jsString(returnUrl),
+                jsString(targetOrigin),
+                jsString(targetUrl)));
+    }
+
+    private String originOf(String uri) {
+        URI parsed = URI.create(uri);
+        String port = parsed.getPort() >= 0 ? ":" + parsed.getPort() : "";
+        return parsed.getScheme() + "://" + parsed.getHost() + port;
+    }
+
+    private String jsString(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\r", "")
+                .replace("\n", "");
+    }
+
+    private LogoutSuccessHandler oidcLogoutSuccessHandler(
+            OAuth2AuthorizedClientService authorizedClientService) {
+        return (request, response, authentication) -> {
+            String targetUrl = oidcLogoutRedirectUri(authentication);
+            removeAuthorizedClient(authorizedClientService, authentication);
+            response.sendRedirect(targetUrl);
+        };
+    }
+
+    private String oidcLogoutRedirectUri(Authentication authentication) {
+        if (authentication != null && authentication.getPrincipal() instanceof OidcUser oidcUser
+                && oidcUser.getIdToken() != null) {
+            return UriComponentsBuilder.fromUriString(oidcLogoutUri)
+                    .queryParam("id_token_hint", oidcUser.getIdToken().getTokenValue())
+                    .queryParam("post_logout_redirect_uri", logoutRedirectUri)
+                    .build()
+                    .encode()
+                    .toUriString();
+        }
+        return logoutRedirectUri;
     }
 
     // Removes server-side OAuth tokens so a logged-out browser must start a fresh login flow.
-    private LogoutHandler oauth2AuthorizedClientLogoutHandler(
-            OAuth2AuthorizedClientService authorizedClientService) {
-        return (request, response, authentication) -> {
-            OAuth2AuthenticationToken oauth2Authentication = oauth2Authentication(authentication);
-            if (oauth2Authentication == null) {
-                return;
-            }
-            authorizedClientService.removeAuthorizedClient(
-                    oauth2Authentication.getAuthorizedClientRegistrationId(),
-                    oauth2Authentication.getName());
-        };
+    private void removeAuthorizedClient(
+            OAuth2AuthorizedClientService authorizedClientService,
+            Authentication authentication) {
+        OAuth2AuthenticationToken oauth2Authentication = oauth2Authentication(authentication);
+        if (oauth2Authentication == null) {
+            return;
+        }
+        authorizedClientService.removeAuthorizedClient(
+                oauth2Authentication.getAuthorizedClientRegistrationId(),
+                oauth2Authentication.getName());
     }
 
     private OAuth2AuthenticationToken oauth2Authentication(Authentication authentication) {

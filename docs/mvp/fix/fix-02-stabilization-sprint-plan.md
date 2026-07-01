@@ -217,6 +217,8 @@ Acceptance criteria:
 
 ### STAB-P0-05 Fix Documentation Duplicates And Slice Naming Drift
 
+Status: complete.
+
 Problem:
 
 - Slice docs exist in both old and new locations:
@@ -251,6 +253,18 @@ Acceptance criteria:
 
 - Teammates can find one source of truth for each slice.
 - Roadmap, AGENTS, and slice docs use consistent naming.
+
+Completion note:
+
+- Top-level `docs/mvp/list-02-media-upload-request-confirm.md` is now a
+  redirect note to `docs/mvp/list/list-02-media-upload-request-confirm.md`.
+- Top-level `docs/mvp/fix-01-restore-verification-baseline.md` is now a
+  redirect note to `docs/mvp/fix/fix-01-restore-verification-baseline.md`.
+- `SITE-00` source content now lives in
+  `docs/mvp/site/site-00-logical-three-site-separation.md`; the old top-level
+  file is a redirect note.
+- `AGENTS.md` now lists `docs/mvp/search/` and `docs/mvp/site/` as approved
+  feature folders.
 
 ## P1: Should Fix Soon
 

@@ -18,6 +18,9 @@ shipping.
   `listing_media_objects` tables as the source of truth.
 - Return only listings with `status=ACTIVE` and `moderation_status=APPROVED`.
 - Reuse the same safe public projection for listing cards and listing detail.
+- Split public discovery into two MVP user experiences:
+  - individual marketplace search for `INDIVIDUAL` listings
+  - business storefront browse for `BUSINESS` listings
 - Keep the marketplace homepage listing-first. Secondary actions belong in the
   top navigation or seller/admin route groups, not in the main browse surface.
 - Add OpenSearch only after the database-backed browse, storefront, filters,
@@ -82,13 +85,20 @@ Current browse endpoint:
 GET /api/v1/public/listings
 ```
 
-Planned storefront endpoint:
+Planned individual marketplace search endpoint:
+
+```text
+GET /api/v1/public/marketplace/listings?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
+```
+
+Planned storefront endpoints:
 
 ```text
 GET /api/v1/public/stores/{storeSlugOrId}
+GET /api/v1/public/stores/{storeSlugOrId}/listings?categoryId=&condition=&minPrice=&maxPrice=&sort=&cursor=&limit=
 ```
 
-Planned browse improvements:
+Shared fallback browse improvements:
 
 ```text
 GET /api/v1/public/listings?keyword=&categoryId=&sellerType=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
@@ -97,6 +107,11 @@ GET /api/v1/public/listings?keyword=&categoryId=&sellerType=&condition=&minPrice
 Rules:
 
 - Guest access is allowed.
+- Individual marketplace search defaults to `sellerType=INDIVIDUAL`.
+- Storefront browse is scoped to one approved active business and returns only
+  that business's approved active listings.
+- Shared browse may still accept `sellerType`, but product pages should route
+  users into the correct individual or business experience.
 - Cursor pagination is required for unbounded collections.
 - Server controls maximum `limit`.
 - Sorts must be stable and deterministic.
@@ -148,7 +163,7 @@ Recommended layout:
 
 No runtime tests are required for SEARCH-00 because it is a planning slice.
 
-Before implementing SEARCH-02 or SEARCH-03, keep the existing verification
+Before implementing SEARCH-02A, SEARCH-02B, or SEARCH-03, keep the existing verification
 baseline green:
 
 ```powershell
@@ -161,8 +176,9 @@ npm.cmd run build
 
 ## Deferred
 
-- Public business storefront implementation: SEARCH-02.
-- Keyword/filter/sort/cursor browse: SEARCH-03.
+- Individual marketplace keyword search: SEARCH-02A.
+- Public business storefront browse: SEARCH-02B.
+- Shared filter/sort/cursor browse: SEARCH-03.
 - OpenSearch projection: SEARCH-04.
 - Contact seller and chat: CHAT slices.
 - Cart, checkout, inventory, payment, orders, and shipping: V2.

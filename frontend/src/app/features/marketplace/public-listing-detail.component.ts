@@ -4,6 +4,11 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { PublicListing } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ListingImageGalleryComponent } from '../../shared/components/ui/listing-image-gallery.component';
+import {
+  publicListingConditionLabel,
+  publicListingLocationLabel,
+  publicListingOwnerLabel,
+} from '../../shared/listing/public-listing-display';
 
 @Component({
   selector: 'app-public-listing-detail',
@@ -40,6 +45,7 @@ import { ListingImageGalleryComponent } from '../../shared/components/ui/listing
             </div>
 
             <h1>{{ listing()?.title }}</h1>
+            <p class="owner-line">Listed by {{ ownerLabel(listing()) }}</p>
 
             <div class="price-line">
               <strong>{{ listing()?.priceAmount | number: '1.2-2' }} {{ listing()?.currency }}</strong>
@@ -60,6 +66,10 @@ import { ListingImageGalleryComponent } from '../../shared/components/ui/listing
               <div>
                 <dt>Quantity</dt>
                 <dd>{{ listing()?.quantity }}</dd>
+              </div>
+              <div>
+                <dt>Owner</dt>
+                <dd>{{ ownerLabel(listing()) }}</dd>
               </div>
             </dl>
 
@@ -198,6 +208,12 @@ import { ListingImageGalleryComponent } from '../../shared/components/ui/listing
       font-weight: 950;
     }
 
+    .owner-line {
+      margin: -0.35rem 0 0;
+      color: var(--market-lavender);
+      font-weight: 900;
+    }
+
     .price-line span {
       color: var(--market-lavender);
       font-size: 0.88rem;
@@ -206,7 +222,7 @@ import { ListingImageGalleryComponent } from '../../shared/components/ui/listing
 
     .facts {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.65rem;
       margin: 0;
     }
@@ -342,14 +358,15 @@ export class PublicListingDetailComponent implements OnInit {
   }
 
   conditionLabel(condition: string): string {
-    return condition.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+    return publicListingConditionLabel(condition);
   }
 
   locationLabel(listing: PublicListing | null): string {
-    if (!listing) {
-      return 'Not set';
-    }
-    return [listing.publicCity, listing.publicRegion].filter(Boolean).join(', ') || 'Not set';
+    return publicListingLocationLabel(listing, 'Not set');
+  }
+
+  ownerLabel(listing: PublicListing | null): string {
+    return publicListingOwnerLabel(listing);
   }
 
   marketplaceNotice(listing: PublicListing | null): string {

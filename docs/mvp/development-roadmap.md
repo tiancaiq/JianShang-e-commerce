@@ -42,10 +42,17 @@ The current repository contains implementation work for:
 - Login/session UX stabilization: LOGIN-01 complete
 - Sign-up and external identity provider planning: SIGNUP-00 complete
 - Keycloak self-registration: SIGNUP-01 complete
+- Marketplace auth dialog and popup OIDC: SIGNUP-02 complete
+- Marketplace native auth: SIGNUP-03 complete
+- Backend password login bridge: LOGIN-02 complete
+- Backend credential registration bridge: SIGNUP-04 complete
+- Google identity provider wiring: SIGNUP-05 complete
+- User profile roadmap: USER-00 planned
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
 - Listing foundation, drafts, media, submit, admin decision, and public detail:
   LIST-00 through LIST-07
+- Public UI surface split: SITE-01
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -89,6 +96,11 @@ Stabilization sprint:
 
 - Before continuing feature development, complete the P0 cleanup slices in
   `docs/mvp/fix/fix-02-stabilization-sprint-plan.md`.
+- Before continuing user profile, chat, likes, reviews, or other user
+  communication work, complete the P0 auth/login cleanup slices in
+  `docs/mvp/fix/fix-03-auth-login-stabilization-sprint.md`.
+- Before starting `SEARCH-02A`, complete the P0 pre-search cleanup slices in
+  `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`.
 
 Do not start V2 or V3 features until the MVP browser, seller, listing, search,
 chat, and moderation paths are validated.
@@ -169,6 +181,7 @@ Login/session stabilization:
 | Slice | Status | Reference |
 | --- | --- | --- |
 | LOGIN-01 Login and session UX | Complete | `docs/mvp/iam/login-01-login-session-ux-plan.md` |
+| LOGIN-02 Backend password login bridge | Complete | `docs/mvp/iam/login-02-backend-password-login-bridge.md` |
 
 Sign-up and external identity providers:
 
@@ -176,15 +189,29 @@ Sign-up and external identity providers:
 | --- | --- | --- |
 | SIGNUP-00 Sign-up and external identity provider plan | Complete | `docs/mvp/iam/signup-00-sign-up-external-identity-provider-plan.md` |
 | SIGNUP-01 Keycloak self-registration | Complete | `docs/mvp/iam/signup-01-keycloak-self-registration.md` |
+| SIGNUP-02 Marketplace auth dialog and popup OIDC | Complete | `docs/mvp/iam/signup-02-marketplace-auth-dialog-popup.md` |
+| SIGNUP-03 Marketplace native auth | Complete | `docs/mvp/iam/signup-03-marketplace-native-auth.md` |
+| SIGNUP-04 Backend credential registration bridge | Complete | `docs/mvp/iam/signup-04-backend-credential-registration-bridge.md` |
+| SIGNUP-05 Google identity provider wiring | Complete | `docs/mvp/iam/signup-05-google-identity-provider-wiring.md` |
 
 Remaining account work before MVP completion:
 
+- User profile roadmap:
+  - `docs/mvp/iam/user-00-user-profile-roadmap.md`
 - Keep the marketplace, seller portal, and admin login/session/logout
   experience verified as future protected flows are added.
-- Implement SIGNUP-02 Google identity provider and SIGNUP-03 frontend polish
-  after SIGNUP-01 verification.
 - Keep registration/password recovery lifecycle owned by Keycloak.
 - Do not reintroduce browser token storage or custom JWT issuance.
+
+User profile and account experience:
+
+| Slice | Status | Reference |
+| --- | --- | --- |
+| USER-00 User profile roadmap | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
+| USER-01 Marketplace account profile consolidation | Complete | `docs/mvp/iam/user-01-marketplace-account-profile-consolidation.md` |
+| USER-02 Safe public identity labels | Complete | `docs/mvp/iam/user-02-safe-public-identity-labels.md` |
+| USER-03 Account dashboard shell | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
+| USER-04 Chat identity display support | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
 
 ### 5.2 Individual Seller Profile
 
@@ -249,10 +276,9 @@ Completed slices:
 
 Recommended next search/storefront slices:
 
-1. IND-03 implementation: move individual seller personal listing routes into
-   marketplace/account routes.
-2. SEARCH-02 public business storefront.
-3. SEARCH-03 search filters, sorting, and cursor pagination.
+1. SEARCH-02A individual marketplace keyword search.
+2. SEARCH-02B business storefront browse.
+3. SEARCH-03 shared filters, sorting, and cursor pagination.
 
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
@@ -260,7 +286,8 @@ as part of listing work.
 ### 5.5 Search And Storefront
 
 Status: read model plan and initial database-backed public approved listing
-browse are implemented.
+browse are implemented. The public UI is split into individual marketplace and
+business store surfaces.
 
 MVP goal:
 
@@ -271,18 +298,40 @@ MVP goal:
   business sellers.
 - Individual listings show that payment and delivery are arranged
   off-platform.
+- Individual marketplace search and business storefront browse are separate
+  public experiences. They may reuse listing tables and response primitives,
+  but should not share checkout language, calls to action, or page layout.
 
 Recommended slices:
 
+0. SITE-01 public UI surface split.
+   - Status: complete.
+   - Reference: `docs/mvp/site/site-01-public-ui-surface-split.md`
 1. SEARCH-00 search/storefront read model plan.
    - Status: complete.
    - Reference: `docs/mvp/search/search-00-search-storefront-read-model-plan.md`
 2. SEARCH-01 public approved listing browse without OpenSearch.
    - Status: complete.
    - Reference: `docs/mvp/search/search-01-public-approved-listing-browse.md`
-3. SEARCH-02 public business storefront page.
-4. SEARCH-03 search filters, sorting, and cursor pagination.
-5. SEARCH-04 OpenSearch projection only after the database-backed read path is
+3. SEARCH-02A individual marketplace keyword search.
+   - Status: planned.
+   - Reference:
+     `docs/mvp/search/search-02a-individual-marketplace-keyword-search.md`
+   - Scope: keyword search for approved active `INDIVIDUAL` listings in the
+     marketplace user site.
+   - Excludes business storefronts, cart, checkout, and structured offers.
+4. SEARCH-02B public business storefront browse.
+   - Status: planned.
+   - Reference:
+     `docs/mvp/search/search-02b-public-business-storefront-browse.md`
+   - Scope: guest-readable store page and approved active `BUSINESS` listings.
+   - Excludes inventory reservation, cart, checkout, payment, orders, and
+     shipping.
+5. SEARCH-03 shared filters, sorting, and cursor pagination.
+   - Status: planned.
+   - Scope: category, seller type, condition, price, location, stable sort, and
+     cursor pagination for the database-backed public read paths.
+6. SEARCH-04 OpenSearch projection only after the database-backed read path is
    correct.
 
 ### 5.6 Basic Buyer/Seller Chat
@@ -359,6 +408,84 @@ P0 cleanup slices:
    - Reference: `docs/mvp/fix/stab-p0-04-legacy-jwt-cleanup.md`
 5. STAB-P0-05 Fix documentation duplicates and slice naming drift.
 
+### FIX-03 Auth/Login Stabilization Sprint
+
+Status: planned.
+
+Reference:
+
+- `docs/mvp/fix/fix-03-auth-login-stabilization-sprint.md`
+
+Goal:
+
+- Review completed login, logout, sign-up, native auth, and external provider
+  wiring before building more user profile or communication features.
+- Do not add features.
+- Preserve API contracts and database schema.
+
+P0 cleanup slices:
+
+1. AUTH-STAB-P0-01 Auth verification baseline.
+   - Status: complete.
+   - Reference: `docs/mvp/fix/auth-stab-p0-01-auth-verification-baseline.md`.
+2. AUTH-STAB-P0-02 Align Google provider docs with hidden CTA.
+   - Status: complete.
+3. AUTH-STAB-P0-03 Native auth session and CSRF regression coverage.
+   - Status: complete.
+4. AUTH-STAB-P0-04 Logout and return-url regression coverage.
+   - Status: complete.
+
+### FIX-04 Pre-Search Stabilization Sprint
+
+Status: complete.
+
+Reference:
+
+- `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`
+
+Goal:
+
+- Review completed MVP auth, seller, business, listing, media, public browse,
+  and public UI split work before adding search behavior.
+- Do not add features.
+- Preserve API contracts.
+- Preserve database schema unless a verified migration or data-safety bug
+  requires a forward-safe migration.
+- Keep each cleanup slice scoped to one pull request.
+
+P0 cleanup slices:
+
+1. PRESEARCH-STAB-P0-01 Verification and git baseline refresh.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/presearch-stab-p0-01-verification-git-baseline-refresh.md`
+2. PRESEARCH-STAB-P0-02 Public surface contract regression audit.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/presearch-stab-p0-02-public-surface-contract-regression-audit.md`
+3. PRESEARCH-STAB-P0-03 Media storage secret and environment hygiene.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/presearch-stab-p0-03-media-storage-secret-environment-hygiene.md`
+4. PRESEARCH-STAB-P0-04 Source-of-truth documentation cleanup.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/presearch-stab-p0-04-source-of-truth-documentation-cleanup.md`
+
+P1 cleanup themes:
+
+- Listing frontend component responsibility cleanup.
+- Listing lifecycle regression test cleanup.
+- Public listing DTO and client naming cleanup.
+- Backend listing service readability cleanup.
+
+P2 cleanup themes:
+
+- Marketplace CSS budget cleanup.
+- Manual browser smoke checklist.
+- Small shared UI primitive consolidation.
+- Historical demo and deferred-service index.
+
 ### FIX-01 Restore Verification Baseline
 
 Status: complete.
@@ -419,6 +546,7 @@ Acceptance criteria:
 
 4. SITE-00: Logical three-site separation.
    - Status: complete.
+   - Reference: `docs/mvp/site/site-00-logical-three-site-separation.md`
    - Keep one Angular app.
    - Separate `/`, `/seller`, and `/admin` route groups.
    - Add marketplace, seller, and admin layouts.
@@ -463,16 +591,40 @@ Acceptance criteria:
    - Define storefront shape.
    - Defer OpenSearch until database-backed browse is correct.
 
-9. SEARCH-01: Public approved listing browse.
+10. SEARCH-01: Public approved listing browse.
    - Status: complete.
    - Let guests browse approved listings.
    - Show newest approved active listings on the marketplace homepage.
    - Do not add OpenSearch yet.
 
-10. SEARCH-02: Public business storefront.
+11. FIX-04: Pre-search stabilization sprint.
+    - Status: complete.
+    - Reference:
+      `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`
+    - Completed P0, P1, and P2 cleanup slices before search implementation.
+    - Do not add features.
+    - Preserve API contracts and database schema.
+
+12. SEARCH-02A: Individual marketplace keyword search.
+    - Reference:
+      `docs/mvp/search/search-02a-individual-marketplace-keyword-search.md`
+    - Search approved active individual listings from the public marketplace.
+    - Use backend keyword matching instead of browser-only filtering.
+    - Keep off-platform trade disclosure and no checkout language.
+
+13. SEARCH-02B: Public business storefront browse.
+    - Reference:
+      `docs/mvp/search/search-02b-public-business-storefront-browse.md`
     - Let guests view an active business storefront.
     - Show approved active business listings.
     - Hide suspended and private data.
+    - Do not add cart, inventory, checkout, payment, orders, or shipping.
+
+14. SEARCH-03: Shared filters, sorting, and cursor pagination.
+    - Add category, seller type, condition, price, and approximate location
+      filters.
+    - Add newest and price sorting.
+    - Add cursor pagination and load-more UI.
 
 ## 7. Deferred Release Summaries
 

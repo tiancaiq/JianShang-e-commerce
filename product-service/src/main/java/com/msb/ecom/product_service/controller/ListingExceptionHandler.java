@@ -5,6 +5,7 @@ import com.msb.ecom.common.web.error.ApiError;
 import com.msb.ecom.common.web.error.ApiErrorEnvelope;
 import com.msb.ecom.product_service.model.CategoryNotFoundException;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.model.ListingMediaAccessDeniedException;
 import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
 import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
@@ -72,6 +73,21 @@ public class ListingExceptionHandler {
                 .body(new ApiErrorEnvelope(new ApiError(
                         "LISTING_MEDIA_NOT_FOUND",
                         "Listing media was not found.",
+                        List.of(),
+                        correlationId)));
+    }
+
+    @ExceptionHandler(ListingMediaAccessDeniedException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleListingMediaAccessDenied(
+            ListingMediaAccessDeniedException exception,
+            HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Listing media storage access denied path={} correlationId={} reason={}",
+                request.getRequestURI(), correlationId, exception.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "LISTING_MEDIA_STORAGE_ACCESS_DENIED",
+                        "Listing media storage could not be read.",
                         List.of(),
                         correlationId)));
     }

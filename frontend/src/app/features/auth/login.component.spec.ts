@@ -14,8 +14,12 @@ describe('LoginComponent', () => {
       'ensureSession',
       'login',
       'register',
+      'loginWithPopup',
+      'registerWithPopup',
     ]);
     authService.ensureSession.and.returnValue(of({ authenticated: false, user: null }));
+    authService.loginWithPopup.and.returnValue(of({ authenticated: false, user: null }));
+    authService.registerWithPopup.and.returnValue(of({ authenticated: false, user: null }));
 
     TestBed.configureTestingModule({
       imports: [LoginComponent],
@@ -58,18 +62,51 @@ describe('LoginComponent', () => {
     expect(text).toContain('Create account');
   });
 
-  it('starts registration with the selected client and safe return URL', () => {
+  it('uses the marketplace popup flow for marketplace sign-in', () => {
+    const { fixture, authService } = createFixture({
+      client: 'marketplace',
+      returnUrl: '/account/profile',
+    });
+
+    fixture.componentInstance.handleLogin();
+
+    expect(authService.loginWithPopup).toHaveBeenCalledOnceWith('marketplace', '/account/profile');
+    expect(authService.login).not.toHaveBeenCalled();
+  });
+
+  it('uses regular Keycloak redirect for seller portal sign-in', () => {
     const { fixture, authService } = createFixture({
       client: 'seller-portal',
       returnUrl: '/seller/business/apply',
     });
 
-    fixture.componentInstance.handleRegister();
+    fixture.componentInstance.handleLogin();
 
-    expect(authService.register).toHaveBeenCalledOnceWith('seller-portal', '/seller/business/apply');
+    expect(authService.login).toHaveBeenCalledOnceWith('seller-portal', '/seller/business/apply');
+    expect(authService.loginWithPopup).not.toHaveBeenCalled();
   });
 
-  it('does not advertise self-registration for admin sign-in', () => {
+  it('uses regular Keycloak redirect for admin portal sign-in', () => {
+    const { fixture, authService } = createFixture({
+      client: 'admin-portal',
+      returnUrl: '/admin/business-applications',
+    });
+
+    fixture.componentInstance.handleLogin();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/admin/business-applications');
+    expect(authService.loginWithPopup).not.toHaveBeenCalled();
+  });
+
+  it('does not advertise self-registration for seller or admin sign-in', () => {
+    const seller = createFixture({
+      client: 'seller-portal',
+      returnUrl: '/seller/business/apply',
+    });
+    expect((seller.fixture.nativeElement as HTMLElement).textContent || '').not.toContain('Create account');
+
+    TestBed.resetTestingModule();
+
     const { fixture } = createFixture({
       client: 'admin-portal',
       returnUrl: '/admin/business-applications',

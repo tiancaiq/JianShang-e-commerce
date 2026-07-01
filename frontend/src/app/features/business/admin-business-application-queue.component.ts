@@ -3,13 +3,14 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { BusinessApplication } from '../../core/models/business-application.model';
 import { BusinessApplicationService } from '../../core/services/business-application.service';
+import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
 
 type ReviewQueueStatus = 'PENDING_VERIFICATION' | 'UNDER_REVIEW';
 
 @Component({
   selector: 'app-admin-business-application-queue',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, StatusPillComponent],
   template: `
     <section class="admin-business-queue">
       <header class="page-header">
@@ -79,7 +80,7 @@ type ReviewQueueStatus = 'PENDING_VERIFICATION' | 'UNDER_REVIEW';
               </span>
               <span role="cell">{{ application.businessType }} / {{ application.country }}</span>
               <span role="cell">
-                <span class="status-pill">{{ statusLabel(application.status) }}</span>
+                <app-ui-status-pill>{{ statusLabel(application.status) }}</app-ui-status-pill>
               </span>
               <span role="cell">
                 <strong>{{ application.contactEmail }}</strong>
@@ -248,16 +249,8 @@ type ReviewQueueStatus = 'PENDING_VERIFICATION' | 'UNDER_REVIEW';
       font-size: 0.75rem;
     }
 
-    .status-pill {
-      display: inline-flex;
-      width: fit-content;
-      border-radius: var(--radius-md);
-      background: var(--color-accent-muted);
-      color: var(--color-accent);
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.35rem 0.55rem;
-      white-space: nowrap;
+    .queue-row app-ui-status-pill {
+      --ui-pill-radius: var(--radius-md);
     }
 
     @media (max-width: 980px) {

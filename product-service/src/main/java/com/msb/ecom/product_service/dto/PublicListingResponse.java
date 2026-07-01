@@ -1,5 +1,7 @@
 package com.msb.ecom.product_service.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -7,6 +9,10 @@ import java.util.List;
 public record PublicListingResponse(
         String id,
         String sellerType,
+        @JsonIgnore
+        String sellerId,
+        String sellerDisplayName,
+        String sellerAvatarUrl,
         String categoryId,
         String categorySlug,
         String categoryName,
@@ -24,4 +30,53 @@ public record PublicListingResponse(
         String transactionNotice,
         List<PublicListingImageResponse> images
 ) {
+    public PublicListingResponse withSellerDisplayName(String displayName) {
+        return new PublicListingResponse(
+                id,
+                sellerType,
+                sellerId,
+                displayName,
+                sellerAvatarUrl,
+                categoryId,
+                categorySlug,
+                categoryName,
+                title,
+                description,
+                condition,
+                conditionNotes,
+                priceAmount,
+                currency,
+                negotiable,
+                quantity,
+                publicCity,
+                publicRegion,
+                publishedAt,
+                transactionNotice,
+                images);
+    }
+
+    public PublicListingResponse withSellerLabel(String displayName, String avatarUrl) {
+        return new PublicListingResponse(
+                id,
+                sellerType,
+                sellerId,
+                displayName,
+                avatarUrl,
+                categoryId,
+                categorySlug,
+                categoryName,
+                title,
+                description,
+                condition,
+                conditionNotes,
+                priceAmount,
+                currency,
+                negotiable,
+                quantity,
+                publicCity,
+                publicRegion,
+                publishedAt,
+                transactionNotice,
+                images);
+    }
 }

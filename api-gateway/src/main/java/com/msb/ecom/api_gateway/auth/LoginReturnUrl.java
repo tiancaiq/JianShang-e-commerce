@@ -7,6 +7,7 @@ import java.util.Optional;
 public final class LoginReturnUrl {
 
     public static final String SESSION_ATTRIBUTE = LoginReturnUrl.class.getName() + ".RETURN_URL";
+    public static final String POPUP_SESSION_ATTRIBUTE = LoginReturnUrl.class.getName() + ".POPUP";
 
     private LoginReturnUrl() {
     }

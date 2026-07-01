@@ -162,6 +162,18 @@ describe('AdminListingModerationDetailComponent', () => {
     expect(text).toContain('Blue bike');
   });
 
+  it('loads review images through the admin media endpoint', () => {
+    fixture.detectChanges();
+
+    const image = fixture.nativeElement.querySelector('.image-preview img') as HTMLImageElement;
+
+    expect(image.getAttribute('src'))
+      .toBe('/api/v1/admin/listings/01L00000000000000000000001/media/01M00000000000000000000001/content');
+    expect(listingService.mediaUrl).toHaveBeenCalledWith(
+      '/api/v1/admin/listings/01L00000000000000000000001/media/01M00000000000000000000001/content'
+    );
+  });
+
   it('requires a resolution reason before calling the API', () => {
     fixture.detectChanges();
     component.decision = 'APPROVE';

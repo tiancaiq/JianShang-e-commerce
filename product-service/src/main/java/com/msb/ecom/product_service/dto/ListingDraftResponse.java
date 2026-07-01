@@ -9,6 +9,7 @@ public record ListingDraftResponse(
         String sellerType,
         String individualSellerUserId,
         String businessId,
+        String sellerDisplayName,
         String categoryId,
         String title,
         String description,
@@ -28,4 +29,30 @@ public record ListingDraftResponse(
         Instant updatedAt,
         List<ListingImageResponse> images
 ) {
+    public ListingDraftResponse withSellerDisplayName(String displayName) {
+        return new ListingDraftResponse(
+                id,
+                sellerType,
+                individualSellerUserId,
+                businessId,
+                displayName,
+                categoryId,
+                title,
+                description,
+                condition,
+                conditionNotes,
+                priceAmount,
+                currency,
+                negotiable,
+                sku,
+                quantity,
+                publicCity,
+                publicRegion,
+                status,
+                moderationStatus,
+                version,
+                createdAt,
+                updatedAt,
+                images);
+    }
 }

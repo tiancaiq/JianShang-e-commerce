@@ -2,8 +2,14 @@ import { DecimalPipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ListingCondition, ListingSellerType, PublicListing } from '../../core/models/listing.model';
+import { ListingCondition, MarketplaceBrowseListing, PublicListing } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
+import {
+  publicListingConditionLabel,
+  publicListingLocationLabel,
+  publicListingOwnerLabel,
+  publicListingPrimaryImageUrl,
+} from '../../shared/listing/public-listing-display';
 
 type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 
@@ -17,7 +23,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
         <div class="hero-copy">
           <p class="eyebrow">MSB cute market</p>
           <h1 id="marketplace-title">Find sweet local treasures.</h1>
-          <p class="summary">Browse approved individual and business listings with clear seller labels and public pickup areas.</p>
+          <p class="summary">Browse approved individual listings with clear seller labels and public pickup areas.</p>
 
           <form class="hero-search" role="search" (submit)="$event.preventDefault()">
             <label>
@@ -33,7 +39,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 
           <div class="hero-actions">
             <a href="#listings" class="primary-link">Browse Listings</a>
-            <a routerLink="/account/listings/new" class="secondary-link">List an Item</a>
+            <a routerLink="/account/listings" class="secondary-link">My Listings</a>
           </div>
         </div>
 
@@ -57,6 +63,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
                 <div>
                   <span class="mini-label">Featured approved listing</span>
                   <strong>{{ featuredListing()?.title }}</strong>
+                  <small>By {{ ownerLabel(featuredListing()) }}</small>
                   <p>{{ featuredListing()?.priceAmount | number: '1.2-2' }} {{ featuredListing()?.currency }}</p>
                 </div>
               </a>
@@ -68,7 +75,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 
             <div class="preview-notes">
               <span>Individual trades stay off-platform</span>
-              <span>Business sellers are reviewed</span>
+              <span>Payment and delivery are arranged directly</span>
             </div>
           </div>
         </div>
@@ -92,21 +99,12 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
             <div class="browse-header">
               <div>
                 <p class="eyebrow">Fresh finds</p>
-                <h2 id="browse-title">Public Listings</h2>
+                <h2 id="browse-title">Individual Marketplace</h2>
               </div>
               <span>{{ filteredListings().length }} shown</span>
             </div>
 
             <form class="filter-row" aria-label="Marketplace filters" (submit)="$event.preventDefault()">
-              <label>
-                <span>Seller</span>
-                <select name="sellerType" [(ngModel)]="selectedSellerType">
-                  <option value="ALL">All sellers</option>
-                  <option value="INDIVIDUAL">Individual</option>
-                  <option value="BUSINESS">Business</option>
-                </select>
-              </label>
-
               <label>
                 <span>Condition</span>
                 <select name="condition" [(ngModel)]="selectedCondition">
@@ -135,7 +133,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
             } @else if (errorMsg()) {
               <div class="empty-list">{{ errorMsg() }}</div>
             } @else if (listings().length === 0) {
-              <div class="empty-list">No approved listings yet.</div>
+              <div class="empty-list">No approved individual listings yet.</div>
             } @else if (filteredListings().length === 0) {
               <div class="empty-list">No listings match these filters.</div>
             } @else {
@@ -155,12 +153,13 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
                         <span>{{ conditionLabel(listing.condition) }}</span>
                       </div>
                       <h3>{{ listing.title }}</h3>
+                      <p class="seller-name">By {{ ownerLabel(listing) }}</p>
                       <p>{{ locationLabel(listing) }}</p>
                       <div class="listing-price">
                         {{ listing.priceAmount | number: '1.2-2' }} {{ listing.currency }}
                       </div>
                       <div class="card-foot">
-                        <span>{{ listing.sellerType === 'INDIVIDUAL' ? 'Off-platform trade' : 'Reviewed business' }}</span>
+                        <span>Off-platform trade</span>
                         <strong>Details</strong>
                       </div>
                     </div>
@@ -381,7 +380,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 
     .filter-row {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.75rem;
     }
 
@@ -468,6 +467,13 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       font-weight: 750;
     }
 
+    .featured-card small,
+    .seller-name {
+      color: var(--market-lavender);
+      font-size: 0.82rem;
+      font-weight: 900;
+    }
+
     .listing-price {
       color: var(--market-ink);
       font-size: 1.05rem;
@@ -534,7 +540,6 @@ export class MarketplaceHomeComponent implements OnInit {
 
   searchTerm = '';
   selectedCategory = 'ALL';
-  selectedSellerType: ListingSellerType | 'ALL' = 'ALL';
   selectedCondition: ListingCondition | 'ALL' = 'ALL';
   sortMode: ListingSort = 'newest';
 
@@ -553,31 +558,31 @@ export class MarketplaceHomeComponent implements OnInit {
   }
 
   categoryOptions(): string[] {
-    return [...new Set(this.listings().map(listing => listing.categoryName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return [...new Set(this.marketplaceListings().map(listing => listing.categoryName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   }
 
   selectCategory(category: string): void {
     this.selectedCategory = category;
   }
 
-  featuredListing(): PublicListing | null {
-    return this.listings()[0] || null;
+  featuredListing(): MarketplaceBrowseListing | null {
+    return this.marketplaceListings()[0] || null;
   }
 
-  filteredListings(): PublicListing[] {
+  filteredListings(): MarketplaceBrowseListing[] {
     const term = this.searchTerm.trim().toLowerCase();
-    const filtered = this.listings().filter(listing => {
+    const filtered = this.marketplaceListings().filter(listing => {
       const searchable = [
         listing.title,
         listing.description,
         listing.categoryName,
+        listing.sellerDisplayName || '',
         listing.publicCity || '',
         listing.publicRegion || '',
       ].join(' ').toLowerCase();
 
       return (!term || searchable.includes(term))
         && (this.selectedCategory === 'ALL' || listing.categoryName === this.selectedCategory)
-        && (this.selectedSellerType === 'ALL' || listing.sellerType === this.selectedSellerType)
         && (this.selectedCondition === 'ALL' || listing.condition === this.selectedCondition);
     });
 
@@ -592,17 +597,24 @@ export class MarketplaceHomeComponent implements OnInit {
     });
   }
 
-  locationLabel(listing: PublicListing): string {
-    return [listing.publicCity, listing.publicRegion].filter(Boolean).join(', ') || 'Location not set';
+  locationLabel(listing: MarketplaceBrowseListing): string {
+    return publicListingLocationLabel(listing);
+  }
+
+  private marketplaceListings(): MarketplaceBrowseListing[] {
+    return this.listings().filter(listing => listing.sellerType === 'INDIVIDUAL');
+  }
+
+  ownerLabel(listing: MarketplaceBrowseListing | null | undefined): string {
+    return publicListingOwnerLabel(listing);
   }
 
   conditionLabel(condition: ListingCondition): string {
-    return condition.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+    return publicListingConditionLabel(condition);
   }
 
-  imageUrl(listing: PublicListing): string {
-    const image = listing.images[0];
-    return this.listingService.mediaUrl(image?.url || image?.uploadUrl);
+  imageUrl(listing: MarketplaceBrowseListing): string {
+    return publicListingPrimaryImageUrl(listing, url => this.listingService.mediaUrl(url));
   }
 
   private publicListingLoadMessage(error: { status?: number }): string {

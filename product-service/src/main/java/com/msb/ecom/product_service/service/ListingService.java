@@ -46,8 +46,10 @@ import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
+import com.msb.ecom.product_service.model.ListingMediaAccessDeniedException;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
 import com.msb.ecom.product_service.storage.ListingMediaStorageProperties;
+import com.msb.ecom.product_service.storage.StorageObjectAccessDeniedException;
 import com.msb.ecom.product_service.storage.StorageUploadTarget;
 import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +67,7 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.ArrayList;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
@@ -74,6 +77,8 @@ import java.util.regex.Pattern;
 public class ListingService {
 
     static final int PUBLIC_BROWSE_LIMIT = 24;
+    private static final String DEFAULT_INDIVIDUAL_SELLER_LABEL = "Marketplace seller";
+    private static final String DEFAULT_BUSINESS_SELLER_LABEL = "Business seller";
     private static final Pattern SAFE_FILE_PART = Pattern.compile("[^A-Za-z0-9._-]");
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of(
             "image/jpeg",
@@ -108,20 +113,20 @@ public class ListingService {
         };
 
         log.info("Created listing draft id={} sellerType={}", response.id(), response.sellerType());
-        return response;
+        return withSellerLabels(response);
     }
 
     @Transactional(readOnly = true)
     public ListingDraftResponse getOwnedListing(String listingId) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional(readOnly = true)
     public List<ListingDraftResponse> getCurrentIndividualSellerListings() {
         CurrentActor actor = currentActorProvider.currentActor();
         IndividualSellerAuthorization seller = authServiceClient.requireActiveIndividualSeller(actor.accessToken());
-        return withImages(listingDraftRepository.findByIndividualSellerUserId(seller.userId()));
+        return withSellerLabels(withImages(listingDraftRepository.findByIndividualSellerUserId(seller.userId())));
     }
 
     @Transactional(readOnly = true)
@@ -130,7 +135,7 @@ public class ListingService {
         CurrentActor actor = currentActorProvider.currentActor();
         BusinessMembershipAuthorization membership =
                 authServiceClient.requireBusinessListingPermission(actor.accessToken(), normalizedBusinessId);
-        return withImages(listingDraftRepository.findByBusinessId(membership.businessId()));
+        return withSellerLabels(withImages(listingDraftRepository.findByBusinessId(membership.businessId())));
     }
 
     @Transactional(readOnly = true)
@@ -138,21 +143,25 @@ public class ListingService {
     public PublicListingResponse getPublicListing(String listingId) {
         PublicListingResponse listing = listingDraftRepository.findPublicListingById(normalizedRequiredId("Listing ID", listingId))
                 .orElseThrow(ListingNotFoundException::new);
-        return publicListingWithImagesAndNotice(listing);
+        return withPublicSellerLabels(List.of(publicListingWithImagesAndNotice(listing))).get(0);
     }
 
     @Transactional(readOnly = true)
     // Public browse is intentionally fixed-size until SEARCH-03 adds cursor pagination.
     public List<PublicListingResponse> getPublicListings() {
-        return listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT).stream()
+        List<PublicListingResponse> listings = listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT).stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
+        return withPublicSellerLabels(listings);
     }
 
     private PublicListingResponse publicListingWithImagesAndNotice(PublicListingResponse listing) {
         return new PublicListingResponse(
                 listing.id(),
                 listing.sellerType(),
+                listing.sellerId(),
+                listing.sellerDisplayName(),
+                listing.sellerAvatarUrl(),
                 listing.categoryId(),
                 listing.categorySlug(),
                 listing.categoryName(),
@@ -198,7 +207,7 @@ public class ListingService {
         }
 
         log.info("Updated listing draft id={} sellerType={}", listing.id(), listing.sellerType());
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional
@@ -215,7 +224,7 @@ public class ListingService {
         }
 
         log.info("Closed listing id={} sellerType={}", listing.id(), listing.sellerType());
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional
@@ -248,22 +257,22 @@ public class ListingService {
         log.info("Submitted listing for review id={} sellerType={} moderationCaseId={} moderationCaseCreated={} submittedByUserId={}",
                 listing.id(), listing.sellerType(), moderationCase.id(), moderationCase.created(),
                 submission.submittedByUserId());
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional(readOnly = true)
     // Admin review queue is scoped to submitted listings that still need a platform decision.
     public List<ListingDraftResponse> getPendingReviewListings() {
         requirePlatformAdmin();
-        return withImages(listingDraftRepository.findPendingReview());
+        return withSellerLabels(withImages(listingDraftRepository.findPendingReview()));
     }
 
     @Transactional(readOnly = true)
     // Lets platform admins inspect active listings before live marketplace edits/removal.
     public ListingDraftResponse getAdminListing(String listingId) {
         requirePlatformAdmin();
-        return withImages(listingDraftRepository.findOptionalById(normalizedRequiredId("Listing ID", listingId))
-                .orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional
@@ -291,7 +300,7 @@ public class ListingService {
         }
         recordAdminListingAction(listing.id(), "ADMIN_EDIT", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin edited active listing listingId={} adminUserId={}", listing.id(), admin.userId());
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional
@@ -309,7 +318,7 @@ public class ListingService {
         }
         recordAdminListingAction(listing.id(), "ADMIN_REMOVE", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin removed active listing listingId={} adminUserId={}", listing.id(), admin.userId());
-        return withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new));
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional(readOnly = true)
@@ -637,9 +646,27 @@ public class ListingService {
         return mediaContent(media);
     }
 
+    @Transactional(readOnly = true)
+    // Allows platform admins to inspect uploaded listing images during moderation without using seller ownership.
+    public ListingMediaContent adminListingMediaContent(String listingId, String mediaId) {
+        requirePlatformAdmin();
+        ListingMediaResponse media = listingMediaRepository.findMediaById(
+                        normalizedRequiredId("Listing ID", listingId),
+                        normalizedRequiredId("Media ID", mediaId))
+                .orElseThrow(ListingMediaNotFoundException::new);
+        if (!"UPLOADED".equals(media.uploadStatus())) {
+            throw new ListingMediaNotFoundException();
+        }
+        return mediaContent(media);
+    }
+
     private ListingMediaContent mediaContent(ListingMediaResponse media) {
         try {
             return new ListingMediaContent(media.contentType(), listingMediaStorage.readObject(media.objectKey()));
+        } catch (StorageObjectAccessDeniedException exception) {
+            log.warn("Listing media object access denied listingId={} mediaId={} objectKey={} reason={}",
+                    media.listingId(), media.id(), media.objectKey(), exception.getMessage());
+            throw new ListingMediaAccessDeniedException(exception.getMessage());
         } catch (StorageObjectNotFoundException exception) {
             log.warn("Listing media object missing listingId={} mediaId={} objectKey={}",
                     media.listingId(), media.id(), media.objectKey());
@@ -734,6 +761,7 @@ public class ListingService {
                 listing.sellerType(),
                 listing.individualSellerUserId(),
                 listing.businessId(),
+                listing.sellerDisplayName(),
                 listing.categoryId(),
                 listing.title(),
                 listing.description(),
@@ -754,10 +782,136 @@ public class ListingService {
                 listingMediaRepository.findImagesByListingId(listing.id()));
     }
 
+    private List<ListingDraftResponse> withSellerLabels(List<ListingDraftResponse> listings) {
+        AuthServiceClient.AdminIdentityLabels labels = publicSellerLabels(
+                collectSellerIds(
+                        listings,
+                        listing -> "INDIVIDUAL".equals(listing.sellerType()),
+                        ListingDraftResponse::individualSellerUserId),
+                collectSellerIds(
+                        listings,
+                        listing -> "BUSINESS".equals(listing.sellerType()),
+                        ListingDraftResponse::businessId));
+        Map<String, String> users = userLabelMap(labels);
+        Map<String, String> businesses = businessLabelMap(labels);
+        return listings.stream()
+                .map(listing -> listing.withSellerDisplayName(sellerDisplayName(listing, users, businesses)))
+                .toList();
+    }
+
+    private ListingDraftResponse withSellerLabels(ListingDraftResponse listing) {
+        return withSellerLabels(List.of(listing)).get(0);
+    }
+
+    private List<PublicListingResponse> withPublicSellerLabels(List<PublicListingResponse> listings) {
+        AuthServiceClient.AdminIdentityLabels labels = publicSellerLabels(
+                collectSellerIds(
+                        listings,
+                        listing -> "INDIVIDUAL".equals(listing.sellerType()),
+                        PublicListingResponse::sellerId),
+                collectSellerIds(
+                        listings,
+                        listing -> "BUSINESS".equals(listing.sellerType()),
+                        PublicListingResponse::sellerId));
+        Map<String, String> users = userLabelMap(labels);
+        Map<String, String> businesses = businessLabelMap(labels);
+        Map<String, String> userAvatars = userAvatarMap(labels);
+        return listings.stream()
+                .map(listing -> listing.withSellerLabel(
+                        sellerDisplayName(listing, users, businesses),
+                        "INDIVIDUAL".equals(listing.sellerType()) ? userAvatars.get(listing.sellerId()) : null))
+                .toList();
+    }
+
+    // Collects stable, nonblank owner IDs before the auth-service label lookup.
+    private <T> Set<String> collectSellerIds(
+            List<T> listings,
+            Predicate<T> sellerTypeFilter,
+            Function<T, String> idExtractor) {
+        return listings.stream()
+                .filter(sellerTypeFilter)
+                .map(idExtractor)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private AuthServiceClient.AdminIdentityLabels publicSellerLabels(Set<String> userIds, Set<String> businessIds) {
+        Set<String> normalizedUserIds = userIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> normalizedBusinessIds = businessIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (normalizedUserIds.isEmpty() && normalizedBusinessIds.isEmpty()) {
+            return new AuthServiceClient.AdminIdentityLabels(List.of(), List.of());
+        }
+        try {
+            AuthServiceClient.AdminIdentityLabels labels =
+                    authServiceClient.lookupPublicSellerLabels(normalizedUserIds, normalizedBusinessIds);
+            return labels == null ? new AuthServiceClient.AdminIdentityLabels(List.of(), List.of()) : labels;
+        } catch (ListingAuthorizationException exception) {
+            log.warn("Auth-service public seller label lookup failed; using neutral seller labels.");
+            return new AuthServiceClient.AdminIdentityLabels(List.of(), List.of());
+        }
+    }
+
+    private Map<String, String> userLabelMap(AuthServiceClient.AdminIdentityLabels labels) {
+        return safeUsers(labels).stream()
+                .filter(label -> label.displayName() != null)
+                .collect(Collectors.toMap(
+                        AuthServiceClient.UserIdentityLabel::id,
+                        AuthServiceClient.UserIdentityLabel::displayName,
+                        (left, right) -> left));
+    }
+
+    private Map<String, String> businessLabelMap(AuthServiceClient.AdminIdentityLabels labels) {
+        return safeBusinesses(labels).stream()
+                .filter(label -> label.legalName() != null)
+                .collect(Collectors.toMap(
+                        AuthServiceClient.BusinessIdentityLabel::id,
+                        AuthServiceClient.BusinessIdentityLabel::legalName,
+                        (left, right) -> left));
+    }
+
+    private Map<String, String> userAvatarMap(AuthServiceClient.AdminIdentityLabels labels) {
+        return safeUsers(labels).stream()
+                .filter(label -> label.avatarUrl() != null)
+                .collect(Collectors.toMap(
+                        AuthServiceClient.UserIdentityLabel::id,
+                        AuthServiceClient.UserIdentityLabel::avatarUrl,
+                        (left, right) -> left));
+    }
+
+    private List<AuthServiceClient.UserIdentityLabel> safeUsers(AuthServiceClient.AdminIdentityLabels labels) {
+        return labels == null || labels.users() == null ? List.of() : labels.users();
+    }
+
+    private List<AuthServiceClient.BusinessIdentityLabel> safeBusinesses(AuthServiceClient.AdminIdentityLabels labels) {
+        return labels == null || labels.businesses() == null ? List.of() : labels.businesses();
+    }
+
+    private String sellerDisplayName(
+            ListingDraftResponse listing,
+            Map<String, String> users,
+            Map<String, String> businesses) {
+        return "BUSINESS".equals(listing.sellerType())
+                ? businesses.getOrDefault(listing.businessId(), DEFAULT_BUSINESS_SELLER_LABEL)
+                : users.getOrDefault(listing.individualSellerUserId(), DEFAULT_INDIVIDUAL_SELLER_LABEL);
+    }
+
+    private String sellerDisplayName(
+            PublicListingResponse listing,
+            Map<String, String> users,
+            Map<String, String> businesses) {
+        return "BUSINESS".equals(listing.sellerType())
+                ? businesses.getOrDefault(listing.sellerId(), DEFAULT_BUSINESS_SELLER_LABEL)
+                : users.getOrDefault(listing.sellerId(), DEFAULT_INDIVIDUAL_SELLER_LABEL);
+    }
+
     private AdminListingModerationCaseDetailResponse buildListingModerationCaseDetail(
             AdminListingModerationCaseResponse moderationCase) {
-        ListingDraftResponse listing = withImages(listingDraftRepository.findOptionalById(moderationCase.listingId())
-                .orElseThrow(ListingNotFoundException::new));
+        ListingDraftResponse listing = withSellerLabels(withImages(listingDraftRepository.findOptionalById(moderationCase.listingId())
+                .orElseThrow(ListingNotFoundException::new)));
         return new AdminListingModerationCaseDetailResponse(
                 moderationCase,
                 listing,

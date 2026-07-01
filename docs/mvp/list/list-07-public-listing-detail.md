@@ -26,8 +26,9 @@ Rules:
   returned.
 - Draft, pending-review, rejected, and changes-requested listings return
   `404 LISTING_NOT_FOUND`.
-- The public response omits owner user IDs, business internal IDs, status,
-  moderation state, versions, media object IDs, object bucket, and object key.
+- The public response includes a safe owner display label and omits owner user
+  IDs, business internal IDs, status, moderation state, versions, media object
+  IDs, object bucket, and object key.
 - Public images include only safe display metadata and the current local demo
   display URL.
 - Individual listings include the off-platform payment and delivery notice.
@@ -42,7 +43,8 @@ Implemented route:
 
 The marketplace detail page is guest-accessible and shows title, price,
 seller type, category, condition, public location, description, approved image
-metadata, and the individual-listing transaction notice when applicable.
+metadata, owner display name, and the individual-listing transaction notice
+when applicable.
 
 ## Persistence
 

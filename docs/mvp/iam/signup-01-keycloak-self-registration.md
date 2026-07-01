@@ -124,5 +124,5 @@ realm when an existing `msb-local` database volume was created before
 - No Angular password registration form.
 - No application password storage.
 - No browser access-token or refresh-token storage.
-- No Google identity provider. That remains `SIGNUP-02`.
+- No Google identity provider. That remains `SIGNUP-05`.
 - No seller, business, admin, chat, listing, review, or notification behavior.

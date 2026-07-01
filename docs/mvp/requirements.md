@@ -473,8 +473,15 @@ Depends on: `LST-09`.
 
 Acceptance criteria:
 
-- Search supports text, category, seller type, condition, price, and
-  approximate location filters.
+- Public discovery is split into individual marketplace search and business
+  storefront browse.
+- Individual marketplace search defaults to active approved `INDIVIDUAL`
+  listings and supports text, category, condition, price, and approximate
+  location filters.
+- Business storefront browse is scoped to one active approved business and
+  supports its active approved `BUSINESS` listings.
+- Shared search/browse APIs may support seller type filtering, but UI entry
+  points keep individual trade and business store experiences separate.
 - Results use cursor pagination.
 - Only active approved listings are returned.
 
@@ -486,6 +493,8 @@ Acceptance criteria:
 
 - User can view an active business profile and its active listings.
 - Suspended business storefronts are unavailable.
+- Cart, inventory reservation, checkout, payment, orders, and shipping remain
+  V2 even on business storefront pages.
 
 ### 4.6 Chat and individual trades
 

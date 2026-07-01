@@ -49,6 +49,8 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-demo-change-me-keycloak-db}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-demo-change-me-admin}
+      KEYCLOAK_GOOGLE_CLIENT_ID: ${KEYCLOAK_GOOGLE_CLIENT_ID:-}
+      KEYCLOAK_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
@@ -56,6 +58,7 @@ services:
       - "127.0.0.1:${KEYCLOAK_PORT:-8181}:8080"
     volumes:
       - ./infra/keycloak/realm-msb-local.json:/opt/keycloak/data/import/realm-msb-local.json:ro
+      - ./infra/keycloak/themes:/opt/keycloak/themes:ro
     depends_on:
       - postgres-keycloak
     restart: unless-stopped

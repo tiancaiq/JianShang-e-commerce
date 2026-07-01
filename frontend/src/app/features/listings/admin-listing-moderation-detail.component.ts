@@ -125,7 +125,7 @@ import { ToastService } from '../../core/services/toast.service';
                   <article class="image-tile">
                     <div class="image-preview">
                       @if (image.url) {
-                        <img [src]="listingService.mediaUrl(image.url)" [alt]="image.altText || image.originalFileName || 'Listing image'">
+                        <img [src]="adminImageUrl(image)" [alt]="image.altText || image.originalFileName || 'Listing image'">
                       }
                     </div>
                     <strong>{{ image.altText || image.originalFileName || 'Listing image' }}</strong>
@@ -766,6 +766,12 @@ export class AdminListingModerationDetailComponent implements OnInit {
 
   imageLabel(image: ListingImage): string {
     return image.altText || image.originalFileName || image.id;
+  }
+
+  adminImageUrl(image: ListingImage): string {
+    return this.listingService.mediaUrl(
+      `/api/v1/admin/listings/${image.listingId}/media/${image.mediaObjectId}/content`
+    );
   }
 
   private caseId(): string {

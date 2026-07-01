@@ -4,11 +4,12 @@ import { Router } from '@angular/router';
 import { BusinessApplication } from '../../core/models/business-application.model';
 import { BusinessApplicationService } from '../../core/services/business-application.service';
 import { ToastService } from '../../core/services/toast.service';
+import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
 
 @Component({
   selector: 'app-business-application',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, StatusPillComponent],
   template: `
     <section class="business-page">
       <header class="business-header">
@@ -17,7 +18,7 @@ import { ToastService } from '../../core/services/toast.service';
           <p>Create a draft application for business seller onboarding.</p>
         </div>
         @if (application()) {
-          <span class="status-pill">{{ application()?.status }}</span>
+          <app-ui-status-pill>{{ application()?.status }}</app-ui-status-pill>
         }
       </header>
 
@@ -274,16 +275,8 @@ import { ToastService } from '../../core/services/toast.service';
       cursor: not-allowed;
     }
 
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 0 0.625rem;
-      border-radius: var(--radius-md);
-      background: var(--color-accent-muted);
-      color: var(--color-accent);
-      font-size: 0.75rem;
-      font-weight: 700;
+    .business-header app-ui-status-pill {
+      --ui-pill-radius: var(--radius-md);
     }
 
     .success-panel h2 {

@@ -1,6 +1,9 @@
 import { routes } from './app.routes';
 import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
+import { MarketplaceHomeComponent } from './features/marketplace/marketplace-home.component';
+import { PublicListingDetailComponent } from './features/marketplace/public-listing-detail.component';
+import { BusinessStoresComponent } from './features/stores/business-stores.component';
 
 describe('app routes', () => {
   const v2DemoSegments = new Set([
@@ -20,8 +23,30 @@ describe('app routes', () => {
     expect(marketplaceRoute).toBeTruthy();
     expect(marketplaceRoute?.canActivate).toBeUndefined();
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'marketplace',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'stores',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'listings/:listingId',
     }));
+  });
+
+  it('keeps public route components split by surface', async () => {
+    const marketplaceRoute = routes.find(route => route.path === '');
+    const child = (path: string) => marketplaceRoute?.children?.find(route => route.path === path);
+    const load = async (path: string): Promise<unknown> => {
+      const route = child(path);
+      expect(route?.canActivate).withContext(`${path || '/'} must remain public`).toBeUndefined();
+      expect(route?.loadComponent).withContext(`${path || '/'} must lazy-load a component`).toBeTruthy();
+      return await route?.loadComponent?.();
+    };
+
+    await expectAsync(Promise.resolve(load(''))).toBeResolvedTo(MarketplaceHomeComponent);
+    await expectAsync(Promise.resolve(load('marketplace'))).toBeResolvedTo(MarketplaceHomeComponent);
+    await expectAsync(Promise.resolve(load('stores'))).toBeResolvedTo(BusinessStoresComponent);
+    await expectAsync(Promise.resolve(load('listings/:listingId'))).toBeResolvedTo(PublicListingDetailComponent);
   });
 
   it('protects seller and admin route groups', () => {
@@ -50,7 +75,7 @@ describe('app routes', () => {
 
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'sell',
-      redirectTo: 'account/listings/new',
+      redirectTo: 'account/listings',
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/profile',
@@ -94,6 +119,10 @@ describe('app routes', () => {
       redirectTo: '/account/seller-profile',
     }));
     expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'profile',
+      redirectTo: '/account/profile',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
       path: 'business/apply',
     }));
   });
@@ -110,6 +139,10 @@ describe('app routes', () => {
     expect(routes).toContain(jasmine.objectContaining({
       path: 'business/apply',
       redirectTo: 'seller/business/apply',
+    }));
+    expect(routes).toContain(jasmine.objectContaining({
+      path: 'profile',
+      redirectTo: 'account/profile',
     }));
 
     const consoleRoute = routes.find(route => route.path === 'console');
@@ -128,6 +161,10 @@ describe('app routes', () => {
     expect(consoleRoute?.children).toContain(jasmine.objectContaining({
       path: 'seller/activate',
       redirectTo: '/account/seller-profile',
+    }));
+    expect(consoleRoute?.children).toContain(jasmine.objectContaining({
+      path: 'profile',
+      redirectTo: '/account/profile',
     }));
   });
 

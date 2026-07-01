@@ -53,6 +53,19 @@ describe('ListingImageGalleryComponent', () => {
     expect(imageTrack.style.transform).toBe('translateX(-100%)');
   });
 
+  it('renders public images through the app media endpoint', () => {
+    component.images = [{
+      ...firstImage,
+      id: '01I00000000000000000000077',
+      url: 'https://storage.googleapis.com/jianshang/listings/raw.jpg',
+      uploadUrl: 'https://storage.googleapis.com/jianshang/listings/raw.jpg',
+    }];
+    fixture.detectChanges();
+
+    expect(listingService.mediaUrl).toHaveBeenCalledWith('/api/v1/public/listing-media/01I00000000000000000000077');
+    expect(listingService.mediaUrl).not.toHaveBeenCalledWith('https://storage.googleapis.com/jianshang/listings/raw.jpg');
+  });
+
   it('slides the image track when the image changes', () => {
     component.images = [firstImage, secondImage];
     fixture.detectChanges();

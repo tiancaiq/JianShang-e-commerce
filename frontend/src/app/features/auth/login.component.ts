@@ -140,15 +140,43 @@ export class LoginComponent {
   }
 
   handleLogin(): void {
-    this.authService.login(this.client(), this.returnUrl());
+    const returnUrl = this.returnUrl();
+    if (!this.isMarketplaceClient()) {
+      this.authService.login(this.client(), returnUrl);
+      return;
+    }
+
+    this.authService.loginWithPopup(this.client(), returnUrl)
+      .pipe(take(1))
+      .subscribe(state => {
+        if (state.authenticated) {
+          this.router.navigateByUrl(returnUrl);
+        }
+      });
   }
 
   handleRegister(): void {
-    this.authService.register(this.client(), this.returnUrl());
+    const returnUrl = this.returnUrl();
+    if (!this.isMarketplaceClient()) {
+      this.authService.register(this.client(), returnUrl);
+      return;
+    }
+
+    this.authService.registerWithPopup(this.client(), returnUrl)
+      .pipe(take(1))
+      .subscribe(state => {
+        if (state.authenticated) {
+          this.router.navigateByUrl(returnUrl);
+        }
+      });
   }
 
   canCreateAccount(): boolean {
-    return this.client() !== 'admin-portal';
+    return this.isMarketplaceClient();
+  }
+
+  private isMarketplaceClient(): boolean {
+    return this.client() === 'marketplace';
   }
 
   private client(): LoginClient {

@@ -112,6 +112,34 @@ describe('AuthService', () => {
     expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login?client=marketplace');
   });
 
+  it('uses the local gateway when a production-style local frontend has no gateway URL', async () => {
+    const fakeDocument = {
+      defaultView: {
+        location: { origin: 'http://localhost:4200' },
+      },
+    } as unknown as Document;
+    const serviceWithFakeDocument = new AuthService(
+      TestBed.inject(HttpClient),
+      'browser',
+      fakeDocument
+    );
+
+    const statePromise = firstValueFrom(serviceWithFakeDocument.ensureSession());
+    const sessionRequest = httpMock.expectOne('http://localhost:9000/api/v1/auth/session');
+    expect(sessionRequest.request.method).toBe('GET');
+    sessionRequest.flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    expect(await statePromise).toEqual({ authenticated: false, user: null });
+  });
+
   it('redirects login with selected client and safe return URL', () => {
     const assign = jasmine.createSpy('assign');
     const fakeDocument = { defaultView: { location: { assign } } } as unknown as Document;
@@ -170,6 +198,250 @@ describe('AuthService', () => {
     serviceWithFakeDocument.register('marketplace', '//evil.example/account');
 
     expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/register?client=marketplace');
+  });
+
+  it('opens marketplace login in a popup and refreshes the session on callback', async () => {
+    const popup = { closed: false } as Window;
+    const openSpy = spyOn(window, 'open').and.returnValue(popup);
+
+    const statePromise = firstValueFrom(service.loginWithPopup('marketplace', '/account/profile'));
+
+    expect(openSpy).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/login?client=marketplace&returnUrl=%2Faccount%2Fprofile&mode=popup',
+      'msb-auth',
+      jasmine.stringContaining('width=520')
+    );
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'MSB_AUTH_COMPLETE', returnUrl: '/account/profile' },
+    }));
+
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    expect(await statePromise).toEqual({ authenticated: false, user: null });
+  });
+
+  it('opens marketplace Google login in a popup with the provider hint', async () => {
+    const popup = { closed: false } as Window;
+    const openSpy = spyOn(window, 'open').and.returnValue(popup);
+
+    const statePromise = firstValueFrom(service.loginWithGooglePopup('marketplace', '/account/profile'));
+
+    expect(openSpy).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/login?client=marketplace&returnUrl=%2Faccount%2Fprofile&provider=google&mode=popup',
+      'msb-auth',
+      jasmine.stringContaining('width=520')
+    );
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'MSB_AUTH_COMPLETE', returnUrl: '/account/profile' },
+    }));
+
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    expect(await statePromise).toEqual({ authenticated: false, user: null });
+  });
+
+  it('drops unsafe popup return URLs before opening login', async () => {
+    const popup = { closed: false } as Window;
+    const openSpy = spyOn(window, 'open').and.returnValue(popup);
+
+    const statePromise = firstValueFrom(service.loginWithPopup('marketplace', 'https://evil.example/account'));
+
+    expect(openSpy).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/login?client=marketplace&mode=popup',
+      'msb-auth',
+      jasmine.stringContaining('width=520')
+    );
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'MSB_AUTH_COMPLETE', returnUrl: 'https://evil.example/account' },
+    }));
+
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    expect(await statePromise).toEqual({ authenticated: false, user: null });
+  });
+
+  it('opens marketplace registration in a popup', async () => {
+    const popup = { closed: false } as Window;
+    const openSpy = spyOn(window, 'open').and.returnValue(popup);
+
+    const statePromise = firstValueFrom(service.registerWithPopup('marketplace', '/account/profile'));
+
+    expect(openSpy).toHaveBeenCalledOnceWith(
+      '/api/v1/auth/register?client=marketplace&returnUrl=%2Faccount%2Fprofile&mode=popup',
+      'msb-auth',
+      jasmine.stringContaining('width=520')
+    );
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'MSB_AUTH_COMPLETE', returnUrl: '/account/profile' },
+    }));
+
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    expect(await statePromise).toEqual({ authenticated: false, user: null });
+  });
+
+  it('posts native login through the gateway with CSRF and refreshes the identity user', async () => {
+    const statePromise = firstValueFrom(service.nativeLogin({
+      email: 'buyer@example.com',
+      password: 'password-123',
+    }));
+
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+
+    const loginRequest = httpMock.expectOne('/api/v1/auth/native/login');
+    expect(loginRequest.request.method).toBe('POST');
+    expect(loginRequest.request.withCredentials).toBeTrue();
+    expect(loginRequest.request.headers.get('X-CSRF-TOKEN')).toBe('csrf-token');
+    expect(loginRequest.request.body).toEqual({
+      email: 'buyer@example.com',
+      password: 'password-123',
+    });
+    loginRequest.flush({
+      authenticated: true,
+      user: {
+        subject: 'keycloak-sub-1',
+        email: 'buyer@example.com',
+        displayName: 'Buyer One',
+        roles: ['BUYER'],
+        expiresAt: '2026-06-16T12:00:00Z',
+      },
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token-2',
+      },
+    });
+
+    httpMock.expectOne('/api/v1/users/me').flush({
+      data: {
+        id: '01JY0000000000000000000000',
+        keycloakSub: 'keycloak-sub-1',
+        email: 'buyer@example.com',
+        emailVerified: true,
+        displayName: 'Buyer One',
+        phone: null,
+        phoneVerified: false,
+        avatarUrl: null,
+        status: 'ACTIVE',
+        version: 0,
+        createdAt: '2026-06-16T12:00:00Z',
+        updatedAt: '2026-06-16T12:00:00Z',
+      },
+    });
+
+    expect((await statePromise).authenticated).toBeTrue();
+  });
+
+  it('refreshes the gateway session before native registration so CSRF is current', async () => {
+    const statePromise = firstValueFrom(service.nativeRegister({
+      email: 'new@example.com',
+      password: 'password-123',
+      displayName: 'New Buyer',
+    }));
+
+    const sessionRequest = httpMock.expectOne('/api/v1/auth/session');
+    expect(sessionRequest.request.method).toBe('GET');
+    sessionRequest.flush({
+      authenticated: false,
+      user: null,
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'fresh-csrf-token',
+      },
+    });
+
+    const registerRequest = httpMock.expectOne('/api/v1/auth/native/register');
+    expect(registerRequest.request.method).toBe('POST');
+    expect(registerRequest.request.withCredentials).toBeTrue();
+    expect(registerRequest.request.headers.get('X-CSRF-TOKEN')).toBe('fresh-csrf-token');
+    expect(registerRequest.request.body).toEqual({
+      email: 'new@example.com',
+      password: 'password-123',
+      displayName: 'New Buyer',
+    });
+    registerRequest.flush({
+      authenticated: true,
+      user: {
+        subject: 'keycloak-sub-2',
+        email: 'new@example.com',
+        displayName: 'New Buyer',
+        roles: ['BUYER'],
+        expiresAt: '2026-06-16T12:00:00Z',
+      },
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token-2',
+      },
+    });
+
+    httpMock.expectOne('/api/v1/users/me').flush({
+      data: {
+        id: '01JY0000000000000000000001',
+        keycloakSub: 'keycloak-sub-2',
+        email: 'new@example.com',
+        emailVerified: true,
+        displayName: 'New Buyer',
+        phone: null,
+        phoneVerified: false,
+        avatarUrl: null,
+        status: 'ACTIVE',
+        version: 0,
+        createdAt: '2026-06-16T12:00:00Z',
+        updatedAt: '2026-06-16T12:00:00Z',
+      },
+    });
+
+    expect((await statePromise).authenticated).toBeTrue();
   });
 
   it('posts logout through the gateway with the current CSRF parameter', async () => {

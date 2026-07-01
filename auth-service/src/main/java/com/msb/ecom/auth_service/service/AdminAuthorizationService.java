@@ -23,6 +23,7 @@ import java.util.Set;
 public class AdminAuthorizationService {
 
     private static final String PLATFORM_ADMIN_ROLE = "PLATFORM_ADMIN";
+    private static final int MAX_LABEL_IDS_PER_TYPE = 50;
 
     private final AuthService authService;
     private final JdbcTemplate jdbcTemplate;
@@ -53,20 +54,34 @@ public class AdminAuthorizationService {
     public AdminIdentityLabelsResponse identityLabels(Set<String> userIds, Set<String> businessIds) {
         User user = authService.ensureUserEntity();
         requirePlatformAdmin(user.getId());
+        return labelResponse(userIds, businessIds, false);
+    }
+
+    @Transactional(readOnly = true)
+    // Public listing cards need only seller display labels; raw identity IDs stay owned by auth-service.
+    public AdminIdentityLabelsResponse publicSellerLabels(Set<String> userIds, Set<String> businessIds) {
+        return labelResponse(userIds, businessIds, true);
+    }
+
+    private AdminIdentityLabelsResponse labelResponse(Set<String> userIds, Set<String> businessIds, boolean publicOnly) {
         Set<String> normalizedUserIds = normalizedIds(userIds);
         Set<String> normalizedBusinessIds = normalizedIds(businessIds);
 
         List<UserIdentityLabelResponse> users = normalizedUserIds.isEmpty()
                 ? List.of()
                 : jdbcTemplate.query("""
-                        select id, display_name
+                        select id,
+                               coalesce(nullif(trim(display_name), ''), 'Marketplace user') as display_name,
+                               avatar_url
                         from users
                         where id in (%s)
+                        %s
                         order by id
-                        """.formatted(placeholders(normalizedUserIds.size())),
+                        """.formatted(placeholders(normalizedUserIds.size()), publicOnly ? "and status = 'ACTIVE'" : ""),
                         (rs, rowNum) -> new UserIdentityLabelResponse(
                                 rs.getString("id"),
-                                rs.getString("display_name")),
+                                rs.getString("display_name"),
+                                rs.getString("avatar_url")),
                         normalizedUserIds.toArray());
         List<BusinessIdentityLabelResponse> businesses = normalizedBusinessIds.isEmpty()
                 ? List.of()
@@ -74,8 +89,9 @@ public class AdminAuthorizationService {
                         select id, legal_name
                         from businesses
                         where id in (%s)
+                        %s
                         order by id
-                        """.formatted(placeholders(normalizedBusinessIds.size())),
+                        """.formatted(placeholders(normalizedBusinessIds.size()), publicOnly ? "and status = 'ACTIVE'" : ""),
                         (rs, rowNum) -> new BusinessIdentityLabelResponse(
                                 rs.getString("id"),
                                 rs.getString("legal_name")),
@@ -105,6 +121,9 @@ public class AdminAuthorizationService {
                 continue;
             }
             normalized.add(FixedLengthIds.requireTrimmed("ID", id, 26));
+        }
+        if (normalized.size() > MAX_LABEL_IDS_PER_TYPE) {
+            throw new IllegalArgumentException("At most 50 IDs can be resolved per label type.");
         }
         return normalized;
     }

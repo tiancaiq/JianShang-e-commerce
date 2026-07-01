@@ -1,6 +1,7 @@
 import { Component, Input, OnChanges, OnDestroy, OnInit, SimpleChanges, inject, signal } from '@angular/core';
 import { PublicListingImage } from '../../../core/models/listing.model';
 import { ListingService } from '../../../core/services/listing.service';
+import { publicListingImageUrl } from '../../listing/public-listing-display';
 
 @Component({
   selector: 'app-listing-image-gallery',
@@ -185,7 +186,7 @@ export class ListingImageGalleryComponent implements OnChanges, OnDestroy, OnIni
   }
 
   imageUrl(image: PublicListingImage | undefined): string {
-    return this.listingService.mediaUrl(image?.url || image?.uploadUrl);
+    return publicListingImageUrl(image, url => this.listingService.mediaUrl(url));
   }
 
   selectedImage(): PublicListingImage | undefined {

@@ -75,6 +75,16 @@ describe('IndividualSellerActivationComponent', () => {
     expect(toastService.success).toHaveBeenCalledWith('Individual seller profile activated.');
   });
 
+  it('renders the marketplace seller registration form labels', () => {
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+
+    expect(text).toContain('Register an individual seller profile');
+    expect(text).toContain('City');
+    expect(text).toContain('County / region');
+  });
+
   it('requires accepting individual-selling terms before calling the API', () => {
     fixture.detectChanges();
     component.publicCity = 'Irvine';

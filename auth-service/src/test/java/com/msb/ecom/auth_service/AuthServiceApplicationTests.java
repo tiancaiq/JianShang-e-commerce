@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.stream.IntStream;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -1018,6 +1019,62 @@ class AuthServiceApplicationTests {
                         .value("Alex Seller"))
                 .andExpect(jsonPath("$.data.businesses[?(@.id == '%s')].legalName".formatted(businessId))
                         .value("Label Business LLC"));
+    }
+
+    @Test
+    void guestCanReadPublicSellerIdentityLabels() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-public-label-seller")
+                        .claim("email", "public-label-seller@example.com")
+                        .claim("name", "Public Label Seller"))))
+                .andExpect(status().isOk());
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                "keycloak-sub-public-label-seller");
+        jdbcTemplate.update(
+                "update users set avatar_url = ? where id = ?",
+                "https://example.com/public-label.png",
+                userId);
+
+        mockMvc.perform(get("/api/v1/public/seller-labels").queryParam("userIds", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.users[?(@.id == '%s')].displayName".formatted(userId))
+                        .value("Public Label Seller"))
+                .andExpect(jsonPath("$.data.users[?(@.id == '%s')].avatarUrl".formatted(userId))
+                        .value("https://example.com/public-label.png"))
+                .andExpect(jsonPath("$.data.users[0].email").doesNotExist())
+                .andExpect(jsonPath("$.data.users[0].phone").doesNotExist())
+                .andExpect(jsonPath("$.data.users[0].keycloakSub").doesNotExist())
+                .andExpect(jsonPath("$.data.users[0].status").doesNotExist());
+    }
+
+    @Test
+    void publicSellerIdentityLabelsHideUnavailableUsers() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-public-label-suspended")
+                        .claim("email", "public-label-suspended@example.com")
+                        .claim("name", "Suspended Seller"))))
+                .andExpect(status().isOk());
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                "keycloak-sub-public-label-suspended");
+        jdbcTemplate.update("update users set status = 'SUSPENDED' where id = ?", userId);
+
+        mockMvc.perform(get("/api/v1/users/public-labels").queryParam("userIds", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.users").isEmpty());
+    }
+
+    @Test
+    void publicSellerIdentityLabelsRejectOversizedBatches() throws Exception {
+        String[] userIds = IntStream.range(0, 51)
+                .mapToObj(index -> String.format("01L%023d", index))
+                .toArray(String[]::new);
+
+        mockMvc.perform(get("/api/v1/users/public-labels").queryParam("userIds", userIds))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

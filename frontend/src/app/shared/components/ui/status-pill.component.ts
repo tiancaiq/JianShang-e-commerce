@@ -15,7 +15,7 @@ import { Component } from '@angular/core';
       min-height: 28px;
       padding: 0 0.65rem;
       border: 1px solid var(--ui-pill-border, var(--listing-border, var(--profile-border, var(--color-border))));
-      border-radius: 999px;
+      border-radius: var(--ui-pill-radius, 999px);
       background: var(--ui-pill-bg, var(--listing-surface, var(--profile-accent-muted, var(--color-accent-muted))));
       color: var(--ui-pill-text, var(--listing-accent, var(--profile-accent, var(--color-accent))));
       font-size: 0.75rem;

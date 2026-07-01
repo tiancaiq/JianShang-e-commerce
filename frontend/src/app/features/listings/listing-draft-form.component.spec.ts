@@ -130,12 +130,13 @@ describe('ListingDraftFormComponent', () => {
     expect(component.categoryId).toBe(category.id);
   });
 
-  it('saves an individual draft with quantity fixed to one', () => {
+  it('saves an individual draft with seller-entered quantity', () => {
     fixture.detectChanges();
     fillCommonFields();
     component.publicCity = ' Irvine ';
     component.publicRegion = ' CA ';
     component.negotiable = true;
+    component.quantity = 2;
 
     component.saveDraft();
 
@@ -146,7 +147,7 @@ describe('ListingDraftFormComponent', () => {
       description: 'A reliable city bike.',
       price: { amount: 250, currency: 'USD' },
       negotiable: true,
-      quantity: 1,
+      quantity: 2,
       location: { city: 'Irvine', region: 'CA' },
     }));
     expect(component.savedId()).toBe(draft.id);
@@ -369,6 +370,28 @@ describe('ListingDraftFormComponent', () => {
       title: 'Updated bicycle',
     }));
     expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 3);
+    expect(component.errorMsg()).toBe('');
+  });
+
+  it('saves pending review listing edits before resubmitting for review', () => {
+    listingService.updateDraft.and.returnValue(of({ ...draft, status: 'DRAFT', version: 5, images: [image] }));
+    fixture.detectChanges();
+    fillCommonFields();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    (component as unknown as { currentVersion: number }).currentVersion = 4;
+    component.isEditMode.set(true);
+    component.listingStatus.set('PENDING_REVIEW');
+    component.mediaItems.set([image]);
+    (component as unknown as { rememberCurrentFormSnapshot: () => void }).rememberCurrentFormSnapshot();
+    component.description = 'Updated while review is pending.';
+
+    component.submitForReview();
+
+    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(draft.id, 4, jasmine.objectContaining({
+      sellerType: 'INDIVIDUAL',
+      description: 'Updated while review is pending.',
+    }));
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 5);
     expect(component.errorMsg()).toBe('');
   });
 

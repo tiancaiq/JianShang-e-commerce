@@ -117,6 +117,28 @@ public class RestAuthServiceClient implements AuthServiceClient {
         return response.data();
     }
 
+    @Override
+    public AdminIdentityLabels lookupPublicSellerLabels(Set<String> userIds, Set<String> businessIds) {
+        AdminIdentityLabelsEnvelope response = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/public/seller-labels")
+                        .queryParam("userIds", userIds.toArray())
+                        .queryParam("businessIds", businessIds.toArray())
+                        .build())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied public seller label lookup status={}",
+                            clientResponse.getStatusCode().value());
+                    throw new ListingAuthorizationException("Seller labels could not be loaded.");
+                })
+                .body(AdminIdentityLabelsEnvelope.class);
+
+        if (response == null || response.data() == null) {
+            return new AdminIdentityLabels(List.of(), List.of());
+        }
+        return response.data();
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record IndividualSellerEnvelope(IndividualSellerAuthorization data) {
     }

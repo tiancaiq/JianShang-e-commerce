@@ -134,6 +134,15 @@ LOGIN-01 must preserve these boundaries:
 - No registration, password recovery, profile-edit, listing, chat, cart,
   checkout, payment, order, notification, review, or AI behavior is added.
 
+Logout environment note:
+
+- Local development may use `http://localhost:4200/` as the configured
+  post-logout marketplace URI.
+- VM and deployed environments must set the equivalent marketplace base URI
+  through gateway configuration rather than relying on localhost.
+- Logout should return to the marketplace surface and require a fresh login
+  before protected account routes are available again.
+
 ## Implemented Behavior
 
 - Protected frontend routes redirect unauthenticated users to `/login` with a

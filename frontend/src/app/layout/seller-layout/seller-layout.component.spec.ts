@@ -32,7 +32,8 @@ describe('SellerLayoutComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
     expect(text).toContain('Business Apply');
-    expect(text).toContain('Profile');
+    expect(text).toContain('Account');
+    expect(text).not.toContain('Profile');
     expect(text).not.toContain('New Listing');
     expect(text).not.toContain('Individual Seller');
     expect(text).not.toContain('My Listings');
@@ -44,5 +45,14 @@ describe('SellerLayoutComponent', () => {
     expect(text).not.toContain('Checkout');
     expect(text).not.toContain('Wallet');
     expect(text).not.toContain('Notifications');
+  });
+
+  it('links basic user account management to the marketplace account route', () => {
+    fixture.detectChanges();
+
+    const accountLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'Account');
+
+    expect(accountLink?.getAttribute('href')).toBe('/account/profile');
   });
 });

@@ -17,6 +17,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/api/v1/public/seller-labels").permitAll()
+                        .requestMatchers("/api/v1/users/public-labels").permitAll()
                         .requestMatchers("/api/v1/webhooks/business-verification").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))

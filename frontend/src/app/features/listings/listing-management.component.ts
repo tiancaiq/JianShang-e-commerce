@@ -36,6 +36,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
             <a class="listing-row" [routerLink]="editListingLink(listing.id)">
               <div>
                 <strong>{{ listing.title }}</strong>
+                <span class="owner-line">Owner: {{ ownerLabel(listing) }}</span>
                 <span>{{ listing.sellerType }} / {{ listing.condition }} / {{ listing.currency }} {{ listing.priceAmount }}</span>
               </div>
               <div class="status">
@@ -182,6 +183,11 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       font-size: 0.8125rem;
     }
 
+    .listing-row .owner-line {
+      color: var(--listing-accent);
+      font-weight: 850;
+    }
+
     .status {
       align-items: flex-end;
       flex: 0 0 auto;
@@ -244,6 +250,11 @@ export class ListingManagementComponent implements OnInit {
   // Builds the marketplace account edit route for a seller-owned listing draft.
   editListingLink(listingId: string): string[] {
     return [this.listingBasePath(), listingId, 'edit'];
+  }
+
+  ownerLabel(listing: ListingDraft): string {
+    return listing.sellerDisplayName?.trim()
+      || (listing.sellerType === 'BUSINESS' ? 'Business seller' : 'Individual seller');
   }
 
   // Centralizes the account listing route so legacy seller routes do not leak into templates.

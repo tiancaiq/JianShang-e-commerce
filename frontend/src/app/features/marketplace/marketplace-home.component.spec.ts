@@ -52,12 +52,29 @@ describe('MarketplaceHomeComponent', () => {
     expect(fixture.nativeElement.querySelector('img')?.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000001');
   });
 
-  it('routes the sell call to action into marketplace account listing creation', () => {
+  it('keeps the marketplace page focused on individual listings', () => {
+    const businessListing = publicListing({
+      id: '01L00000000000000000000002',
+      sellerType: 'BUSINESS',
+      sellerDisplayName: 'Mochi Store',
+      title: 'Business plush',
+    });
+    listingService.getPublicListings.and.returnValue(of([listing, businessListing]));
+
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Used bicycle');
+    expect(fixture.nativeElement.textContent).not.toContain('Business plush');
+    expect(fixture.nativeElement.textContent).not.toContain('All sellers');
+  });
+
+  it('routes the listing call to action through the marketplace account seller entry', () => {
     fixture.detectChanges();
 
     const sellLink = fixture.nativeElement.querySelector('.secondary-link') as HTMLAnchorElement;
 
-    expect(sellLink.getAttribute('href')).toBe('/account/listings/new');
+    expect(sellLink.textContent?.trim()).toBe('My Listings');
+    expect(sellLink.getAttribute('href')).toBe('/account/listings');
   });
 
   it('shows an empty state when no public listings exist', () => {
@@ -65,7 +82,7 @@ describe('MarketplaceHomeComponent', () => {
 
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No approved listings yet.');
+    expect(fixture.nativeElement.textContent).toContain('No approved individual listings yet.');
   });
 
   it('shows a load error state', () => {

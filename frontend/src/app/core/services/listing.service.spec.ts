@@ -94,6 +94,7 @@ describe('ListingService', () => {
   const publicListing: PublicListing = {
     id: draft.id,
     sellerType: 'INDIVIDUAL',
+    sellerDisplayName: 'Alex Seller',
     categoryId: categories[0].id,
     categorySlug: 'general',
     categoryName: 'General',

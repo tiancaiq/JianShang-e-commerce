@@ -131,6 +131,7 @@ Query:
 ```text
 client=marketplace|seller-portal|admin-portal
 returnUrl=/safe/relative/path
+mode=popup
 ```
 
 Rules:
@@ -139,6 +140,8 @@ Rules:
 - Unknown clients return `404`.
 - `returnUrl` must be a safe same-site relative path; unsafe values are
   ignored.
+- `mode=popup` uses the same OIDC flow but returns a popup completion page
+  after successful authentication.
 - The browser is redirected into the OIDC authorization flow with Keycloak's
   registration action.
 - After registration/authentication, the gateway callback creates the BFF
@@ -157,16 +160,109 @@ Starts the gateway BFF OIDC login redirect. The gateway, not browser
 JavaScript, exchanges the authorization code and stores OAuth tokens
 server-side.
 
-Query: `client=marketplace|seller-portal|admin-portal`.
+Query:
+
+- `client=marketplace|seller-portal|admin-portal`
+- `returnUrl=/safe/relative/path`
+- `mode=popup`
+- `provider=google`
 
 The endpoint does not accept credentials and does not return access or refresh
-tokens.
+tokens. When `mode=popup` is present, a successful OAuth callback returns a
+small popup completion page that notifies the marketplace window to refresh
+its BFF session.
+
+When `provider=google` is present, the gateway adds Keycloak's
+`kc_idp_hint=google` authorization parameter after validating the provider
+allowlist. Angular still talks only to the gateway BFF; Google OAuth is
+completed through Keycloak identity brokering.
 
 ### `GET /auth/session` (`IAM-02`)
 
 Returns authenticated state, a safe Keycloak subject/user summary when signed
 in, and CSRF metadata for browser mutations. It never returns access tokens,
 refresh tokens, ID tokens, or token type metadata.
+
+### `POST /auth/native/login` (`LOGIN-02`)
+
+Marketplace-native email/password sign-in through the gateway BFF. This keeps
+the user inside the marketplace UI while Keycloak remains the credential and
+token authority.
+
+Headers:
+
+```text
+X-CSRF-TOKEN: value from GET /auth/session
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "secret"
+}
+```
+
+Response:
+
+```json
+{
+  "authenticated": true,
+  "user": {
+    "subject": "keycloak-sub",
+    "email": "user@example.com",
+    "displayName": "Alex Buyer",
+    "roles": ["BUYER"],
+    "expiresAt": "2026-06-16T12:00:00Z"
+  },
+  "csrf": {
+    "headerName": "X-CSRF-TOKEN",
+    "parameterName": "_csrf",
+    "token": "rotated-or-current-token"
+  }
+}
+```
+
+Rules:
+
+- Marketplace browser JavaScript posts credentials only to the gateway.
+- The gateway exchanges credentials with Keycloak and stores OAuth tokens
+  server-side.
+- The response never returns access tokens, refresh tokens, ID tokens, or
+  token type metadata.
+- Invalid credentials return `401 INVALID_CREDENTIALS`.
+
+### `POST /auth/native/register` (`SIGNUP-04`)
+
+Marketplace-native account creation through the gateway BFF. The gateway uses
+a Keycloak service account to create the identity-provider user, then signs
+the user into the same BFF session.
+
+Headers:
+
+```text
+X-CSRF-TOKEN: value from GET /auth/session
+```
+
+Request:
+
+```json
+{
+  "displayName": "Alex Buyer",
+  "email": "user@example.com",
+  "password": "secret"
+}
+```
+
+Response: same shape as `POST /auth/native/login`.
+
+Rules:
+
+- Passwords are never stored in application service databases.
+- Duplicate emails return `409 EMAIL_ALREADY_REGISTERED`.
+- Google and other external identity providers remain redirect/popup provider
+  flows because external consent cannot be completed entirely inside the app.
 
 ### `POST /auth/logout` (`IAM-02`)
 
@@ -854,9 +950,9 @@ Rules:
 - Only listings with `status=ACTIVE` and `moderationStatus=APPROVED` are
   visible.
 - Non-public listing states return `404 LISTING_NOT_FOUND`.
-- The response omits owner user IDs, business internal IDs, internal status,
-  moderation status, versions, media object IDs, object bucket, and object
-  key.
+- The response includes a safe owner display label and omits owner user IDs,
+  business internal IDs, internal status, moderation status, versions, media
+  object IDs, object bucket, and object key.
 - Individual listings include an off-platform payment and delivery notice.
 
 Response:
@@ -865,6 +961,7 @@ Response:
 {
   "id": "01J...",
   "sellerType": "INDIVIDUAL",
+  "sellerDisplayName": "Alex Seller",
   "categoryId": "01J...",
   "categorySlug": "general",
   "categoryName": "General",
@@ -894,12 +991,60 @@ Response:
 }
 ```
 
+### Safe public identity labels (`USER-02`)
+
+```text
+GET /users/public-labels?userIds=&businessIds=
+GET /public/seller-labels?userIds=&businessIds=
+```
+
+`USER-02` defines an auth-service-owned safe seller-label contract for
+marketplace listing display and future chat header use. The
+`/public/seller-labels` route is retained for existing service callers; the
+`/users/public-labels` route is the canonical user-profile contract.
+
+Rules:
+
+- Login is not required.
+- Each requested ID set is capped at 50 IDs.
+- Public labels include only user ID, display name, optional avatar URL,
+  business ID, and business legal name.
+- Email, phone, Keycloak subject, roles, account status, verification flags,
+  and internal profile/contact metadata are never returned.
+- Suspended, closed, or missing identities are omitted from the response.
+- Listing APIs that cannot resolve a label use neutral fallback text such as
+  `Marketplace seller` or `Business seller`.
+
+Response:
+
+```json
+{
+  "data": {
+    "users": [
+      {
+        "id": "01J...",
+        "displayName": "Alex Seller",
+        "avatarUrl": "https://example.com/avatar.png"
+      }
+    ],
+    "businesses": [
+      {
+        "id": "01J...",
+        "legalName": "MSB Local Store LLC"
+      }
+    ]
+  }
+}
+```
+
 ### Search (`SRC-02`, `SRC-03`)
 
 ```text
 GET /public/listings
-GET /search/listings?q=&categoryId=&sellerType=&condition=&minPrice=&maxPrice=&city=&region=&cursor=&limit=
-GET /stores/{slug}/listings?cursor=&limit=
+GET /public/marketplace/listings?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
+GET /public/stores/{slug}
+GET /public/stores/{slug}/listings?categoryId=&condition=&minPrice=&maxPrice=&sort=&cursor=&limit=
+GET /search/listings?q=&sellerType=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
 ```
 
 SEARCH-01 implements the initial database-backed public browse path:
@@ -912,12 +1057,23 @@ reads start from MySQL source tables and expose only safe public fields.
 OpenSearch is deferred until the database-backed browse, storefront, filters,
 sorting, and cursor pagination contracts are stable.
 
-Public listing cards may expose listing ID, seller type, category display
-data, title, condition, price, public location, published time, negotiable
-state, transaction notice, and approved image URLs. They must not expose owner
-user IDs, business staff/member data, internal status, moderation state,
-versions, media bucket/key, exact individual locations, or private contact
-data.
+SEARCH-02 is split by product experience:
+
+- SEARCH-02A adds individual marketplace keyword search for approved active
+  `INDIVIDUAL` listings. It keeps individual trade/off-platform disclosure and
+  does not introduce checkout language.
+- SEARCH-02B adds public business storefront browse for approved active
+  `BUSINESS` listings scoped to a store. It does not introduce cart,
+  inventory, checkout, payment, orders, or shipping.
+- SEARCH-03 adds shared filters, sorting, and cursor pagination after both
+  paths have stable database-backed reads.
+
+Public listing cards may expose listing ID, seller type, safe owner display
+label, category display data, title, condition, price, public location,
+published time, negotiable state, transaction notice, and approved image URLs.
+They must not expose owner user IDs, business staff/member data, internal
+status, moderation state, versions, media bucket/key, exact individual
+locations, or private contact data.
 
 Maximum `limit` is server-controlled. Search result includes seller type and
 checkout/off-platform disclosure.

@@ -77,7 +77,7 @@ Non-goal:
 
 - Do not add `POST /api/v1/auth/register` in application code.
 
-### SIGNUP-02 Google Identity Provider
+### SIGNUP-05 Google Identity Provider
 
 Add Google as a Keycloak identity provider for sign-in and sign-up.
 
@@ -100,7 +100,7 @@ Non-goals:
 - Do not let Angular call Google OAuth directly for MVP web login.
 - Do not grant seller, business, or admin permissions from Google login.
 
-### SIGNUP-03 Frontend Sign-In/Sign-Up UX
+### SIGNUP-02/SIGNUP-03 Frontend Sign-In/Sign-Up UX
 
 Polish the marketplace entry point for new and returning users.
 
@@ -108,7 +108,8 @@ Expected work:
 
 - Update the login page copy to say sign in or create account.
 - Preserve `LOGIN-01` client and safe return URL behavior.
-- Prefer Keycloak-hosted registration and Google buttons for MVP.
+- Prefer the marketplace-native sign-in/create-account dialog for the current
+  MVP UX; keep Google hidden until provider credentials are configured.
 - If adding an Angular "Create account" link, route through a gateway
   endpoint that redirects to Keycloak registration instead of collecting
   passwords in Angular.
@@ -140,8 +141,17 @@ Keycloak's registration flow. It must not accept credentials.
 
 ### Google Sign-In/Sign-Up
 
+Current UI note:
+
+- The gateway and Keycloak `provider=google` wiring exists.
+- The marketplace Google CTA is hidden until real Google OAuth credentials are
+  configured and the provider is enabled in Keycloak.
+- Angular must still route Google sign-in through the gateway BFF when the UI
+  is later exposed.
+
 1. User opens the marketplace login/sign-up entry point.
-2. User chooses Google from the Keycloak login screen.
+2. User chooses Google from the marketplace or Keycloak login entry point
+   after the provider is enabled.
 3. Google authenticates the user and returns to Keycloak.
 4. Keycloak creates or links the Keycloak user.
 5. Keycloak redirects to the gateway callback.
@@ -225,14 +235,14 @@ SIGNUP-01 should test or manually verify:
 - `/users/me` creates the application-owned user mapping.
 - Default access is buyer-only.
 
-SIGNUP-02 should test or manually verify:
+SIGNUP-05 should test or manually verify:
 
 - Google sign-in reaches Keycloak and returns through the gateway callback.
 - Google-created users map by Keycloak `sub`.
 - No Google token is exposed to Angular or stored by application services.
 - Safe return URLs still work.
 
-SIGNUP-03 should test:
+SIGNUP-02/SIGNUP-03 should test:
 
 - Login/sign-up page copy and links.
 - Registration link preserves client and return URL.

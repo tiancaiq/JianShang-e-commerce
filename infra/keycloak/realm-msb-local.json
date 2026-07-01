@@ -2,6 +2,7 @@
   "realm": "msb-local",
   "enabled": true,
   "displayName": "MSB Local",
+  "loginTheme": "msb-marketplace",
   "registrationAllowed": true,
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
@@ -52,7 +53,7 @@
       "secret": "local-dev-only-change-me-marketplace",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
       "redirectUris": [
@@ -151,8 +152,65 @@
         "phone",
         "offline_access"
       ]
+    },
+    {
+      "clientId": "msb-gateway-admin",
+      "name": "MSB Gateway Admin Local",
+      "description": "Local gateway service account for marketplace-native registration. Production must rotate this secret.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "local-dev-only-change-me-gateway-admin",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": false,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ]
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": false,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${KEYCLOAK_GOOGLE_CLIENT_ID:}",
+        "clientSecret": "${KEYCLOAK_GOOGLE_CLIENT_SECRET:}",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT"
+      }
     }
   ],
   "groups": [],
-  "users": []
+  "users": [
+    {
+      "username": "service-account-msb-gateway-admin",
+      "enabled": true,
+      "serviceAccountClientId": "msb-gateway-admin",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users"
+        ]
+      }
+    }
+  ]
 }

@@ -78,6 +78,7 @@ export interface ListingDraft {
   sellerType: ListingSellerType;
   individualSellerUserId: string | null;
   businessId: string | null;
+  sellerDisplayName?: string | null;
   categoryId: string;
   title: string;
   description: string;
@@ -189,6 +190,8 @@ export interface PublicListingImage {
 export interface PublicListing {
   id: string;
   sellerType: ListingSellerType;
+  sellerDisplayName?: string | null;
+  sellerAvatarUrl?: string | null;
   categoryId: string;
   categorySlug: string;
   categoryName: string;
@@ -206,6 +209,9 @@ export interface PublicListing {
   transactionNotice: string | null;
   images: PublicListingImage[];
 }
+
+export type MarketplaceBrowseListing = PublicListing;
+export type BusinessStoreListing = PublicListing;
 
 export interface AdminListingModerationCase {
   id: string;

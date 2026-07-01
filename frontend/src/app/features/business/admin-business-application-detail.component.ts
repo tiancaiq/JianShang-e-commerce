@@ -7,11 +7,12 @@ import {
 } from '../../core/models/business-application.model';
 import { BusinessApplicationService } from '../../core/services/business-application.service';
 import { ToastService } from '../../core/services/toast.service';
+import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
 
 @Component({
   selector: 'app-admin-business-application-detail',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, StatusPillComponent],
   template: `
     <section class="admin-business-detail">
       <header class="page-header">
@@ -22,7 +23,7 @@ import { ToastService } from '../../core/services/toast.service';
 
         @if (application(); as data) {
           <div class="header-meta">
-            <span class="status-pill">{{ data.status }}</span>
+            <app-ui-status-pill>{{ data.status }}</app-ui-status-pill>
             <span>Version {{ data.version }}</span>
           </div>
         }
@@ -297,15 +298,8 @@ import { ToastService } from '../../core/services/toast.service';
       overflow-wrap: anywhere;
     }
 
-    .status-pill {
-      display: inline-flex;
-      border-radius: var(--radius-md);
-      background: var(--color-accent-muted);
-      color: var(--color-accent);
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.35rem 0.55rem;
-      white-space: nowrap;
+    .header-meta app-ui-status-pill {
+      --ui-pill-radius: var(--radius-md);
     }
 
     .decision-form {

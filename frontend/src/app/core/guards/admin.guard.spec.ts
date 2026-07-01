@@ -41,12 +41,13 @@ describe('adminGuard', () => {
     });
 
     const result = TestBed.runInInjectionContext(() =>
-      adminGuard({} as never, {} as never)
+      adminGuard({} as never, { url: '/admin/dashboard' } as never)
     );
     const value = await firstValueFrom(result as Observable<boolean | UrlTree>);
 
     expect(value instanceof UrlTree).toBeTrue();
-    expect(TestBed.inject(Router).serializeUrl(value as UrlTree)).toBe('/login');
+    expect(TestBed.inject(Router).serializeUrl(value as UrlTree))
+      .toBe('/login?client=admin-portal&returnUrl=%2Fadmin%2Fdashboard');
     expect(adminService.getCurrentAdmin).not.toHaveBeenCalled();
   });
 
@@ -74,7 +75,7 @@ describe('adminGuard', () => {
     expect(await firstValueFrom(result as Observable<boolean | UrlTree>)).toBeTrue();
   });
 
-  it('redirects authenticated non-admin users to marketplace', async () => {
+  it('redirects authenticated non-admin users to admin access denied', async () => {
     const authService = {
       ensureSession: () => of({ authenticated: true, user: null }),
     };
@@ -92,15 +93,16 @@ describe('adminGuard', () => {
     });
 
     const result = TestBed.runInInjectionContext(() =>
-      adminGuard({} as never, {} as never)
+      adminGuard({} as never, { url: '/admin/dashboard' } as never)
     );
     const value = await firstValueFrom(result as Observable<boolean | UrlTree>);
 
     expect(value instanceof UrlTree).toBeTrue();
-    expect(TestBed.inject(Router).serializeUrl(value as UrlTree)).toBe('/');
+    expect(TestBed.inject(Router).serializeUrl(value as UrlTree))
+      .toBe('/admin-access-denied?returnUrl=%2Fadmin%2Fdashboard');
   });
 
-  it('prevents loading admin route for authenticated non-admin users', async () => {
+  it('prevents login loops for authenticated non-admin users', async () => {
     const authService = {
       ensureSession: () => of({ authenticated: true, user: null }),
     };
@@ -114,6 +116,7 @@ describe('adminGuard', () => {
         provideRouter([
           { path: '', component: TestMarketplaceComponent },
           { path: 'login', component: TestLoginComponent },
+          { path: 'admin-access-denied', component: TestLoginComponent },
           { path: 'admin', component: TestAdminComponent, canActivate: [adminGuard] },
         ]),
         { provide: AuthService, useValue: authService },
@@ -125,6 +128,6 @@ describe('adminGuard', () => {
 
     await router.navigateByUrl('/admin');
 
-    expect(router.url).toBe('/');
+    expect(router.url).toBe('/admin-access-denied?returnUrl=%2Fadmin');
   });
 });

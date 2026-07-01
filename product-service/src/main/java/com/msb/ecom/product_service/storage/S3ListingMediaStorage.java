@@ -13,10 +13,16 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
+import java.io.IOException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.URI;
 import java.time.Duration;
 
@@ -24,6 +30,7 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
 
     private final S3Client s3Client;
     private final S3Presigner presigner;
+    private final HttpClient httpClient;
     private final String bucket;
     private final Duration signedUrlTtl;
 
@@ -60,6 +67,7 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
 
         this.s3Client = clientBuilder.build();
         this.presigner = presignerBuilder.build();
+        this.httpClient = HttpClient.newHttpClient();
     }
 
     @Override
@@ -121,11 +129,52 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
                 .bucket(bucket)
                 .key(objectKey)
                 .build();
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(signedUrlTtl)
+                .getObjectRequest(getObjectRequest)
+                .build();
         try {
-            return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
-        } catch (NoSuchKeyException exception) {
-            throw new StorageObjectNotFoundException("Stored media object was not found.");
+            PresignedGetObjectRequest signedRequest = presigner.presignGetObject(presignRequest);
+            HttpResponse<byte[]> response = httpClient.send(
+                    HttpRequest.newBuilder(URI.create(signedRequest.url().toString())).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() == 200) {
+                return response.body();
+            }
+            if (response.statusCode() == 403) {
+                throw new StorageObjectAccessDeniedException(
+                        "Stored media object could not be read. storageStatus=403 storageBody="
+                                + safeStorageBody(response.body()));
+            }
+            if (response.statusCode() == 404) {
+                throw new StorageObjectNotFoundException("Stored media object could not be read.");
+            }
+            throw S3Exception.builder()
+                    .message("Stored media object read failed with HTTP " + response.statusCode())
+                    .statusCode(response.statusCode())
+                    .build();
+        } catch (IOException exception) {
+            throw S3Exception.builder()
+                    .message("Stored media object could not be read.")
+                    .cause(exception)
+                    .build();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw S3Exception.builder()
+                    .message("Stored media object read was interrupted.")
+                    .cause(exception)
+                    .build();
         }
+    }
+
+    private String safeStorageBody(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "<empty>";
+        }
+        String text = new String(body, java.nio.charset.StandardCharsets.UTF_8)
+                .replaceAll("\\s+", " ")
+                .trim();
+        return text.length() > 240 ? text.substring(0, 240) : text;
     }
 
     private String required(String field, String value) {

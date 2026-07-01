@@ -1,0 +1,71 @@
+:root {
+  --msb-ink: #382648;
+  --msb-muted: #827194;
+  --msb-line: #ead7f2;
+  --msb-pink: #f472b6;
+  --msb-pink-dark: #be3a83;
+  --msb-lavender: #8b6fe8;
+  --msb-soft: #fff0f7;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 6%, rgba(255, 205, 226, 0.44) 0 18%, transparent 19%),
+    radial-gradient(circle at 92% 0%, rgba(202, 191, 255, 0.34) 0 14%, transparent 15%),
+    linear-gradient(180deg, #fff7fb 0%, #f9f2ff 54%, #fffaf0 100%) !important;
+  color: var(--msb-ink);
+}
+
+.login-pf body {
+  background:
+    radial-gradient(circle at 12% 6%, rgba(255, 205, 226, 0.44) 0 18%, transparent 19%),
+    radial-gradient(circle at 92% 0%, rgba(202, 191, 255, 0.34) 0 14%, transparent 15%),
+    linear-gradient(180deg, #fff7fb 0%, #f9f2ff 54%, #fffaf0 100%) !important;
+}
+
+.login-pf-page,
+.login-pf-page .card-pf {
+  color: var(--msb-ink);
+}
+
+.login-pf-page .card-pf {
+  border: 1px solid var(--msb-line);
+  border-radius: 8px;
+  box-shadow: 0 28px 70px rgba(98, 62, 108, 0.22);
+}
+
+#kc-header-wrapper {
+  color: var(--msb-ink);
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+#kc-page-title {
+  color: var(--msb-ink);
+  font-weight: 800;
+}
+
+.pf-c-form-control,
+.form-control {
+  border-color: var(--msb-line);
+  border-radius: 8px;
+}
+
+.pf-c-button.pf-m-primary,
+.btn-primary {
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--msb-pink), var(--msb-lavender)) !important;
+  color: #fff !important;
+  font-weight: 800;
+}
+
+a {
+  color: var(--msb-pink-dark) !important;
+  font-weight: 700;
+}
+
+#kc-registration a,
+#kc-form-options a {
+  color: var(--msb-pink-dark) !important;
+}

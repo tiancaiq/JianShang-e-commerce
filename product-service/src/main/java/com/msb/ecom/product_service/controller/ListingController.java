@@ -102,6 +102,16 @@ public class ListingController {
         return listingService.getAdminListing(listingId);
     }
 
+    @GetMapping("/admin/listings/{listingId}/media/{mediaId}/content")
+    public ResponseEntity<byte[]> adminListingMedia(
+            @PathVariable String listingId,
+            @PathVariable String mediaId) {
+        ListingMediaContent content = listingService.adminListingMediaContent(listingId, mediaId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(content.contentType()))
+                .body(content.bytes());
+    }
+
     @PatchMapping("/admin/listings/{listingId}")
     public ListingDraftResponse updateActiveListingByAdmin(
             @PathVariable String listingId,

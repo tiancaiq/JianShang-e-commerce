@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
@@ -62,6 +63,62 @@ class AuthBffControllerTests {
     }
 
     @Test
+    void loginPopupStoresSafeReturnUrlAndPopupMode() throws Exception {
+        var result = mockMvc.perform(get("/api/v1/auth/login")
+                        .param("client", "marketplace")
+                        .param("returnUrl", "/account/profile")
+                        .param("mode", "popup"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")))
+                .andReturn();
+
+        assertThat(result.getRequest().getSession(false)).isNotNull();
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.SESSION_ATTRIBUTE))
+                .isEqualTo("/account/profile");
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.POPUP_SESSION_ATTRIBUTE))
+                .isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void loginWithGoogleProviderRedirectsWithProviderHint() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/login")
+                        .param("client", "marketplace")
+                        .param("provider", "google")
+                        .param("mode", "popup"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")))
+                .andExpect(header().string("Location", containsString("kc_idp_hint=google")));
+    }
+
+    @Test
+    void registerWithGoogleProviderRedirectsWithProviderHintAndRegistrationAction() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/register")
+                        .param("client", "marketplace")
+                        .param("provider", "google")
+                        .param("mode", "popup"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")))
+                .andExpect(header().string("Location", containsString("kc_action=register")))
+                .andExpect(header().string("Location", containsString("kc_idp_hint=google")));
+    }
+
+    @Test
+    void loginRejectsUnknownExternalProvider() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/login")
+                        .param("client", "marketplace")
+                        .param("provider", "unknown"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void registerRejectsUnknownExternalProvider() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/register")
+                        .param("client", "marketplace")
+                        .param("provider", "unknown"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void loginIgnoresUnsafeReturnUrl() throws Exception {
         var result = mockMvc.perform(get("/api/v1/auth/login")
                         .param("client", "marketplace")
@@ -96,6 +153,21 @@ class AuthBffControllerTests {
     }
 
     @Test
+    void registerPopupStoresPopupMode() throws Exception {
+        var result = mockMvc.perform(get("/api/v1/auth/register")
+                        .param("client", "marketplace")
+                        .param("mode", "popup"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")))
+                .andExpect(header().string("Location", containsString("kc_action=register")))
+                .andReturn();
+
+        assertThat(result.getRequest().getSession(false)).isNotNull();
+        assertThat(result.getRequest().getSession(false).getAttribute(LoginReturnUrl.POPUP_SESSION_ATTRIBUTE))
+                .isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
     void registerRejectsUnknownClient() throws Exception {
         mockMvc.perform(get("/api/v1/auth/register").param("client", "unknown"))
                 .andExpect(status().isNotFound());
@@ -114,6 +186,22 @@ class AuthBffControllerTests {
         mockMvc.perform(get("/oauth2/authorization/marketplace").param("kc_action", "register"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(header().string("Location", containsString("kc_action=register")))
+                .andExpect(header().string("Location", containsString("code_challenge=")));
+    }
+
+    @Test
+    void oidcAuthorizationRequestCanHintGoogleProvider() throws Exception {
+        mockMvc.perform(get("/oauth2/authorization/marketplace").param("kc_idp_hint", "google"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", containsString("kc_idp_hint=google")))
+                .andExpect(header().string("Location", containsString("code_challenge=")));
+    }
+
+    @Test
+    void oidcAuthorizationRequestIgnoresUnknownProviderHint() throws Exception {
+        mockMvc.perform(get("/oauth2/authorization/marketplace").param("kc_idp_hint", "unknown"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", org.hamcrest.Matchers.not(containsString("kc_idp_hint=unknown"))))
                 .andExpect(header().string("Location", containsString("code_challenge=")));
     }
 
@@ -152,6 +240,18 @@ class AuthBffControllerTests {
     void stateChangingRequestsRequireCsrf() throws Exception {
         mockMvc.perform(post("/api/v1/auth/logout"))
                 .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/auth/native/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"alex@example.com\",\"password\":\"secret\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unauthenticatedApiRequestsReturnUnauthorizedInsteadOfLoginRedirect() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("Location"));
     }
 
     @Test
@@ -160,7 +260,11 @@ class AuthBffControllerTests {
                         .with(csrf())
                         .with(oidcLogin()))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(header().string("Location", "http://localhost:4200/"))
+                .andExpect(header().string(
+                        "Location",
+                        containsString("http://localhost:8181/realms/msb-local/protocol/openid-connect/logout")))
+                .andExpect(header().string("Location", containsString("id_token_hint=")))
+                .andExpect(header().string("Location", containsString("post_logout_redirect_uri=http://localhost:4200/")))
                 .andExpect(header().string("Set-Cookie", containsString("JSESSIONID=;")));
 
         verify(authorizedClientService).removeAuthorizedClient(anyString(), anyString());

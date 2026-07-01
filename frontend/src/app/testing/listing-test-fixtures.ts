@@ -20,6 +20,7 @@ export function publicListing(overrides: Partial<PublicListing> = {}): PublicLis
   return {
     id: '01L00000000000000000000001',
     sellerType: 'INDIVIDUAL',
+    sellerDisplayName: 'Alex Seller',
     categoryId: '01K00000000000000000000001',
     categorySlug: 'general',
     categoryName: 'General',
@@ -69,6 +70,7 @@ export function listingDraft(overrides: Partial<ListingDraft> = {}): ListingDraf
     sellerType: 'INDIVIDUAL',
     individualSellerUserId: 'user-1',
     businessId: null,
+    sellerDisplayName: 'Alex Seller',
     categoryId: '01K00000000000000000000001',
     title: 'Used bicycle',
     description: 'A reliable city bike.',

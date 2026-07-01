@@ -15,6 +15,8 @@ public interface AuthServiceClient {
 
     AdminIdentityLabels lookupAdminIdentityLabels(String bearerToken, Set<String> userIds, Set<String> businessIds);
 
+    AdminIdentityLabels lookupPublicSellerLabels(Set<String> userIds, Set<String> businessIds);
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     record IndividualSellerAuthorization(
             String userId,
@@ -51,7 +53,8 @@ public interface AuthServiceClient {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record UserIdentityLabel(
             String id,
-            String displayName
+            String displayName,
+            String avatarUrl
     ) {
     }
 

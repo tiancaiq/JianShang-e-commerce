@@ -128,6 +128,7 @@ public class ListingDraftRepository {
     public Optional<PublicListingResponse> findPublicListingById(String listingId) {
         List<PublicListingResponse> matches = jdbcTemplate.query("""
                 select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
                        coalesce(l.published_at, l.updated_at) as published_at
@@ -140,6 +141,9 @@ public class ListingDraftRepository {
                 (rs, rowNum) -> new PublicListingResponse(
                         rs.getString("id"),
                         rs.getString("seller_type"),
+                        sellerId(rs),
+                        null,
+                        null,
                         rs.getString("category_id"),
                         rs.getString("category_slug"),
                         rs.getString("category_name"),
@@ -163,6 +167,7 @@ public class ListingDraftRepository {
     public List<PublicListingResponse> findPublicListings(int limit) {
         return jdbcTemplate.query("""
                 select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
                        coalesce(l.published_at, l.updated_at) as published_at
@@ -176,6 +181,9 @@ public class ListingDraftRepository {
                 (rs, rowNum) -> new PublicListingResponse(
                         rs.getString("id"),
                         rs.getString("seller_type"),
+                        sellerId(rs),
+                        null,
+                        null,
                         rs.getString("category_id"),
                         rs.getString("category_slug"),
                         rs.getString("category_name"),
@@ -385,6 +393,7 @@ public class ListingDraftRepository {
                 rs.getString("seller_type"),
                 rs.getString("individual_seller_user_id"),
                 rs.getString("business_id"),
+                null,
                 rs.getString("category_id"),
                 rs.getString("title"),
                 rs.getString("description"),
@@ -403,6 +412,12 @@ public class ListingDraftRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 List.of());
+    }
+
+    private String sellerId(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return "BUSINESS".equals(rs.getString("seller_type"))
+                ? rs.getString("business_id")
+                : rs.getString("individual_seller_user_id");
     }
 
     public record ListingOwnerSnapshot(

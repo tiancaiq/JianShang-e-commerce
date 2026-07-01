@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, EventEmitter, OnInit, Output, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IndividualSellerProfile } from '../../core/models/individual-seller.model';
@@ -13,8 +13,9 @@ import { ToastService } from '../../core/services/toast.service';
     <section class="seller-page">
       <header class="seller-header">
         <div>
+          <p class="eyebrow">Marketplace account</p>
           <h1>Become a Seller</h1>
-          <p>Individual listings use public city and region only.</p>
+          <p>Register an individual seller profile before creating your first listing.</p>
         </div>
         @if (profile()) {
           <span class="status-pill">{{ profile()?.status }}</span>
@@ -37,6 +38,14 @@ import { ToastService } from '../../core/services/toast.service';
         </section>
       } @else {
         <form class="seller-form" (ngSubmit)="activate()">
+          <div class="form-intro">
+            <span class="intro-mark">M</span>
+            <div>
+              <h2>Start with your public seller details.</h2>
+              <p>Only your public location is shown on marketplace listings.</p>
+            </div>
+          </div>
+
           <div class="terms-panel">
             <strong>Off-platform trade disclosure</strong>
             <p>
@@ -56,7 +65,7 @@ import { ToastService } from '../../core/services/toast.service';
 
           <div class="form-grid">
             <label class="field">
-              <span>Public city</span>
+              <span>City</span>
               <input
                 name="publicCity"
                 [(ngModel)]="publicCity"
@@ -67,7 +76,7 @@ import { ToastService } from '../../core/services/toast.service';
             </label>
 
             <label class="field">
-              <span>Public region</span>
+              <span>County / region</span>
               <input
                 name="publicRegion"
                 [(ngModel)]="publicRegion"
@@ -92,11 +101,41 @@ import { ToastService } from '../../core/services/toast.service';
     </section>
   `,
   styles: [`
+    :host {
+      display: block;
+      --seller-surface: var(--color-bg-secondary);
+      --seller-panel: var(--color-bg-tertiary);
+      --seller-border: var(--color-border);
+      --seller-text: var(--color-text-primary);
+      --seller-muted: var(--color-text-muted);
+      --seller-soft: var(--color-bg-tertiary);
+      --seller-accent: var(--color-accent);
+      --seller-accent-strong: var(--color-accent);
+      --seller-button-bg: var(--color-accent);
+      --seller-button-text: #0c0c0e;
+      --seller-shadow: none;
+    }
+
+    :host-context(.marketplace-shell) {
+      --seller-surface: rgba(255, 255, 255, 0.94);
+      --seller-panel: #fff8fc;
+      --seller-border: var(--market-line);
+      --seller-text: var(--market-ink);
+      --seller-muted: var(--market-muted);
+      --seller-soft: #fff0f7;
+      --seller-accent: var(--market-accent-dark);
+      --seller-accent-strong: #8b6fe8;
+      --seller-button-bg: linear-gradient(135deg, #ff85bd, #8b6fe8);
+      --seller-button-text: #fff;
+      --seller-shadow: 0 18px 44px rgba(143, 92, 144, 0.12);
+    }
+
     .seller-page {
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
-      max-width: 900px;
+      max-width: 920px;
+      margin: 0 auto;
     }
 
     .seller-header {
@@ -104,24 +143,41 @@ import { ToastService } from '../../core/services/toast.service';
       align-items: flex-start;
       justify-content: space-between;
       gap: 1rem;
+      padding: 0.5rem 0.15rem 0;
+    }
+
+    .eyebrow {
+      margin: 0 0 0.35rem;
+      color: var(--seller-accent);
+      font-size: 0.76rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     .seller-header h1 {
-      font-size: 1.75rem;
+      color: var(--seller-text);
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1;
       margin-bottom: 0.25rem;
+      letter-spacing: 0;
     }
 
     .seller-header p {
-      color: var(--color-text-muted);
-      font-size: 0.875rem;
+      color: var(--seller-muted);
+      font-size: 1rem;
+      line-height: 1.55;
+      margin: 0;
     }
 
     .seller-form,
     .success-panel {
-      background: var(--color-bg-secondary);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-lg);
-      padding: 1.25rem;
+      background: var(--seller-surface);
+      border: 1px solid var(--seller-border);
+      border-radius: 8px;
+      padding: clamp(1rem, 3vw, 1.45rem);
+      box-shadow: var(--seller-shadow);
     }
 
     .seller-form {
@@ -130,24 +186,63 @@ import { ToastService } from '../../core/services/toast.service';
       gap: 1.25rem;
     }
 
+    .form-intro {
+      display: flex;
+      gap: 0.9rem;
+      align-items: center;
+      padding: 1rem;
+      border: 1px solid var(--seller-border);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 240, 247, 0.9), rgba(245, 239, 255, 0.95));
+    }
+
+    .intro-mark {
+      width: 2.7rem;
+      height: 2.7rem;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #ff85bd, #8b6fe8);
+      color: #fff;
+      font-weight: 900;
+      box-shadow: 0 12px 24px rgba(190, 58, 131, 0.2);
+    }
+
+    .form-intro h2 {
+      margin: 0;
+      color: var(--seller-text);
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      letter-spacing: 0;
+    }
+
+    .form-intro p {
+      margin: 0.25rem 0 0;
+      color: var(--seller-muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
     .terms-panel {
       display: flex;
       flex-direction: column;
       gap: 0.625rem;
       padding: 1rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
+      background: var(--seller-panel);
+      border: 1px solid var(--seller-border);
+      border-radius: 8px;
     }
 
     .terms-panel strong {
-      color: var(--color-text-primary);
+      color: var(--seller-text);
       font-size: 0.9375rem;
     }
 
     .terms-panel p,
     .checkbox-row span {
-      color: var(--color-text-secondary);
+      color: var(--seller-muted);
       font-size: 0.875rem;
       line-height: 1.5;
     }
@@ -178,25 +273,25 @@ import { ToastService } from '../../core/services/toast.service';
     .field span,
     .success-panel dt {
       font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--color-text-secondary);
+      font-weight: 800;
+      color: var(--seller-muted);
     }
 
     .field input {
       width: 100%;
-      min-height: 40px;
+      min-height: 44px;
       padding: 0.625rem 0.75rem;
-      background: var(--color-bg-tertiary);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      color: var(--color-text-primary);
-      font-size: 0.875rem;
+      background: var(--seller-panel);
+      border: 1px solid var(--seller-border);
+      border-radius: 8px;
+      color: var(--seller-text);
+      font-size: 0.95rem;
       outline: none;
     }
 
     .field input:focus {
-      border-color: var(--color-accent);
-      box-shadow: 0 0 0 3px var(--color-accent-muted);
+      border-color: var(--seller-accent);
+      box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.18);
     }
 
     .error-message {
@@ -214,14 +309,15 @@ import { ToastService } from '../../core/services/toast.service';
     }
 
     .primary-btn {
-      min-height: 40px;
-      padding: 0 0.875rem;
-      border-radius: var(--radius-md);
-      font-weight: 700;
+      min-height: 44px;
+      padding: 0 1rem;
+      border-radius: 8px;
+      font-weight: 900;
       cursor: pointer;
       border: 1px solid transparent;
-      background: var(--color-accent);
-      color: #0c0c0e;
+      background: var(--seller-button-bg);
+      color: var(--seller-button-text);
+      box-shadow: 0 14px 26px rgba(190, 58, 131, 0.18);
     }
 
     .primary-btn:disabled {
@@ -234,14 +330,15 @@ import { ToastService } from '../../core/services/toast.service';
       align-items: center;
       min-height: 28px;
       padding: 0 0.625rem;
-      border-radius: var(--radius-md);
-      background: var(--color-accent-muted);
-      color: var(--color-accent);
+      border-radius: 999px;
+      background: var(--seller-soft);
+      color: var(--seller-accent);
       font-size: 0.75rem;
-      font-weight: 700;
+      font-weight: 900;
     }
 
     .success-panel h2 {
+      color: var(--seller-text);
       font-size: 1.125rem;
       margin-bottom: 1rem;
     }
@@ -255,7 +352,7 @@ import { ToastService } from '../../core/services/toast.service';
 
     .success-panel dd {
       margin: 0.25rem 0 0;
-      color: var(--color-text-primary);
+      color: var(--seller-text);
       font-weight: 700;
     }
 
@@ -283,6 +380,8 @@ export class IndividualSellerActivationComponent implements OnInit {
   private individualSellerService = inject(IndividualSellerService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+
+  @Output() sellerActivated = new EventEmitter<IndividualSellerProfile>();
 
   readonly termsVersion = '2026-01';
   loading = signal(false);
@@ -338,6 +437,7 @@ export class IndividualSellerActivationComponent implements OnInit {
       next: profile => {
         this.profile.set(profile);
         this.saving.set(false);
+        this.sellerActivated.emit(profile);
         this.toastService.success('Individual seller profile activated.');
       },
       error: error => {
