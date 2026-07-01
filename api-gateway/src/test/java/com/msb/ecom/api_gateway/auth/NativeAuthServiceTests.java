@@ -111,6 +111,29 @@ class NativeAuthServiceTests {
         server.verify();
     }
 
+    @Test
+    void registerMapsAdminTokenFailureToConfigurationError() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        NativeAuthService service = service(builder);
+
+        server.expect(requestTo("http://localhost:8181/realms/msb-local/protocol/openid-connect/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> service.register(
+                        new NativeAuthService.NativeRegisterRequest("alex@example.com", "secret", "Alex Buyer"),
+                        servletRequest,
+                        servletResponse))
+                .isInstanceOfSatisfying(NativeAuthException.class, exception -> {
+                    assertThat(exception.status()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(exception.code()).isEqualTo("IDENTITY_PROVIDER_CONFIGURATION");
+                    assertThat(exception.getMessage()).contains("gateway admin service account");
+                });
+
+        server.verify();
+    }
+
     private NativeAuthService service(RestClient.Builder builder) {
         when(registrations.findByRegistrationId("marketplace")).thenReturn(marketplaceRegistration());
         return new NativeAuthService(

@@ -187,12 +187,24 @@ public class NativeAuthService {
         form.add("client_id", adminClientId);
         form.add("client_secret", adminClientSecret);
 
-        TokenResponse tokenResponse = restClient.post()
-                .uri("%s/realms/%s/protocol/openid-connect/token".formatted(keycloakAdminBaseUri, keycloakRealm))
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .body(form)
-                .retrieve()
-                .body(TokenResponse.class);
+        TokenResponse tokenResponse;
+        try {
+            tokenResponse = restClient.post()
+                    .uri("%s/realms/%s/protocol/openid-connect/token".formatted(keycloakAdminBaseUri, keycloakRealm))
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(form)
+                    .retrieve()
+                    .body(TokenResponse.class);
+        } catch (HttpClientErrorException.BadRequest
+                 | HttpClientErrorException.Unauthorized
+                 | HttpClientErrorException.Forbidden ex) {
+            throw new NativeAuthException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "IDENTITY_PROVIDER_CONFIGURATION",
+                    "Marketplace registration is not enabled in Keycloak. Check the gateway admin service account.");
+        } catch (HttpClientErrorException ex) {
+            throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider rejected the registration request.");
+        }
         if (tokenResponse == null || tokenResponse.accessToken() == null) {
             throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider admin token response was incomplete.");
         }
