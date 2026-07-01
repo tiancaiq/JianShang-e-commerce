@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.security.web.context.SecurityContextRepository;
 
 import java.time.Instant;
@@ -135,6 +136,8 @@ public class NativeAuthService {
             throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider rejected the sign-in request.");
         } catch (HttpClientErrorException ex) {
             throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider rejected the sign-in request.");
+        } catch (RestClientException ex) {
+            throw new NativeAuthException(HttpStatus.SERVICE_UNAVAILABLE, "IDENTITY_PROVIDER_UNAVAILABLE", "Identity provider is unavailable.");
         }
     }
 
@@ -204,6 +207,8 @@ public class NativeAuthService {
                     "Marketplace registration is not enabled in Keycloak. Check the gateway admin service account.");
         } catch (HttpClientErrorException ex) {
             throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider rejected the registration request.");
+        } catch (RestClientException ex) {
+            throw new NativeAuthException(HttpStatus.SERVICE_UNAVAILABLE, "IDENTITY_PROVIDER_UNAVAILABLE", "Identity provider is unavailable.");
         }
         if (tokenResponse == null || tokenResponse.accessToken() == null) {
             throw new NativeAuthException(HttpStatus.BAD_GATEWAY, "IDENTITY_PROVIDER_ERROR", "Identity provider admin token response was incomplete.");
