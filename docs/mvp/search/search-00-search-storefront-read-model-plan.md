@@ -7,9 +7,10 @@ Status: complete.
 SEARCH-00 defines the MVP public browse and storefront read model before adding
 more search behavior.
 
-This slice does not implement new runtime behavior, migrations, OpenSearch,
-chat, contact-seller actions, cart, checkout, payment, inventory, orders, or
-shipping.
+This slice implements the public contract split between individual marketplace
+discovery and business storefront discovery. It does not implement keyword
+matching, migrations, OpenSearch, chat, contact-seller actions, cart, checkout,
+payment, inventory, orders, or shipping.
 
 ## Decisions
 
@@ -79,19 +80,33 @@ Storefront responses must not expose:
 
 ## API Shape
 
-Current browse endpoint:
+Compatibility browse endpoint:
 
 ```text
 GET /api/v1/public/listings
 ```
 
-Planned individual marketplace search endpoint:
+Individual marketplace search contract:
 
 ```text
-GET /api/v1/public/marketplace/listings?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
+GET /api/v1/public/marketplace/listings/search
 ```
 
-Planned storefront endpoints:
+It returns only approved active `INDIVIDUAL` listings using the public listing
+card projection. SEARCH-01A adds keyword/filter/sort handling and SEARCH-03
+adds cursor pagination.
+
+Business storefront listing search contract:
+
+```text
+GET /api/v1/public/stores/listings/search
+```
+
+It returns only approved active `BUSINESS` listings using the public listing
+card projection. SEARCH-01B adds keyword/filter/sort handling and SEARCH-03
+adds cursor pagination. One-store scoping and storefront metadata are deferred.
+
+Planned scoped storefront endpoints:
 
 ```text
 GET /api/v1/public/stores/{storeSlugOrId}
@@ -107,9 +122,10 @@ GET /api/v1/public/listings?keyword=&categoryId=&sellerType=&condition=&minPrice
 Rules:
 
 - Guest access is allowed.
-- Individual marketplace search defaults to `sellerType=INDIVIDUAL`.
-- Storefront browse is scoped to one approved active business and returns only
-  that business's approved active listings.
+- Individual marketplace search is fixed to `sellerType=INDIVIDUAL`.
+- The interim business storefront listing path is fixed to
+  `sellerType=BUSINESS`. One-store scoping will later return only that
+  business's approved active listings.
 - Shared browse may still accept `sellerType`, but product pages should route
   users into the correct individual or business experience.
 - Cursor pagination is required for unbounded collections.
@@ -161,10 +177,14 @@ Recommended layout:
 
 ## Verification
 
-No runtime tests are required for SEARCH-00 because it is a planning slice.
+SEARCH-00 runtime verification covers:
 
-Before implementing SEARCH-02A, SEARCH-02B, or SEARCH-03, keep the existing verification
-baseline green:
+- marketplace search excludes business listings
+- business storefront listing search excludes individual listings
+- Angular public marketplace uses the marketplace search contract
+- Angular stores page uses the business storefront listing search contract
+
+Expected local checks:
 
 ```powershell
 .\mvnw.cmd -pl product-service -am test
@@ -176,9 +196,9 @@ npm.cmd run build
 
 ## Deferred
 
-- Individual marketplace keyword search: SEARCH-02A.
-- Public business storefront browse: SEARCH-02B.
-- Shared filter/sort/cursor browse: SEARCH-03.
+- Individual marketplace search: SEARCH-01A.
+- Business storefront search: SEARCH-01B.
+- Shared filter/sort/cursor browse: SEARCH-03 complete.
 - OpenSearch projection: SEARCH-04.
 - Contact seller and chat: CHAT slices.
 - Cart, checkout, inventory, payment, orders, and shipping: V2.

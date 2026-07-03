@@ -106,8 +106,7 @@ Backend Maven modules:
 common/
   common-core/
   common-web/
-  common-security/
-  common-events/
+  common-storage/
   common-testing/
 ```
 
@@ -117,9 +116,17 @@ Responsibilities:
 |---|---|
 | `common-core` | Money/currency value types, time/ID utilities, pagination primitives |
 | `common-web` | Error envelope, correlation-ID filters, API validation helpers |
-| `common-security` | Authenticated principal and reusable authorization interfaces |
-| `common-events` | Event envelope, outbox interfaces, consumer deduplication primitives |
+| `common-storage` | Technical object-storage upload/read/verify/delete adapters shared by listing media and avatars |
 | `common-testing` | Test fixtures, container helpers, API assertions |
+
+Deferred modules:
+
+- `common-security`: authenticated principal and reusable authorization interfaces
+- `common-events`: event envelope, outbox interfaces, consumer deduplication primitives
+
+`common-storage` must not own listing media or avatar business rules. Content
+type policy, object-key ownership, profile/listing versioning, moderation, and
+public URL rules remain in the owning service.
 
 Frontend Angular libraries:
 

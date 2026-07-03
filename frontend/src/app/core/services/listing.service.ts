@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, of } from 'rxjs';
 import { environment } from '../../../environments/environment';
@@ -7,6 +7,8 @@ import {
   AdminListingModerationCase,
   AdminListingModerationCaseDetail,
   AdminListingRemoveRequest,
+  BusinessStoreListingSearchPage,
+  BusinessStoreListingSearchParams,
   Category,
   CreateListingDraftRequest,
   ListingDraft,
@@ -17,7 +19,10 @@ import {
   ListingModerationCaseFilter,
   ListingModerationDecisionRequest,
   ListingModerationDecisionResponse,
+  MarketplaceListingSearchPage,
+  MarketplaceListingSearchParams,
   PublicListing,
+  PublicListingSearchParams,
   UpdateListingImagesRequest,
 } from '../models/listing.model';
 
@@ -53,6 +58,20 @@ export class ListingService {
 
   getPublicListings(): Observable<PublicListing[]> {
     return this.http.get<PublicListing[]>(`${this.baseUrl}/public/listings`, {
+      withCredentials: true,
+    });
+  }
+
+  searchMarketplaceListings(params: MarketplaceListingSearchParams = {}): Observable<MarketplaceListingSearchPage> {
+    return this.http.get<MarketplaceListingSearchPage>(`${this.baseUrl}/public/marketplace/listings/search`, {
+      params: this.listingSearchHttpParams(params),
+      withCredentials: true,
+    });
+  }
+
+  searchBusinessStoreListings(params: BusinessStoreListingSearchParams = {}): Observable<BusinessStoreListingSearchPage> {
+    return this.http.get<BusinessStoreListingSearchPage>(`${this.baseUrl}/public/stores/listings/search`, {
+      params: this.listingSearchHttpParams(params),
       withCredentials: true,
     });
   }
@@ -232,5 +251,32 @@ export class ListingService {
       return `${environment.apiGatewayUrl}${url}`;
     }
     return url;
+  }
+
+  // Builds the shared query string for the split marketplace and business-store public search endpoints.
+  private listingSearchHttpParams(params: PublicListingSearchParams): HttpParams {
+    let httpParams = new HttpParams();
+    const append = (name: string, value: string | number | null | undefined): void => {
+      if (value === null || value === undefined) {
+        return;
+      }
+      const text = String(value).trim();
+      if (!text) {
+        return;
+      }
+      httpParams = httpParams.set(name, text);
+    };
+
+    append('q', params.q);
+    append('categoryId', params.categoryId);
+    append('condition', params.condition);
+    append('minPrice', params.minPrice);
+    append('maxPrice', params.maxPrice);
+    append('city', params.city);
+    append('county', params.county);
+    append('sort', params.sort === 'none' ? null : params.sort);
+    append('cursor', params.cursor);
+    append('limit', params.limit);
+    return httpParams;
   }
 }

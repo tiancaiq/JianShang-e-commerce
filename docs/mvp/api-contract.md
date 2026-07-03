@@ -340,7 +340,9 @@ Rules:
 - `displayName`: nullable, trimmed, max 200 characters, blank rejected.
 - `phone`: nullable, E.164 format only, verification remains false until a
   later verification flow.
-- `avatarUrl`: nullable, `http` or `https` URL only, max 2048 characters.
+- `avatarUrl`: nullable, `http` or `https` URL only, or the app-owned
+  `/api/v1/public/user-avatars/{userId}` URL produced by avatar upload, max
+  2048 characters.
 - Email changes are deferred to a later reverification flow.
 
 Response:
@@ -363,6 +365,133 @@ Response:
   }
 }
 ```
+
+### Avatar upload (`USER-05`)
+
+```text
+POST   /users/me/avatar/upload-request
+PUT    {uploadUrl}
+POST   /users/me/avatar/confirm
+DELETE /users/me/avatar
+GET    /public/user-avatars/{userId}
+```
+
+The preferred marketplace avatar flow mirrors listing media upload:
+
+1. The frontend requests an upload target from auth-service.
+2. The frontend uploads bytes directly to the returned `uploadUrl`.
+3. The frontend confirms the uploaded object with auth-service.
+
+#### Request upload target
+
+`POST /users/me/avatar/upload-request`
+
+Request:
+
+```json
+{
+  "contentType": "image/png",
+  "fileName": "avatar.png",
+  "sizeBytes": 12345
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "objectBucket": "msb-media",
+    "objectKey": "users/01J.../avatar.png",
+    "contentType": "image/png",
+    "sizeBytes": 12345,
+    "uploadMethod": "PUT",
+    "uploadUrl": "https://storage.googleapis.com/..."
+  }
+}
+```
+
+Rules:
+
+- Requires the authenticated user.
+- Accepts only `image/png`, `image/jpeg`, and `image/webp`.
+- Rejects empty files and files larger than the configured avatar limit
+  (5 MB by default).
+- For remote storage, `uploadUrl` is a short-lived signed PUT URL for the
+  auth-service owned avatar object.
+- For local demo storage, `uploadUrl` may be an app-relative gateway URL.
+- The browser must send the same `Content-Type` used to create the upload
+  target.
+- The returned object key and bucket are storage metadata for confirmation,
+  not public profile data.
+
+#### Upload bytes
+
+`PUT {uploadUrl}`
+
+Headers:
+
+```text
+Content-Type: image/png
+```
+
+The signed URL has required headers baked into its signature. The frontend
+must not add credentials, CSRF headers, or unrelated custom headers when
+uploading to a remote signed URL. Local demo app-relative upload URLs still
+go through the gateway and use the normal browser session.
+
+#### Confirm upload
+
+`POST /users/me/avatar/confirm`
+
+Headers:
+
+```text
+If-Match: 0
+```
+
+Request:
+
+```json
+{
+  "objectKey": "users/01J.../avatar.png",
+  "contentType": "image/png",
+  "sizeBytes": 12345
+}
+```
+
+Rules:
+
+- Requires the authenticated user.
+- Requires the current profile version through `If-Match`.
+- Verifies the uploaded object exists in storage.
+- Verifies object size and content type match the upload request.
+- Stores avatar bytes in auth-service owned S3-compatible storage. VM/demo
+  deployments target Google Cloud Storage through its S3-compatible XML API.
+- Updates `users.avatar_url` to an app-owned URL:
+  `/api/v1/public/user-avatars/{userId}?v={profileVersion}`.
+- Does not expose local file paths, object keys, buckets, or raw storage URLs
+  in public profile responses.
+
+`DELETE /users/me/avatar` clears the authenticated user's avatar URL and
+best-effort removes stored avatar bytes. It also requires `If-Match`.
+
+`GET /public/user-avatars/{userId}` serves public avatar bytes for active users
+who have an avatar URL. Missing, suspended, closed, or avatarless users return
+`404 AVATAR_NOT_FOUND`.
+
+`POST /users/me/avatar` multipart upload may remain available for backward
+compatibility, but the marketplace UI should use the signed upload target
+flow above.
+
+Google Cloud Storage requirements for VM/demo:
+
+- Bucket CORS allows `PUT` and `OPTIONS` from the marketplace origin such as
+  `http://localhost:4200`.
+- Bucket CORS allows the `Content-Type` request header.
+- Auth-service and product-service storage configuration must point at the
+  intended bucket, endpoint, region, and credentials.
+- Signed URLs are short-lived; expired URLs require a new upload-request.
 
 ### Address APIs (`IAM-05`)
 
@@ -985,7 +1114,8 @@ Response:
       "originalFileName": "bike.png",
       "contentType": "image/png",
       "sizeBytes": 1024,
-      "uploadUrl": "local-demo://..."
+      "uploadUrl": "/api/v1/public/listing-media/01J...",
+      "url": "/api/v1/public/listing-media/01J..."
     }
   ]
 }
@@ -1041,7 +1171,8 @@ Response:
 
 ```text
 GET /public/listings
-GET /public/marketplace/listings?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
+GET /public/marketplace/listings/search?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&county=&sort=&cursor=&limit=
+GET /public/stores/listings/search?q=&categoryId=&condition=&minPrice=&maxPrice=&city=&county=&sort=&cursor=&limit=
 GET /public/stores/{slug}
 GET /public/stores/{slug}/listings?categoryId=&condition=&minPrice=&maxPrice=&sort=&cursor=&limit=
 GET /search/listings?q=&sellerType=&categoryId=&condition=&minPrice=&maxPrice=&city=&region=&sort=&cursor=&limit=
@@ -1052,21 +1183,47 @@ SEARCH-01 implements the initial database-backed public browse path:
 same safe public projection as `GET /public/listings/{listingId}`. It has a
 server-side cap and no client filters yet.
 
-SEARCH-00 defines the MVP read-model direction: public browse and storefront
-reads start from MySQL source tables and expose only safe public fields.
-OpenSearch is deferred until the database-backed browse, storefront, filters,
-sorting, and cursor pagination contracts are stable.
+SEARCH-00 defines and implements the split public read contract:
+`GET /public/marketplace/listings/search` returns approved active
+`INDIVIDUAL` listings, and `GET /public/stores/listings/search` returns
+approved active `BUSINESS` listings. Both start from MySQL source tables and
+expose only safe public fields. Storefront scoping and OpenSearch are deferred
+until the split database-backed contracts are stable.
 
-SEARCH-02 is split by product experience:
+SEARCH-01A / SEARCH-02A is the implemented individual marketplace search path:
+`GET /public/marketplace/listings/search` accepts `q`, `categoryId`,
+`condition`, `minPrice`, `maxPrice`, `city`, `county`, and
+optional `sort=newest|price_asc|price_desc`. When `sort` is absent, the
+service uses its default stable result order without treating sorting as an
+active user filter. It returns approved active `INDIVIDUAL` listings only and
+keeps the off-platform individual trade disclosure.
 
-- SEARCH-02A adds individual marketplace keyword search for approved active
-  `INDIVIDUAL` listings. It keeps individual trade/off-platform disclosure and
-  does not introduce checkout language.
-- SEARCH-02B adds public business storefront browse for approved active
-  `BUSINESS` listings scoped to a store. It does not introduce cart,
-  inventory, checkout, payment, orders, or shipping.
-- SEARCH-03 adds shared filters, sorting, and cursor pagination after both
-  paths have stable database-backed reads.
+Remaining search/storefront work is split by product experience:
+
+- SEARCH-01B is the implemented business storefront search path:
+  `GET /public/stores/listings/search` accepts `q`, `categoryId`,
+  `condition`, `minPrice`, `maxPrice`, `city`, `county`, and
+  optional `sort=newest|price_asc|price_desc`. When `sort` is absent, the
+  service uses its default stable result order without treating sorting as an
+  active user filter. It returns approved active `BUSINESS` listings only and
+  does not introduce cart, inventory, checkout, payment, orders, or shipping.
+- SEARCH-03 is the implemented shared cursor pagination path. Both split
+  public search endpoints accept `cursor` and `limit` and return
+  `{"data":[],"page":{"nextCursor":null,"hasMore":false}}`. Cursors are
+  opaque, limits are server-capped, and sort order is deterministic.
+- SEARCH-04 adds OpenSearch as a derived projection after the database-backed
+  contracts are stable. It does not change this public response shape. When
+  enabled, OpenSearch returns candidate listing IDs and product-service
+  revalidates those IDs against MySQL before returning safe public cards.
+
+Internal/admin operation:
+
+```text
+POST /admin/search/listings/rebuild
+```
+
+This rebuilds the derived listing-search projection from MySQL and requires a
+platform admin session. It does not create or modify listings.
 
 Public listing cards may expose listing ID, seller type, safe owner display
 label, category display data, title, condition, price, public location,
@@ -1075,8 +1232,13 @@ They must not expose owner user IDs, business staff/member data, internal
 status, moderation state, versions, media bucket/key, exact individual
 locations, or private contact data.
 
-Maximum `limit` is server-controlled. Search result includes seller type and
-checkout/off-platform disclosure.
+Public image URLs must be app-owned read URLs, such as
+`/api/v1/public/listing-media/{imageId}`. Public listing responses must not
+return raw object storage URLs, signed upload URLs, object buckets, or object
+keys.
+
+Maximum `limit` is server-controlled. Search results include seller type and
+any applicable individual off-platform trade disclosure.
 
 ## 7. Chat
 

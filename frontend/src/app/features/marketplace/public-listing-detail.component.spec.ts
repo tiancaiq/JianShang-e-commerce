@@ -61,4 +61,22 @@ describe('PublicListingDetailComponent', () => {
     expect(component.errorMsg()).toBe('This listing is not available.');
     expect(fixture.nativeElement.textContent).toContain('Listing unavailable');
   });
+
+  it('keeps business public detail copy away from deferred checkout language', () => {
+    listingService.getPublicListing.and.returnValue(of(publicListing({
+      sellerType: 'BUSINESS',
+      sellerDisplayName: 'Mochi Store',
+      title: 'Store plush',
+      transactionNotice: null,
+    })));
+
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Business listings are view-only in the MVP.');
+    expect(text).not.toContain('checkout');
+    expect(text).not.toContain('payment');
+    expect(text).not.toContain('shipping');
+    expect(text).not.toContain('order');
+  });
 });

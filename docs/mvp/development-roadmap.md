@@ -47,12 +47,14 @@ The current repository contains implementation work for:
 - Backend password login bridge: LOGIN-02 complete
 - Backend credential registration bridge: SIGNUP-04 complete
 - Google identity provider wiring: SIGNUP-05 complete
-- User profile roadmap: USER-00 planned
+- User profile roadmap: USER-00 complete as a planning slice
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
 - Listing foundation, drafts, media, submit, admin decision, and public detail:
   LIST-00 through LIST-07
 - Public UI surface split: SITE-01
+- Search and storefront: SEARCH-00, SEARCH-01, SEARCH-01A, SEARCH-01B,
+  SEARCH-03, and SEARCH-04
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -95,12 +97,15 @@ baseline after the demo deployment:
 Stabilization sprint:
 
 - Before continuing feature development, complete the P0 cleanup slices in
-  `docs/mvp/fix/fix-02-stabilization-sprint-plan.md`.
+  `docs/mvp/fix/stabilization/general/fix-02-stabilization-sprint-plan.md`.
 - Before continuing user profile, chat, likes, reviews, or other user
   communication work, complete the P0 auth/login cleanup slices in
-  `docs/mvp/fix/fix-03-auth-login-stabilization-sprint.md`.
-- Before starting `SEARCH-02A`, complete the P0 pre-search cleanup slices in
-  `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`.
+  `docs/mvp/fix/stabilization/auth-login/fix-03-auth-login-stabilization-sprint.md`.
+- Before starting `SEARCH-01A`, complete the P0 pre-search cleanup slices in
+  `docs/mvp/fix/stabilization/pre-search/fix-04-pre-search-stabilization-sprint.md`.
+- Before starting chat or another user-to-user feature, complete the P0
+  post-search/profile cleanup slices in
+  `docs/mvp/fix/stabilization/post-search/fix-05-post-search-profile-stabilization-sprint.md`.
 
 Do not start V2 or V3 features until the MVP browser, seller, listing, search,
 chat, and moderation paths are validated.
@@ -162,42 +167,42 @@ Status: implemented through profile view/edit.
 
 Reference plan:
 
-- `docs/mvp/iam/iam-authentication-accounts-implementation-plan.md`
+- `docs/mvp/iam/core/iam-authentication-accounts-implementation-plan.md`
 
 Completed slices:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| IAM-00 Legacy auth cleanup plan | Complete | `docs/mvp/iam/iam-00-legacy-auth-cleanup-plan.md` |
-| IAM-01 Keycloak local setup | Complete | `docs/mvp/iam/iam-01-keycloak-local-setup.md` |
-| IAM-02 Gateway BFF login/logout/session | Complete | `docs/mvp/iam/iam-02-gateway-bff-login-logout-session.md` |
-| IAM-03 Identity user table and Keycloak `sub` mapping | Complete | `docs/mvp/iam/iam-03-identity-user-keycloak-sub-mapping.md` |
-| IAM-04 Frontend auth session awareness | Complete | `docs/mvp/iam/iam-04-frontend-auth-session-awareness.md` |
-| IAM-05 Protected route test | Complete | `docs/mvp/iam/iam-05-protected-route-test.md` |
-| IAM-06 Profile view/edit | Complete | `docs/mvp/iam/iam-06-profile-view-edit.md` |
+| IAM-00 Legacy auth cleanup plan | Complete | `docs/mvp/iam/core/iam-00-legacy-auth-cleanup-plan.md` |
+| IAM-01 Keycloak local setup | Complete | `docs/mvp/iam/core/iam-01-keycloak-local-setup.md` |
+| IAM-02 Gateway BFF login/logout/session | Complete | `docs/mvp/iam/core/iam-02-gateway-bff-login-logout-session.md` |
+| IAM-03 Identity user table and Keycloak `sub` mapping | Complete | `docs/mvp/iam/core/iam-03-identity-user-keycloak-sub-mapping.md` |
+| IAM-04 Frontend auth session awareness | Complete | `docs/mvp/iam/core/iam-04-frontend-auth-session-awareness.md` |
+| IAM-05 Protected route test | Complete | `docs/mvp/iam/core/iam-05-protected-route-test.md` |
+| IAM-06 Profile view/edit | Complete | `docs/mvp/iam/core/iam-06-profile-view-edit.md` |
 
 Login/session stabilization:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| LOGIN-01 Login and session UX | Complete | `docs/mvp/iam/login-01-login-session-ux-plan.md` |
-| LOGIN-02 Backend password login bridge | Complete | `docs/mvp/iam/login-02-backend-password-login-bridge.md` |
+| LOGIN-01 Login and session UX | Complete | `docs/mvp/iam/login/login-01-login-session-ux-plan.md` |
+| LOGIN-02 Backend password login bridge | Complete | `docs/mvp/iam/login/login-02-backend-password-login-bridge.md` |
 
 Sign-up and external identity providers:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| SIGNUP-00 Sign-up and external identity provider plan | Complete | `docs/mvp/iam/signup-00-sign-up-external-identity-provider-plan.md` |
-| SIGNUP-01 Keycloak self-registration | Complete | `docs/mvp/iam/signup-01-keycloak-self-registration.md` |
-| SIGNUP-02 Marketplace auth dialog and popup OIDC | Complete | `docs/mvp/iam/signup-02-marketplace-auth-dialog-popup.md` |
-| SIGNUP-03 Marketplace native auth | Complete | `docs/mvp/iam/signup-03-marketplace-native-auth.md` |
-| SIGNUP-04 Backend credential registration bridge | Complete | `docs/mvp/iam/signup-04-backend-credential-registration-bridge.md` |
-| SIGNUP-05 Google identity provider wiring | Complete | `docs/mvp/iam/signup-05-google-identity-provider-wiring.md` |
+| SIGNUP-00 Sign-up and external identity provider plan | Complete | `docs/mvp/iam/signup/signup-00-sign-up-external-identity-provider-plan.md` |
+| SIGNUP-01 Keycloak self-registration | Complete | `docs/mvp/iam/signup/signup-01-keycloak-self-registration.md` |
+| SIGNUP-02 Marketplace auth dialog and popup OIDC | Complete | `docs/mvp/iam/signup/signup-02-marketplace-auth-dialog-popup.md` |
+| SIGNUP-03 Marketplace native auth | Complete | `docs/mvp/iam/signup/signup-03-marketplace-native-auth.md` |
+| SIGNUP-04 Backend credential registration bridge | Complete | `docs/mvp/iam/signup/signup-04-backend-credential-registration-bridge.md` |
+| SIGNUP-05 Google identity provider wiring | Complete | `docs/mvp/iam/signup/signup-05-google-identity-provider-wiring.md` |
 
 Remaining account work before MVP completion:
 
 - User profile roadmap:
-  - `docs/mvp/iam/user-00-user-profile-roadmap.md`
+  - `docs/mvp/iam/user-profile/user-00-user-profile-roadmap.md`
 - Keep the marketplace, seller portal, and admin login/session/logout
   experience verified as future protected flows are added.
 - Keep registration/password recovery lifecycle owned by Keycloak.
@@ -207,11 +212,13 @@ User profile and account experience:
 
 | Slice | Status | Reference |
 | --- | --- | --- |
-| USER-00 User profile roadmap | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
-| USER-01 Marketplace account profile consolidation | Complete | `docs/mvp/iam/user-01-marketplace-account-profile-consolidation.md` |
-| USER-02 Safe public identity labels | Complete | `docs/mvp/iam/user-02-safe-public-identity-labels.md` |
-| USER-03 Account dashboard shell | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
-| USER-04 Chat identity display support | Planned | `docs/mvp/iam/user-00-user-profile-roadmap.md` |
+| USER-00 User profile roadmap | Planned | `docs/mvp/iam/user-profile/user-00-user-profile-roadmap.md` |
+| USER-01 Marketplace account profile consolidation | Complete | `docs/mvp/iam/user-profile/user-01-marketplace-account-profile-consolidation.md` |
+| USER-02 Safe public identity labels | Complete | `docs/mvp/iam/user-profile/user-02-safe-public-identity-labels.md` |
+| USER-03 Account dashboard shell | Complete | `docs/mvp/iam/user-profile/user-03-account-dashboard-shell.md` |
+| USER-04 Marketplace profile card shell | Complete | `docs/mvp/iam/user-profile/user-04-marketplace-profile-card-shell.md` |
+| USER-05 Avatar image upload | Complete | `docs/mvp/iam/user-profile/user-05-avatar-image-upload.md` |
+| USER-STAB-01 Profile/avatar stabilization | Complete | `docs/mvp/iam/user-profile/user-stab-01-profile-avatar-stabilization.md` |
 
 ### 5.2 Individual Seller Profile
 
@@ -274,20 +281,14 @@ Completed slices:
 | MEDIA-01 Object storage image delivery | Complete | `docs/mvp/list/media-01-object-storage-image-delivery.md` |
 | LIST-FE Stabilize listing frontend behavior | Complete | `docs/mvp/list/list-frontend-stabilization.md` |
 
-Recommended next search/storefront slices:
-
-1. SEARCH-02A individual marketplace keyword search.
-2. SEARCH-02B business storefront browse.
-3. SEARCH-03 shared filters, sorting, and cursor pagination.
-
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
 
 ### 5.5 Search And Storefront
 
-Status: read model plan and initial database-backed public approved listing
-browse are implemented. The public UI is split into individual marketplace and
-business store surfaces.
+Status: split marketplace/storefront search, shared cursor pagination, and the
+OpenSearch-derived projection are implemented. The public UI is split into
+individual marketplace and business store surfaces.
 
 MVP goal:
 
@@ -310,29 +311,39 @@ Recommended slices:
 1. SEARCH-00 search/storefront read model plan.
    - Status: complete.
    - Reference: `docs/mvp/search/search-00-search-storefront-read-model-plan.md`
+   - Split public contracts are implemented:
+     `/api/v1/public/marketplace/listings/search` for individual marketplace
+     listings and `/api/v1/public/stores/listings/search` for business
+     storefront listings.
 2. SEARCH-01 public approved listing browse without OpenSearch.
    - Status: complete.
    - Reference: `docs/mvp/search/search-01-public-approved-listing-browse.md`
-3. SEARCH-02A individual marketplace keyword search.
-   - Status: planned.
+3. SEARCH-01A individual marketplace search.
+   - Status: complete.
    - Reference:
      `docs/mvp/search/search-02a-individual-marketplace-keyword-search.md`
-   - Scope: keyword search for approved active `INDIVIDUAL` listings in the
-     marketplace user site.
+   - Scope: keyword, category, condition, price, city/county, and sort for
+     approved active `INDIVIDUAL` listings in the marketplace user site.
    - Excludes business storefronts, cart, checkout, and structured offers.
-4. SEARCH-02B public business storefront browse.
-   - Status: planned.
+4. SEARCH-01B business storefront search.
+   - Status: complete.
    - Reference:
-     `docs/mvp/search/search-02b-public-business-storefront-browse.md`
-   - Scope: guest-readable store page and approved active `BUSINESS` listings.
+     `docs/mvp/search/search-01b-business-storefront-search.md`
+   - Scope: keyword, category, condition, price, city/county, and sort for
+     approved active `BUSINESS` listings in the public stores surface.
    - Excludes inventory reservation, cart, checkout, payment, orders, and
      shipping.
 5. SEARCH-03 shared filters, sorting, and cursor pagination.
-   - Status: planned.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/search/search-03-shared-cursor-pagination.md`
    - Scope: category, seller type, condition, price, location, stable sort, and
      cursor pagination for the database-backed public read paths.
 6. SEARCH-04 OpenSearch projection only after the database-backed read path is
    correct.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/search/search-04-opensearch-projection.md`
 
 ### 5.6 Basic Buyer/Seller Chat
 
@@ -383,7 +394,7 @@ Status: planned.
 
 Reference:
 
-- `docs/mvp/fix/fix-02-stabilization-sprint-plan.md`
+- `docs/mvp/fix/stabilization/general/fix-02-stabilization-sprint-plan.md`
 
 Goal:
 
@@ -396,16 +407,16 @@ P0 cleanup slices:
 
 1. STAB-P0-01 Stabilize Git state and verification baseline.
    - Status: complete.
-   - Reference: `docs/mvp/fix/stab-p0-01-git-verification-baseline.md`
+   - Reference: `docs/mvp/fix/stabilization/general/stab-p0-01-git-verification-baseline.md`
 2. STAB-P0-02 Remove individual seller tools from business seller portal.
    - Status: complete.
-   - Reference: `docs/mvp/fix/stab-p0-02-business-seller-portal-boundary.md`
+   - Reference: `docs/mvp/fix/stabilization/general/stab-p0-02-business-seller-portal-boundary.md`
 3. STAB-P0-03 Remove or quarantine V2 demo UI from active MVP navigation.
    - Status: complete.
-   - Reference: `docs/mvp/fix/stab-p0-03-v2-demo-ui-quarantine.md`
+   - Reference: `docs/mvp/fix/stabilization/general/stab-p0-03-v2-demo-ui-quarantine.md`
 4. STAB-P0-04 Remove legacy custom JWT issuance path.
    - Status: complete.
-   - Reference: `docs/mvp/fix/stab-p0-04-legacy-jwt-cleanup.md`
+   - Reference: `docs/mvp/fix/stabilization/general/stab-p0-04-legacy-jwt-cleanup.md`
 5. STAB-P0-05 Fix documentation duplicates and slice naming drift.
 
 ### FIX-03 Auth/Login Stabilization Sprint
@@ -414,7 +425,7 @@ Status: planned.
 
 Reference:
 
-- `docs/mvp/fix/fix-03-auth-login-stabilization-sprint.md`
+- `docs/mvp/fix/stabilization/auth-login/fix-03-auth-login-stabilization-sprint.md`
 
 Goal:
 
@@ -427,7 +438,7 @@ P0 cleanup slices:
 
 1. AUTH-STAB-P0-01 Auth verification baseline.
    - Status: complete.
-   - Reference: `docs/mvp/fix/auth-stab-p0-01-auth-verification-baseline.md`.
+   - Reference: `docs/mvp/fix/stabilization/auth-login/auth-stab-p0-01-auth-verification-baseline.md`.
 2. AUTH-STAB-P0-02 Align Google provider docs with hidden CTA.
    - Status: complete.
 3. AUTH-STAB-P0-03 Native auth session and CSRF regression coverage.
@@ -441,7 +452,7 @@ Status: complete.
 
 Reference:
 
-- `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`
+- `docs/mvp/fix/stabilization/pre-search/fix-04-pre-search-stabilization-sprint.md`
 
 Goal:
 
@@ -458,19 +469,19 @@ P0 cleanup slices:
 1. PRESEARCH-STAB-P0-01 Verification and git baseline refresh.
    - Status: complete.
    - Reference:
-     `docs/mvp/fix/presearch-stab-p0-01-verification-git-baseline-refresh.md`
+     `docs/mvp/fix/stabilization/pre-search/presearch-stab-p0-01-verification-git-baseline-refresh.md`
 2. PRESEARCH-STAB-P0-02 Public surface contract regression audit.
    - Status: complete.
    - Reference:
-     `docs/mvp/fix/presearch-stab-p0-02-public-surface-contract-regression-audit.md`
+     `docs/mvp/fix/stabilization/pre-search/presearch-stab-p0-02-public-surface-contract-regression-audit.md`
 3. PRESEARCH-STAB-P0-03 Media storage secret and environment hygiene.
    - Status: complete.
    - Reference:
-     `docs/mvp/fix/presearch-stab-p0-03-media-storage-secret-environment-hygiene.md`
+     `docs/mvp/fix/stabilization/pre-search/presearch-stab-p0-03-media-storage-secret-environment-hygiene.md`
 4. PRESEARCH-STAB-P0-04 Source-of-truth documentation cleanup.
    - Status: complete.
    - Reference:
-     `docs/mvp/fix/presearch-stab-p0-04-source-of-truth-documentation-cleanup.md`
+     `docs/mvp/fix/stabilization/pre-search/presearch-stab-p0-04-source-of-truth-documentation-cleanup.md`
 
 P1 cleanup themes:
 
@@ -492,7 +503,7 @@ Status: complete.
 
 Reference:
 
-- `docs/mvp/fix/fix-01-restore-verification-baseline.md`
+- `docs/mvp/fix/stabilization/general/fix-01-restore-verification-baseline.md`
 
 Goal:
 
@@ -518,6 +529,43 @@ Acceptance criteria:
 - Backend tests pass or any local Docker/Testcontainers limitation is
   documented with a repeatable command that passes in CI/normal shell.
 - No new product feature behavior is added.
+
+### FIX-05 Post-Search And Profile Stabilization Sprint
+
+Status: in progress.
+
+Reference:
+
+- `docs/mvp/fix/stabilization/post-search/fix-05-post-search-profile-stabilization-sprint.md`
+
+Goal:
+
+- Stabilize completed profile/avatar, split search, cursor pagination, and
+  OpenSearch projection work before chat or more user-to-user features.
+- Do not add features.
+- Preserve API contracts and database schema unless a verified data-safety
+  issue requires a forward-safe migration.
+
+P0 cleanup slices:
+
+1. POSTSEARCH-STAB-P0-01 Verification and git baseline refresh.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p0-01-verification-git-baseline-refresh.md`
+2. POSTSEARCH-STAB-P0-02 Auth, session, avatar, and storage security audit.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p0-02-auth-session-avatar-storage-security-audit.md`
+3. POSTSEARCH-STAB-P0-03 Public search and storefront contract audit.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p0-03-public-search-storefront-contract-audit.md`
+4. POSTSEARCH-STAB-P0-04 Source-of-truth documentation and roadmap cleanup.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p0-04-source-of-truth-documentation-roadmap-cleanup.md`
+5. POSTSEARCH-STAB-P0-05 OpenSearch projection operational safety.
+   - Status: planned.
 
 ### Next Implementation Sequence
 
@@ -589,6 +637,8 @@ Acceptance criteria:
    - Decide the initial database-backed read path.
    - Define public listing cards.
    - Define storefront shape.
+   - Implement split public contracts for individual marketplace listings and
+     business storefront listings.
    - Defer OpenSearch until database-backed browse is correct.
 
 10. SEARCH-01: Public approved listing browse.
@@ -600,31 +650,42 @@ Acceptance criteria:
 11. FIX-04: Pre-search stabilization sprint.
     - Status: complete.
     - Reference:
-      `docs/mvp/fix/fix-04-pre-search-stabilization-sprint.md`
+      `docs/mvp/fix/stabilization/pre-search/fix-04-pre-search-stabilization-sprint.md`
     - Completed P0, P1, and P2 cleanup slices before search implementation.
     - Do not add features.
     - Preserve API contracts and database schema.
 
-12. SEARCH-02A: Individual marketplace keyword search.
+12. SEARCH-01A: Individual marketplace search.
+    - Status: complete.
     - Reference:
       `docs/mvp/search/search-02a-individual-marketplace-keyword-search.md`
     - Search approved active individual listings from the public marketplace.
-    - Use backend keyword matching instead of browser-only filtering.
+    - Use backend keyword, category, condition, price, city/county, and sort
+      handling instead of browser-only filtering.
     - Keep off-platform trade disclosure and no checkout language.
 
-13. SEARCH-02B: Public business storefront browse.
+13. SEARCH-01B: Business storefront search.
+    - Status: complete.
     - Reference:
-      `docs/mvp/search/search-02b-public-business-storefront-browse.md`
-    - Let guests view an active business storefront.
-    - Show approved active business listings.
-    - Hide suspended and private data.
+      `docs/mvp/search/search-01b-business-storefront-search.md`
+    - Let guests search approved active business listings.
+    - Hide individual listings, suspended/private data, and business internals.
     - Do not add cart, inventory, checkout, payment, orders, or shipping.
 
 14. SEARCH-03: Shared filters, sorting, and cursor pagination.
-    - Add category, seller type, condition, price, and approximate location
-      filters.
-    - Add newest and price sorting.
+    - Status: complete.
+    - Reference:
+      `docs/mvp/search/search-03-shared-cursor-pagination.md`
     - Add cursor pagination and load-more UI.
+    - Refine shared filter/sort contracts after both individual and business
+      search paths are stable.
+
+15. SEARCH-04: OpenSearch projection.
+    - Status: complete.
+    - Reference:
+      `docs/mvp/search/search-04-opensearch-projection.md`
+    - Add a derived OpenSearch projection after the database-backed paged
+      search contract is stable.
 
 ## 7. Deferred Release Summaries
 

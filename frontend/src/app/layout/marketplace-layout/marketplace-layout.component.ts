@@ -21,7 +21,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
           <a routerLink="/stores">Stores</a>
           @if (authService.isAuthenticated()) {
             <a routerLink="/account/listings">My Listings</a>
-            <a routerLink="/account/profile">Account</a>
+            <a routerLink="/account">Account</a>
             <button type="button" (click)="authService.logout()">Logout</button>
           } @else {
             <button type="button" (click)="openAuthDialog()">Login</button>

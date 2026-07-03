@@ -7,6 +7,7 @@ import { MarketplaceLayoutComponent } from './marketplace-layout.component';
 
 describe('MarketplaceLayoutComponent', () => {
   let fixture: ComponentFixture<MarketplaceLayoutComponent>;
+  let authenticated = false;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -17,7 +18,7 @@ describe('MarketplaceLayoutComponent', () => {
         {
           provide: AuthService,
           useValue: {
-            isAuthenticated: () => false,
+            isAuthenticated: () => authenticated,
             ensureSession: () => of({ authenticated: false, user: null }),
             login: jasmine.createSpy('login'),
             loginWithPopup: jasmine.createSpy('loginWithPopup').and.returnValue(of({ authenticated: false, user: null })),
@@ -32,6 +33,10 @@ describe('MarketplaceLayoutComponent', () => {
     }).compileComponents();
 
     fixture = TestBed.createComponent(MarketplaceLayoutComponent);
+  });
+
+  beforeEach(() => {
+    authenticated = false;
   });
 
   it('does not expose admin navigation on the public marketplace', () => {
@@ -73,6 +78,16 @@ describe('MarketplaceLayoutComponent', () => {
     const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
 
     expect(links.some(link => link.getAttribute('href') === '/account/listings/new')).toBeFalse();
+  });
+
+  it('links authenticated account navigation to the account dashboard shell', () => {
+    authenticated = true;
+    fixture.detectChanges();
+
+    const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
+    const accountLink = links.find(link => link.textContent?.trim() === 'Account');
+
+    expect(accountLink?.getAttribute('href')).toBe('/account');
   });
 
   it('opens a marketplace-themed auth dialog from the login button', () => {

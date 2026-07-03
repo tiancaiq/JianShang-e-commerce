@@ -20,7 +20,7 @@ class TestLoginComponent {}
 describe('authGuard', () => {
   it('allows an authenticated BFF session', async () => {
     const authService = {
-      ensureSession: () => of({ authenticated: true, user: null }),
+      refreshSession: () => of({ authenticated: true, user: null }),
     };
 
     TestBed.configureTestingModule({
@@ -40,7 +40,7 @@ describe('authGuard', () => {
 
   it('redirects an unauthenticated BFF session to login', async () => {
     const authService = {
-      ensureSession: () => of({ authenticated: false, user: null }),
+      refreshSession: () => of({ authenticated: false, user: null }),
     };
 
     TestBed.configureTestingModule({
@@ -63,7 +63,7 @@ describe('authGuard', () => {
 
   it('uses seller and admin login clients for matching protected route groups', async () => {
     const authService = {
-      ensureSession: () => of({ authenticated: false, user: null }),
+      refreshSession: () => of({ authenticated: false, user: null }),
     };
 
     TestBed.configureTestingModule({
@@ -90,7 +90,7 @@ describe('authGuard', () => {
 
   it('prevents loading a protected frontend route without an authenticated session', async () => {
     const authService = {
-      ensureSession: () => of({ authenticated: false, user: null }),
+      refreshSession: () => of({ authenticated: false, user: null }),
     };
 
     TestBed.configureTestingModule({
@@ -113,7 +113,7 @@ describe('authGuard', () => {
 
   it('loads a protected frontend route with an authenticated session', async () => {
     const authService = {
-      ensureSession: () => of({ authenticated: true, user: null }),
+      refreshSession: () => of({ authenticated: true, user: null }),
     };
 
     TestBed.configureTestingModule({

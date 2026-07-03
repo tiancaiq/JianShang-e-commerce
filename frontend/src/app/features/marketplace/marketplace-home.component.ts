@@ -2,7 +2,14 @@ import { DecimalPipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ListingCondition, MarketplaceBrowseListing, PublicListing } from '../../core/models/listing.model';
+import {
+  Category,
+  ListingCondition,
+  MarketplaceBrowseListing,
+  MarketplaceListingSearchParams,
+  MarketplaceListingSort,
+  PublicListing,
+} from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import {
   publicListingConditionLabel,
@@ -10,13 +17,13 @@ import {
   publicListingOwnerLabel,
   publicListingPrimaryImageUrl,
 } from '../../shared/listing/public-listing-display';
-
-type ListingSort = 'newest' | 'price_asc' | 'price_desc';
+import { AuthService } from '../../core/services/auth.service';
+import { UserProfileCardComponent } from '../account/user-profile-card.component';
 
 @Component({
   selector: 'app-marketplace-home',
   standalone: true,
-  imports: [DecimalPipe, FormsModule, RouterLink],
+  imports: [DecimalPipe, FormsModule, RouterLink, UserProfileCardComponent],
   template: `
     <section class="marketplace-home">
       <section class="hero-section" aria-labelledby="marketplace-title">
@@ -25,7 +32,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
           <h1 id="marketplace-title">Find sweet local treasures.</h1>
           <p class="summary">Browse approved individual listings with clear seller labels and public pickup areas.</p>
 
-          <form class="hero-search" role="search" (submit)="$event.preventDefault()">
+          <form class="hero-search" role="search" (submit)="runSearch(); $event.preventDefault()">
             <label>
               <span>Search marketplace</span>
               <input
@@ -35,6 +42,7 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
                 placeholder="Search figures, books, bikes, decor..."
               />
             </label>
+            <button type="submit">Search</button>
           </form>
 
           <div class="hero-actions">
@@ -82,63 +90,36 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       </section>
 
       <section id="listings" class="browse-section" aria-labelledby="browse-title">
-        <aside class="category-rail" aria-label="Categories">
-          <div class="rail-title">Categories</div>
-          <button type="button" [class.active]="selectedCategory === 'ALL'" (click)="selectCategory('ALL')">
-            All items
-          </button>
-          @for (category of categoryOptions(); track category) {
-            <button type="button" [class.active]="selectedCategory === category" (click)="selectCategory(category)">
-              {{ category }}
-            </button>
-          }
-        </aside>
-
-        <div class="listing-area">
+        <main class="listing-area">
           <div class="browse-panel">
             <div class="browse-header">
               <div>
                 <p class="eyebrow">Fresh finds</p>
                 <h2 id="browse-title">Individual Marketplace</h2>
               </div>
-              <span>{{ filteredListings().length }} shown</span>
+              <div class="browse-tools">
+                <span>{{ marketplaceListings().length }} shown</span>
+                <label class="sort-control">
+                  <span>Sort by</span>
+                  <select name="sortMode" [(ngModel)]="sortMode" (ngModelChange)="runSearch()">
+                    <option value="none">Default</option>
+                    <option value="newest">Newest</option>
+                    <option value="price_asc">Price low to high</option>
+                    <option value="price_desc">Price high to low</option>
+                  </select>
+                </label>
+              </div>
             </div>
-
-            <form class="filter-row" aria-label="Marketplace filters" (submit)="$event.preventDefault()">
-              <label>
-                <span>Condition</span>
-                <select name="condition" [(ngModel)]="selectedCondition">
-                  <option value="ALL">Any condition</option>
-                  <option value="NEW">New</option>
-                  <option value="OPEN_BOX">Open box</option>
-                  <option value="LIKE_NEW">Like new</option>
-                  <option value="GOOD">Good</option>
-                  <option value="FAIR">Fair</option>
-                  <option value="FOR_PARTS">For parts</option>
-                </select>
-              </label>
-
-              <label>
-                <span>Sort</span>
-                <select name="sortMode" [(ngModel)]="sortMode">
-                  <option value="newest">Newest</option>
-                  <option value="price_asc">Price low to high</option>
-                  <option value="price_desc">Price high to low</option>
-                </select>
-              </label>
-            </form>
 
             @if (loading()) {
               <div class="empty-list">Loading approved listings...</div>
             } @else if (errorMsg()) {
               <div class="empty-list">{{ errorMsg() }}</div>
-            } @else if (listings().length === 0) {
-              <div class="empty-list">No approved individual listings yet.</div>
-            } @else if (filteredListings().length === 0) {
-              <div class="empty-list">No listings match these filters.</div>
+            } @else if (marketplaceListings().length === 0) {
+              <div class="empty-list">{{ hasActiveSearch() ? 'No listings match these filters.' : 'No approved individual listings yet.' }}</div>
             } @else {
               <div class="listing-grid">
-                @for (listing of filteredListings(); track listing.id) {
+                @for (listing of marketplaceListings(); track listing.id) {
                   <a class="listing-card" [routerLink]="['/listings', listing.id]">
                     <div class="listing-image">
                       @if (listing.images[0]?.url || listing.images[0]?.uploadUrl) {
@@ -166,9 +147,70 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
                   </a>
                 }
               </div>
+              @if (hasMore()) {
+                <div class="load-more-row">
+                  <button type="button" (click)="loadMore()" [disabled]="loadingMore()">
+                    {{ loadingMore() ? 'Loading...' : 'Load more' }}
+                  </button>
+                </div>
+              }
             }
           </div>
-        </div>
+        </main>
+
+        <aside class="marketplace-rail" aria-label="Marketplace account and filters">
+          @if (authService.user(); as user) {
+            <app-user-profile-card [user]="user" />
+          }
+
+          <section class="filter-panel" aria-label="Filter marketplace listings">
+            <div class="filter-heading">
+              <span>Filter by</span>
+              @if (hasActiveSearch()) {
+                <button type="button" class="clear-button" (click)="clearFilters()">Clear</button>
+              }
+            </div>
+
+            <form class="filter-stack" (submit)="runSearch(); $event.preventDefault()">
+              <label>
+                <span>Condition</span>
+                <select name="condition" [(ngModel)]="selectedCondition" (ngModelChange)="runSearch()">
+                  <option value="ALL">Any condition</option>
+                  <option value="NEW">New</option>
+                  <option value="OPEN_BOX">Open box</option>
+                  <option value="LIKE_NEW">Like new</option>
+                  <option value="GOOD">Good</option>
+                  <option value="FAIR">Fair</option>
+                  <option value="FOR_PARTS">For parts</option>
+                </select>
+              </label>
+
+              <div class="price-fields">
+                <label>
+                  <span>Min price</span>
+                  <input name="minPrice" type="number" min="0" inputmode="decimal" [(ngModel)]="minPrice" />
+                </label>
+
+                <label>
+                  <span>Max price</span>
+                  <input name="maxPrice" type="number" min="0" inputmode="decimal" [(ngModel)]="maxPrice" />
+                </label>
+              </div>
+
+              <label>
+                <span>City</span>
+                <input name="city" type="search" [(ngModel)]="city" placeholder="Irvine" />
+              </label>
+
+              <label>
+                <span>County</span>
+                <input name="county" type="search" [(ngModel)]="county" placeholder="Orange County" />
+              </label>
+
+              <button type="submit">Apply</button>
+            </form>
+          </section>
+        </aside>
       </section>
     </section>
   `,
@@ -245,18 +287,24 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
     }
 
     .hero-search {
-      max-width: 660px;
+      max-width: 760px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.75rem;
+      align-items: end;
     }
 
     .hero-search label,
-    .filter-row label {
+    .filter-stack label,
+    .sort-control {
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
     }
 
     .hero-search span,
-    .filter-row span {
+    .filter-stack span,
+    .sort-control span {
       color: var(--market-muted);
       font-size: 0.78rem;
       font-weight: 850;
@@ -275,8 +323,20 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
     }
 
+    button {
+      min-height: 46px;
+      border: 1px solid var(--market-line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--market-accent-dark);
+      padding: 0 1rem;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
     input:focus,
-    select:focus {
+    select:focus,
+    button:focus {
       border-color: var(--market-accent);
       box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.18);
     }
@@ -313,39 +373,44 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 
     .browse-section {
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) 280px;
       gap: 1rem;
       align-items: start;
     }
 
-    .category-rail {
+    .marketplace-rail {
       position: sticky;
       top: 92px;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .filter-panel {
       display: flex;
       flex-direction: column;
-      gap: 0.4rem;
-      padding: 0.75rem;
-    }
-
-    .rail-title {
-      padding: 0.35rem 0.65rem;
-      color: var(--market-muted);
-      font-size: 0.78rem;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .category-rail button {
-      min-height: 38px;
-      border: 0;
+      gap: 0.9rem;
+      padding: 1rem;
+      border: 1px solid rgba(234, 215, 242, 0.95);
       border-radius: 8px;
-      background: transparent;
-      color: var(--market-muted);
-      cursor: pointer;
-      font-weight: 800;
-      text-align: left;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 12px 26px rgba(143, 92, 144, 0.1);
+    }
+
+    .filter-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--market-line);
+      color: var(--market-ink);
+      font-weight: 900;
+    }
+
+    .clear-button {
+      min-height: 32px;
       padding: 0 0.65rem;
+      font-size: 0.8rem;
     }
 
     .listing-area {
@@ -357,6 +422,10 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       flex-direction: column;
       gap: 1rem;
       padding: 1rem;
+      border: 1px solid rgba(234, 215, 242, 0.95);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 12px 26px rgba(143, 92, 144, 0.1);
     }
 
     .browse-header {
@@ -368,17 +437,39 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       border-bottom: 1px solid var(--market-line);
     }
 
+    .browse-tools {
+      display: flex;
+      align-items: end;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      min-width: min(100%, 360px);
+    }
+
     .browse-header h2 {
       font-size: 1.5rem;
     }
 
-    .browse-header > span {
+    .browse-tools > span {
       color: var(--market-muted);
       font-size: 0.9rem;
       font-weight: 850;
+      white-space: nowrap;
     }
 
-    .filter-row {
+    .sort-control {
+      min-width: 190px;
+    }
+
+    .sort-control select {
+      min-height: 40px;
+    }
+
+    .filter-stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .price-fields {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.75rem;
@@ -401,6 +492,25 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 0.9rem;
+    }
+
+    .load-more-row {
+      display: flex;
+      justify-content: center;
+      padding-top: 0.25rem;
+    }
+
+    .load-more-row button {
+      min-width: 160px;
+      background: linear-gradient(135deg, #ff85bd, #8b6fe8);
+      color: #fff;
+      border: 0;
+      box-shadow: 0 10px 22px rgba(190, 58, 131, 0.16);
+    }
+
+    .load-more-row button:disabled {
+      cursor: not-allowed;
+      opacity: 0.68;
     }
 
     .listing-card {
@@ -492,19 +602,12 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
         grid-template-columns: 1fr;
       }
 
-      .category-rail {
+      .filter-panel {
         position: static;
-        flex-direction: row;
-        overflow-x: auto;
       }
 
-      .rail-title {
-        display: none;
-      }
-
-      .category-rail button {
-        flex: 0 0 auto;
-        white-space: nowrap;
+      .marketplace-rail {
+        position: static;
       }
 
       .listing-grid {
@@ -519,9 +622,17 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
       }
 
       .preview-notes,
-      .filter-row,
+      .hero-search,
+      .browse-tools,
+      .price-fields,
       .listing-grid {
         grid-template-columns: 1fr;
+      }
+
+      .browse-tools {
+        width: 100%;
+        align-items: stretch;
+        flex-direction: column;
       }
 
       .browse-header {
@@ -533,21 +644,43 @@ type ListingSort = 'newest' | 'price_asc' | 'price_desc';
 })
 export class MarketplaceHomeComponent implements OnInit {
   private readonly listingService = inject(ListingService);
+  readonly authService = inject(AuthService);
 
   listings = signal<PublicListing[]>([]);
+  categories = signal<Category[]>([]);
   loading = signal(false);
+  loadingMore = signal(false);
+  hasMore = signal(false);
   errorMsg = signal('');
+  nextCursor = signal<string | null>(null);
 
   searchTerm = '';
-  selectedCategory = 'ALL';
+  selectedCategoryId = 'ALL';
   selectedCondition: ListingCondition | 'ALL' = 'ALL';
-  sortMode: ListingSort = 'newest';
+  sortMode: MarketplaceListingSort = 'none';
+  minPrice: string | number = '';
+  maxPrice: string | number = '';
+  city = '';
+  county = '';
 
   ngOnInit(): void {
+    this.listingService.getCategories().subscribe({
+      next: categories => this.categories.set(categories),
+      error: () => this.categories.set([]),
+    });
+    this.runSearch();
+  }
+
+  runSearch(): void {
     this.loading.set(true);
-    this.listingService.getPublicListings().subscribe({
-      next: listings => {
-        this.listings.set(listings);
+    this.loadingMore.set(false);
+    this.errorMsg.set('');
+    this.nextCursor.set(null);
+    this.listingService.searchMarketplaceListings(this.searchParams()).subscribe({
+      next: response => {
+        this.listings.set(response.data);
+        this.nextCursor.set(response.page.nextCursor);
+        this.hasMore.set(response.page.hasMore);
         this.loading.set(false);
       },
       error: error => {
@@ -557,52 +690,74 @@ export class MarketplaceHomeComponent implements OnInit {
     });
   }
 
-  categoryOptions(): string[] {
-    return [...new Set(this.marketplaceListings().map(listing => listing.categoryName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  loadMore(): void {
+    const cursor = this.nextCursor();
+    if (!cursor || this.loading() || this.loadingMore()) {
+      return;
+    }
+    this.loadingMore.set(true);
+    this.errorMsg.set('');
+    this.listingService.searchMarketplaceListings(this.searchParams(cursor)).subscribe({
+      next: response => {
+        this.listings.set([...this.listings(), ...response.data]);
+        this.nextCursor.set(response.page.nextCursor);
+        this.hasMore.set(response.page.hasMore);
+        this.loadingMore.set(false);
+      },
+      error: error => {
+        this.errorMsg.set(this.publicListingLoadMessage(error));
+        this.loadingMore.set(false);
+      },
+    });
   }
 
-  selectCategory(category: string): void {
-    this.selectedCategory = category;
+  categoryOptions(): Category[] {
+    return [...this.categories()].sort((left, right) => {
+      const displayOrder = left.displayOrder - right.displayOrder;
+      return displayOrder || left.name.localeCompare(right.name);
+    });
+  }
+
+  selectCategory(categoryId: string): void {
+    this.selectedCategoryId = categoryId;
+    this.runSearch();
+  }
+
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.selectedCategoryId = 'ALL';
+    this.selectedCondition = 'ALL';
+    this.sortMode = 'none';
+    this.minPrice = '';
+    this.maxPrice = '';
+    this.city = '';
+    this.county = '';
+    this.runSearch();
   }
 
   featuredListing(): MarketplaceBrowseListing | null {
     return this.marketplaceListings()[0] || null;
   }
 
-  filteredListings(): MarketplaceBrowseListing[] {
-    const term = this.searchTerm.trim().toLowerCase();
-    const filtered = this.marketplaceListings().filter(listing => {
-      const searchable = [
-        listing.title,
-        listing.description,
-        listing.categoryName,
-        listing.sellerDisplayName || '',
-        listing.publicCity || '',
-        listing.publicRegion || '',
-      ].join(' ').toLowerCase();
-
-      return (!term || searchable.includes(term))
-        && (this.selectedCategory === 'ALL' || listing.categoryName === this.selectedCategory)
-        && (this.selectedCondition === 'ALL' || listing.condition === this.selectedCondition);
-    });
-
-    return [...filtered].sort((left, right) => {
-      if (this.sortMode === 'price_asc') {
-        return Number(left.priceAmount) - Number(right.priceAmount);
-      }
-      if (this.sortMode === 'price_desc') {
-        return Number(right.priceAmount) - Number(left.priceAmount);
-      }
-      return right.publishedAt.localeCompare(left.publishedAt) || right.id.localeCompare(left.id);
-    });
-  }
-
   locationLabel(listing: MarketplaceBrowseListing): string {
     return publicListingLocationLabel(listing);
   }
 
-  private marketplaceListings(): MarketplaceBrowseListing[] {
+  marketplaceListings(): MarketplaceBrowseListing[] {
     return this.listings().filter(listing => listing.sellerType === 'INDIVIDUAL');
+  }
+
+  hasActiveSearch(): boolean {
+    return Boolean(
+      this.searchTerm.trim()
+      || this.selectedCategoryId !== 'ALL'
+      || this.selectedCondition !== 'ALL'
+      || this.hasNumberInput(this.minPrice)
+      || this.hasNumberInput(this.maxPrice)
+      || this.city.trim()
+      || this.county.trim()
+      || this.sortMode !== 'none',
+    );
   }
 
   ownerLabel(listing: MarketplaceBrowseListing | null | undefined): string {
@@ -621,5 +776,35 @@ export class MarketplaceHomeComponent implements OnInit {
     return error.status
       ? `Approved listings could not be loaded. HTTP ${error.status}.`
       : 'Approved listings could not be loaded.';
+  }
+
+  private searchParams(cursor: string | null = null): MarketplaceListingSearchParams {
+    return {
+      q: this.searchTerm,
+      categoryId: this.selectedCategoryId === 'ALL' ? null : this.selectedCategoryId,
+      condition: this.selectedCondition === 'ALL' ? null : this.selectedCondition,
+      minPrice: this.optionalNumber(this.minPrice),
+      maxPrice: this.optionalNumber(this.maxPrice),
+      city: this.city,
+      county: this.county,
+      sort: this.sortMode === 'none' ? null : this.sortMode,
+      cursor,
+    };
+  }
+
+  private optionalNumber(value: string | number | null | undefined): number | null {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    const text = String(value ?? '').trim();
+    if (!text) {
+      return null;
+    }
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private hasNumberInput(value: string | number | null | undefined): boolean {
+    return String(value ?? '').trim().length > 0;
   }
 }

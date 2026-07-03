@@ -5,6 +5,8 @@ import com.msb.ecom.auth_service.service.BusinessApplicationForbiddenException;
 import com.msb.ecom.auth_service.service.BusinessApplicationNotFoundException;
 import com.msb.ecom.auth_service.service.BusinessApplicationVersionConflictException;
 import com.msb.ecom.auth_service.service.BusinessMembershipNotFoundException;
+import com.msb.ecom.auth_service.service.AvatarNotFoundException;
+import com.msb.ecom.auth_service.service.AvatarStorageException;
 import com.msb.ecom.auth_service.service.IndividualSellerAlreadyActiveException;
 import com.msb.ecom.auth_service.service.IndividualSellerProfileNotFoundException;
 import com.msb.ecom.auth_service.service.ProfileVersionConflictException;
@@ -34,6 +36,33 @@ public class AuthServiceExceptionHandler {
                         "The profile changed. Refresh and try again.",
                         List.of(),
                         CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(AvatarNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAvatarNotFound(
+            AvatarNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "AVATAR_NOT_FOUND",
+                        "Avatar image was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(AvatarStorageException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAvatarStorage(
+            AvatarStorageException exception,
+            HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Avatar storage request failed path={} correlationId={}",
+                request.getRequestURI(), correlationId, exception);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "AVATAR_STORAGE_UNAVAILABLE",
+                        "Avatar storage is temporarily unavailable.",
+                        List.of(),
+                        correlationId)));
     }
 
     @ExceptionHandler(IndividualSellerAlreadyActiveException.class)

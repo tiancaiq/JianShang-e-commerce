@@ -18,3 +18,24 @@ export interface UpdateCurrentUserRequest {
   phone: string | null;
   avatarUrl: string | null;
 }
+
+export interface AvatarUploadRequest {
+  contentType: string;
+  fileName: string;
+  sizeBytes: number;
+}
+
+export interface AvatarUploadTarget {
+  objectBucket: string;
+  objectKey: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadMethod: string;
+  uploadUrl: string;
+}
+
+export interface AvatarUploadConfirmRequest {
+  objectKey: string;
+  contentType: string;
+  sizeBytes: number;
+}

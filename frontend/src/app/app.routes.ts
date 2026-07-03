@@ -66,6 +66,7 @@ export const routes: Routes = [
       { path: 'marketplace', loadComponent: () => import('./features/marketplace/marketplace-home.component').then(m => m.MarketplaceHomeComponent) },
       { path: 'stores', loadComponent: () => import('./features/stores/business-stores.component').then(m => m.BusinessStoresComponent) },
       { path: 'sell', redirectTo: 'account/listings', pathMatch: 'full' },
+      { path: 'account', canActivate: [authGuard], loadComponent: () => import('./features/account/account-dashboard.component').then(m => m.AccountDashboardComponent) },
       { path: 'account/profile', canActivate: [authGuard], loadComponent: () => import('./features/account/profile.component').then(m => m.ProfileComponent) },
       { path: 'account/seller-profile', canActivate: [authGuard], loadComponent: () => import('./features/seller/individual-seller-activation.component').then(m => m.IndividualSellerActivationComponent) },
       { path: 'account/listings', canActivate: [authGuard], loadComponent: () => import('./features/listings/account-listings-entry.component').then(m => m.AccountListingsEntryComponent) },

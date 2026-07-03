@@ -28,6 +28,10 @@ Keep top-level MVP documents in `docs/mvp/`:
 Keep roadmap slice documents in feature folders:
 
 - Authentication/accounts: `docs/mvp/iam/`
+  - Core IAM setup: `docs/mvp/iam/core/`
+  - Login/session work: `docs/mvp/iam/login/`
+  - Sign-up/provider work: `docs/mvp/iam/signup/`
+  - Account/profile/avatar work: `docs/mvp/iam/user-profile/`
 - Business onboarding/store: `docs/mvp/bus/`
 - Individual seller profile: `docs/mvp/ind/`
 - Listings/media: `docs/mvp/list/`
@@ -35,6 +39,10 @@ Keep roadmap slice documents in feature folders:
 - Site/route surface separation: `docs/mvp/site/`
 - UI/product design direction: `docs/mvp/ui/`
 - Verification/demo fixes: `docs/mvp/fix/`
+  - General stabilization: `docs/mvp/fix/stabilization/general/`
+  - Auth/login stabilization: `docs/mvp/fix/stabilization/auth-login/`
+  - Pre-search stabilization: `docs/mvp/fix/stabilization/pre-search/`
+  - Post-search/profile stabilization: `docs/mvp/fix/stabilization/post-search/`
 
 When adding a new slice document, place it in the matching feature folder and
 update references in `docs/mvp/development-roadmap.md`. Do not add new
@@ -173,13 +181,16 @@ Approved backend shared modules:
 
 - `common-core`
 - `common-web`
+- `common-storage`
 - `common-testing`
 
 Allowed shared content includes money/value types, pagination primitives, API
-errors, correlation handling, and testing utilities.
+errors, correlation handling, object-storage plumbing, and testing utilities.
 
 `common-security` and `common-events` are deferred until an approved feature
-requires them. Do not create empty speculative shared modules.
+requires them. Do not create empty speculative shared modules. Keep
+`common-storage` limited to technical object-storage adapters; listing media
+rules and avatar rules stay in their owning services.
 
 Do not put JPA entities, repositories, migrations, controllers, service
 business logic, or domain aggregates in shared modules. Do not make every
@@ -276,6 +287,9 @@ Use Testcontainers for database, Redis, and Kafka integration where practical.
 ## Change Safety
 
 - Preserve unrelated user changes in the working tree.
+- During stabilization, cleanup, refactor, or documentation-only work, do not
+  edit `.env`, `.env.*`, or other local environment files unless the user
+  explicitly asks for an environment/configuration change in that turn.
 - Do not rewrite existing migrations that may have run; add a new migration.
 - Do not perform broad refactors while implementing a small requirement.
 - Do not silently change an approved product invariant.

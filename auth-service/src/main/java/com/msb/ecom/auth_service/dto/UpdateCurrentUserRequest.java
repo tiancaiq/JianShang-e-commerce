@@ -13,7 +13,7 @@ public class UpdateCurrentUserRequest {
     private String phone;
 
     @Size(max = 2048)
-    @Pattern(regexp = "^https?://.+")
+    @Pattern(regexp = "^(https?://.+|/api/v1/public/user-avatars/[0-7][0-9A-HJKMNP-TV-Z]{25}(\\?v=[0-9]+)?)$")
     private String avatarUrl;
 
     public String displayName() {

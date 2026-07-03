@@ -374,7 +374,7 @@ export class PublicListingDetailComponent implements OnInit {
       return '';
     }
     if (listing.sellerType === 'BUSINESS') {
-      return 'Business listings can be viewed here. Platform checkout is not part of the MVP yet.';
+      return 'Business listings are view-only in the MVP. Purchase flows are not available yet.';
     }
     return listing.transactionNotice
       || 'Payment and delivery are arranged directly between buyer and seller. The platform does not process or verify off-platform payment.';

@@ -11,6 +11,7 @@ import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
 import com.msb.ecom.product_service.model.ModerationCaseNotFoundException;
 import com.msb.ecom.product_service.model.ModerationCaseVersionConflictException;
+import com.msb.ecom.product_service.search.ListingSearchUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -128,6 +129,21 @@ public class ListingExceptionHandler {
                         "Moderation case was not found.",
                         List.of(),
                         CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(ListingSearchUnavailableException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleListingSearchUnavailable(
+            ListingSearchUnavailableException exception,
+            HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Listing search unavailable path={} correlationId={} reason={}",
+                request.getRequestURI(), correlationId, exception.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "LISTING_SEARCH_UNAVAILABLE",
+                        "Listing search is temporarily unavailable.",
+                        List.of(),
+                        correlationId)));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

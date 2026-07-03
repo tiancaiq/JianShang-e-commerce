@@ -1,6 +1,6 @@
 import { DOCUMENT, isPlatformBrowser } from '@angular/common';
 import { Inject, Injectable, PLATFORM_ID, computed, signal } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, catchError, finalize, map, of, shareReplay, switchMap, take } from 'rxjs';
 import {
   ApiDataResponse,
@@ -281,7 +281,11 @@ export class AuthService {
         this.currentUser.set(user);
         return this.snapshot();
       }),
-      catchError(() => {
+      catchError(error => {
+        if (error instanceof HttpErrorResponse && error.status === 401) {
+          this.clearUser();
+          return of(this.snapshot());
+        }
         this.currentUser.set(sessionUser);
         return of(this.snapshot());
       })

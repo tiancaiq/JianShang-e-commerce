@@ -3,8 +3,10 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AuthService } from '../../core/services/auth.service';
 import { CurrentUser, UpdateCurrentUserRequest } from '../../core/models/user.model';
 import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-profile',
@@ -22,6 +24,40 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       </header>
 
       <form class="profile-form" (ngSubmit)="save()">
+        <section class="avatar-panel" aria-label="Avatar image">
+          <div class="avatar-preview">
+            @if (avatarPreviewUrl()) {
+              <img [src]="avatarPreviewUrl()" alt="Current avatar preview" />
+            } @else {
+              <span>{{ initials() }}</span>
+            }
+          </div>
+
+          <div class="avatar-controls">
+            <strong>Avatar image</strong>
+            <p>Upload a PNG, JPEG, or WebP image up to 5 MB.</p>
+            <input
+              #avatarInput
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              (change)="selectAvatar($event)"
+              [disabled]="loading() || saving() || avatarSaving()"
+              hidden
+            />
+            <div class="avatar-actions">
+              <button type="button" class="secondary-btn" (click)="avatarInput.click()" [disabled]="loading() || saving() || avatarSaving()">
+                Choose image
+              </button>
+              <button type="button" class="primary-btn" (click)="uploadAvatar()" [disabled]="!selectedAvatarFile || loading() || saving() || avatarSaving()">
+                {{ avatarSaving() && selectedAvatarFile ? 'Uploading' : 'Upload' }}
+              </button>
+              <button type="button" class="secondary-btn danger-btn" (click)="removeAvatar()" [disabled]="!user()?.avatarUrl || loading() || saving() || avatarSaving()">
+                Remove
+              </button>
+            </div>
+          </div>
+        </section>
+
         <div class="form-grid">
           <label class="field">
             <span>Display name</span>
@@ -48,16 +84,6 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
             />
           </label>
 
-          <label class="field">
-            <span>Avatar URL</span>
-            <input
-              name="avatarUrl"
-              [(ngModel)]="avatarUrl"
-              placeholder="https://example.com/avatar.png"
-              maxlength="2048"
-              [disabled]="loading() || saving()"
-            />
-          </label>
         </div>
 
         @if (errorMsg()) {
@@ -68,7 +94,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
           <button type="button" class="secondary-btn" (click)="load()" [disabled]="loading() || saving()">
             Reset
           </button>
-          <button type="submit" class="primary-btn" [disabled]="loading() || saving()">
+          <button type="submit" class="primary-btn" [disabled]="loading() || saving() || avatarSaving()">
             {{ saving() ? 'Saving' : 'Save' }}
           </button>
         </div>
@@ -158,6 +184,62 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       box-shadow: var(--profile-shadow);
     }
 
+    .avatar-panel {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      border: 1px solid var(--profile-border);
+      border-radius: var(--radius-md);
+      background: var(--profile-field);
+    }
+
+    .avatar-preview {
+      width: 96px;
+      height: 96px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 999px;
+      border: 3px solid rgba(244, 114, 182, 0.5);
+      background: linear-gradient(135deg, #ffc1de, #a88df1);
+      color: #fff;
+      font-size: 1.75rem;
+      font-weight: 900;
+    }
+
+    .avatar-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .avatar-controls {
+      display: grid;
+      gap: 0.45rem;
+      min-width: 0;
+    }
+
+    .avatar-controls strong {
+      color: var(--profile-text);
+      font-size: 1rem;
+    }
+
+    .avatar-controls p {
+      margin: 0;
+      color: var(--profile-muted);
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+
+    .avatar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 0.25rem;
+    }
+
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -235,6 +317,10 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       border-color: var(--profile-border);
     }
 
+    .danger-btn {
+      color: var(--color-danger);
+    }
+
     .primary-btn:disabled,
     .secondary-btn:disabled {
       opacity: 0.55;
@@ -248,6 +334,16 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
 
       .form-grid {
         grid-template-columns: 1fr;
+      }
+
+      .avatar-panel {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        text-align: center;
+      }
+
+      .avatar-actions {
+        justify-content: center;
       }
 
       .actions {
@@ -264,16 +360,20 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
 export class ProfileComponent implements OnInit {
   private userProfileService = inject(UserProfileService);
   private toastService = inject(ToastService);
+  private authService = inject(AuthService);
   private router = inject(Router);
 
   user = signal<CurrentUser | null>(null);
   loading = signal(false);
   saving = signal(false);
+  avatarSaving = signal(false);
   errorMsg = signal('');
 
   displayName = '';
   phone = '';
   avatarUrl = '';
+  selectedAvatarFile: File | null = null;
+  private selectedAvatarPreviewUrl = '';
 
   ngOnInit(): void {
     this.load();
@@ -291,7 +391,7 @@ export class ProfileComponent implements OnInit {
       error: error => {
         this.loading.set(false);
         if (error.status === 401) {
-          this.router.navigate(['/login']);
+          this.redirectToLogin();
           return;
         }
         this.errorMsg.set('Profile could not be loaded.');
@@ -317,7 +417,7 @@ export class ProfileComponent implements OnInit {
       error: error => {
         this.saving.set(false);
         if (error.status === 401) {
-          this.router.navigate(['/login']);
+          this.redirectToLogin();
           return;
         }
         if (error.status === 409) {
@@ -327,6 +427,94 @@ export class ProfileComponent implements OnInit {
         this.errorMsg.set('Profile could not be saved.');
       },
     });
+  }
+
+  selectAvatar(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] || null;
+    input.value = '';
+    if (!file) {
+      return;
+    }
+    if (!this.validateAvatarFile(file)) {
+      return;
+    }
+    this.clearSelectedAvatarPreview();
+    this.selectedAvatarFile = file;
+    this.selectedAvatarPreviewUrl = URL.createObjectURL(file);
+    this.errorMsg.set('');
+  }
+
+  uploadAvatar(): void {
+    const current = this.user();
+    if (!current || !this.selectedAvatarFile || !this.validateAvatarFile(this.selectedAvatarFile)) {
+      return;
+    }
+
+    this.avatarSaving.set(true);
+    this.errorMsg.set('');
+    this.userProfileService.uploadAvatar(this.selectedAvatarFile, current.version).subscribe({
+      next: user => {
+        this.applyUser(user);
+        this.clearSelectedAvatarPreview();
+        this.avatarSaving.set(false);
+        this.toastService.success('Avatar updated.');
+      },
+      error: error => {
+        this.avatarSaving.set(false);
+        if (error.status === 401) {
+          this.redirectToLogin();
+          return;
+        }
+        if (error.status === 409) {
+          this.errorMsg.set('Profile changed. Reset and try again.');
+          return;
+        }
+        this.errorMsg.set('Avatar could not be uploaded.');
+      },
+    });
+  }
+
+  removeAvatar(): void {
+    const current = this.user();
+    if (!current || !current.avatarUrl) {
+      return;
+    }
+
+    this.avatarSaving.set(true);
+    this.errorMsg.set('');
+    this.userProfileService.deleteAvatar(current.version).subscribe({
+      next: user => {
+        this.applyUser(user);
+        this.clearSelectedAvatarPreview();
+        this.avatarSaving.set(false);
+        this.toastService.success('Avatar removed.');
+      },
+      error: error => {
+        this.avatarSaving.set(false);
+        if (error.status === 401) {
+          this.redirectToLogin();
+          return;
+        }
+        if (error.status === 409) {
+          this.errorMsg.set('Profile changed. Reset and try again.');
+          return;
+        }
+        this.errorMsg.set('Avatar could not be removed.');
+      },
+    });
+  }
+
+  avatarPreviewUrl(): string {
+    return this.selectedAvatarPreviewUrl || this.displayAvatarUrl(this.user()?.avatarUrl || '');
+  }
+
+  initials(): string {
+    const source = this.displayName.trim() || this.user()?.email?.split('@')[0] || 'M';
+    const parts = source.trim().split(/\s+/).filter(Boolean);
+    const first = parts[0]?.[0] || 'M';
+    const second = parts.length > 1 ? parts[1]?.[0] : '';
+    return `${first}${second}`.toUpperCase();
   }
 
   private applyUser(user: CurrentUser): void {
@@ -347,7 +535,6 @@ export class ProfileComponent implements OnInit {
   private validate(): boolean {
     const displayName = this.displayName.trim();
     const phone = this.phone.trim();
-    const avatarUrl = this.avatarUrl.trim();
 
     if (displayName.length > 200) {
       this.errorMsg.set('Display name is too long.');
@@ -357,16 +544,50 @@ export class ProfileComponent implements OnInit {
       this.errorMsg.set('Phone must use E.164 format.');
       return false;
     }
-    if (avatarUrl && !/^https?:\/\/.+/i.test(avatarUrl)) {
-      this.errorMsg.set('Avatar URL must start with http:// or https://.');
-      return false;
-    }
 
     return true;
+  }
+
+  private validateAvatarFile(file: File): boolean {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      this.errorMsg.set('Avatar image must be a PNG, JPEG, or WebP file.');
+      return false;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      this.errorMsg.set('Avatar image must be 5 MB or smaller.');
+      return false;
+    }
+    return true;
+  }
+
+  private clearSelectedAvatarPreview(): void {
+    if (this.selectedAvatarPreviewUrl) {
+      URL.revokeObjectURL(this.selectedAvatarPreviewUrl);
+    }
+    this.selectedAvatarPreviewUrl = '';
+    this.selectedAvatarFile = null;
   }
 
   private trimOrNull(value: string): string | null {
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
+  }
+
+  private displayAvatarUrl(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('/api/')) {
+      return `${environment.apiGatewayUrl}${trimmed}`;
+    }
+    return trimmed;
+  }
+
+  private redirectToLogin(): void {
+    this.authService.clearUser();
+    this.router.navigate(['/login'], {
+      queryParams: {
+        client: 'marketplace',
+        returnUrl: this.router.url,
+      },
+    });
   }
 }

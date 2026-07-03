@@ -159,8 +159,33 @@ services:
     depends_on:
       - elasticsearch
 
+  # OpenSearch derived listing-search index
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:${OPENSEARCH_PORT:-9201}:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.15.0
+    container_name: opensearch-dashboards
+    ports:
+      - "127.0.0.1:${OPENSEARCH_DASHBOARDS_PORT:-5602}:5601"
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      - opensearch
+
 volumes:
   mongo_data:
   mysql_data:
   postgres_keycloak_data:
   elasticsearch_data:
+  opensearch_data:

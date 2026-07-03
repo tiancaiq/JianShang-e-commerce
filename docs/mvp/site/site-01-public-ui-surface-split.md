@@ -45,8 +45,9 @@ Rules:
 
 ## Follow-Up Slices
 
-- `SEARCH-02A`: backend keyword search for individual marketplace listings.
-- `SEARCH-02B`: real business storefront browse/detail APIs and UI.
+- `SEARCH-01A`: backend keyword/filter/sort search for individual marketplace listings.
+- `SEARCH-01B`: business storefront search.
+- Future storefront slices: one-store detail/scoped browse APIs and UI.
 - `SEARCH-03`: shared filters, sorting, and cursor pagination.
 
 ## Verification

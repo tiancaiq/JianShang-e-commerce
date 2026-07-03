@@ -78,6 +78,10 @@ describe('app routes', () => {
       redirectTo: 'account/listings',
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/profile',
       canActivate: [authGuard],
     }));

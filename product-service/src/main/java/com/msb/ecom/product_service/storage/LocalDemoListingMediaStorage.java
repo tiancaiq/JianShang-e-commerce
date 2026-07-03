@@ -1,5 +1,8 @@
 package com.msb.ecom.product_service.storage;
 
+import com.msb.ecom.common.storage.object.LocalObjectStorageTargets;
+import com.msb.ecom.common.storage.object.ObjectStorageUploadTarget;
+
 public class LocalDemoListingMediaStorage implements ListingMediaStorage {
 
     private static final String BUCKET = "listing-media-local";
@@ -11,7 +14,8 @@ public class LocalDemoListingMediaStorage implements ListingMediaStorage {
 
     @Override
     public StorageUploadTarget createUploadTarget(String objectKey, String contentType, long sizeBytes) {
-        return new StorageUploadTarget(BUCKET, objectKey, "LOCAL_DEMO", localUri(objectKey));
+        ObjectStorageUploadTarget target = LocalObjectStorageTargets.localDemoTarget(BUCKET, objectKey);
+        return new StorageUploadTarget(target.bucket(), target.objectKey(), target.uploadMethod(), target.uploadUrl());
     }
 
     @Override
@@ -29,7 +33,4 @@ public class LocalDemoListingMediaStorage implements ListingMediaStorage {
         return new byte[0];
     }
 
-    private String localUri(String objectKey) {
-        return "local-demo://" + BUCKET + "/" + objectKey;
-    }
 }

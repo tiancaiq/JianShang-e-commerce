@@ -16,8 +16,11 @@ import com.msb.ecom.product_service.dto.ListingMediaResponse;
 import com.msb.ecom.product_service.dto.ListingMediaUploadRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
+import com.msb.ecom.product_service.dto.PublicListingSearchRequest;
+import com.msb.ecom.product_service.dto.PublicListingSearchPageResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
+import com.msb.ecom.product_service.search.ListingSearchRebuildResponse;
 import com.msb.ecom.product_service.service.ListingMediaContent;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -72,6 +76,58 @@ public class ListingController {
     @GetMapping("/public/listings")
     public List<PublicListingResponse> publicListings() {
         return listingService.getPublicListings();
+    }
+
+    @GetMapping("/public/marketplace/listings/search")
+    public PublicListingSearchPageResponse individualMarketplaceSearch(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String categoryId,
+            @RequestParam(required = false) String condition,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String county,
+            @RequestParam(required = false) String region,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+        return listingService.searchIndividualMarketplaceListings(new PublicListingSearchRequest(
+                q,
+                categoryId,
+                condition,
+                minPrice,
+                maxPrice,
+                city,
+                county == null || county.isBlank() ? region : county,
+                sort,
+                cursor,
+                limit));
+    }
+
+    @GetMapping("/public/stores/listings/search")
+    public PublicListingSearchPageResponse businessStoreListingsSearch(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String categoryId,
+            @RequestParam(required = false) String condition,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String county,
+            @RequestParam(required = false) String region,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+        return listingService.searchBusinessStoreListings(new PublicListingSearchRequest(
+                q,
+                categoryId,
+                condition,
+                minPrice,
+                maxPrice,
+                city,
+                county == null || county.isBlank() ? region : county,
+                sort,
+                cursor,
+                limit));
     }
 
     @GetMapping("/public/listing-media/{imageId}")
@@ -137,6 +193,11 @@ public class ListingController {
     @GetMapping("/admin/listings/moderation/summary")
     public AdminListingModerationSummaryResponse adminModerationSummary() {
         return listingService.adminModerationSummary();
+    }
+
+    @PostMapping("/admin/search/listings/rebuild")
+    public ListingSearchRebuildResponse rebuildPublicListingSearchIndex() {
+        return listingService.rebuildPublicListingSearchIndex();
     }
 
     @GetMapping("/admin/moderation/listing-cases")

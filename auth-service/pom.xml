@@ -23,6 +23,11 @@
 			<artifactId>common-web</artifactId>
 			<version>${project.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>com.msb.ecom</groupId>
+			<artifactId>common-storage</artifactId>
+			<version>${project.version}</version>
+		</dependency>
 		<!-- Web -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

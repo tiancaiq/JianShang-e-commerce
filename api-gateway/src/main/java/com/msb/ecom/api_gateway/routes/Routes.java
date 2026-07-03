@@ -45,6 +45,7 @@ public class Routes {
                                                 .or(RequestPredicates.path("/api/v1/listings/**"))
                                                 .or(RequestPredicates.path("/api/v1/users/me/listings"))
                                                 .or(RequestPredicates.path("/api/v1/admin/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/search/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/moderation/**")),
                                                 http(productServiceUrl))
                                 .filter(tokenRelay())
@@ -55,10 +56,23 @@ public class Routes {
 
         @Bean
         @Order(1)
+        public RouterFunction<ServerResponse> publicAuthServiceRoute() {
+                return route("public_auth_service")
+                                .route(RequestPredicates.path("/api/v1/public/user-avatars/**"),
+                                                http(authServiceUrl))
+                                .filter(circuitBreaker("publicAuthServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(2)
         public RouterFunction<ServerResponse> publicListingServiceRoute() {
                 return route("public_listing_service")
                                 .route(RequestPredicates.path("/api/v1/public/listings")
                                                 .or(RequestPredicates.path("/api/v1/public/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/public/marketplace/listings/search"))
+                                                .or(RequestPredicates.path("/api/v1/public/stores/listings/search"))
                                                 .or(RequestPredicates.path("/api/v1/public/listing-media/**")),
                                                 http(productServiceUrl))
                                 .filter(circuitBreaker("publicListingServiceCircuitBreaker",
@@ -67,7 +81,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(2)
+        @Order(3)
         public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
                 return route("public_category_service")
                                 .route(RequestPredicates.path("/api/v1/categories")
@@ -112,7 +126,8 @@ public class Routes {
         @Order(10)
         public RouterFunction<ServerResponse> authServiceRoute() {
                 return route("auth_service")
-                                .route(RequestPredicates.path("/api/v1/users/**")
+                                .route(RequestPredicates.path("/api/v1/users/me")
+                                                .or(RequestPredicates.path("/api/v1/users/me/avatar/**"))
                                                 .or(RequestPredicates.path("/api/v1/individual-seller/**"))
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/membership/me"))
                                                 .or(RequestPredicates.path("/api/v1/business-applications/**"))

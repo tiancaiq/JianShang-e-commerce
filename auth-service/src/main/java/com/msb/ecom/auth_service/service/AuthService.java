@@ -1,6 +1,9 @@
 package com.msb.ecom.auth_service.service;
 
 import com.msb.ecom.auth_service.dto.CurrentUserResponse;
+import com.msb.ecom.auth_service.dto.AvatarUploadConfirmRequest;
+import com.msb.ecom.auth_service.dto.AvatarUploadRequest;
+import com.msb.ecom.auth_service.dto.AvatarUploadResponse;
 import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.auth_service.repository.UserRepository;
@@ -10,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -24,6 +28,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final UlidGenerator ulidGenerator;
     private final CurrentActorProvider currentActorProvider;
+    private final AvatarStorageService avatarStorageService;
 
     @Transactional
     public CurrentUserResponse ensureCurrentUser() {
@@ -34,9 +39,7 @@ public class AuthService {
     public CurrentUserResponse updateCurrentUser(UpdateCurrentUserRequest request, Long expectedVersion) {
         User user = ensureUserEntity();
 
-        if (expectedVersion != null && user.getVersion() != expectedVersion) {
-            throw new ProfileVersionConflictException();
-        }
+        requireCurrentProfileVersion(user, expectedVersion);
 
         user.updateProfile(
                 normalizedDisplayName(request.displayName()),
@@ -44,6 +47,76 @@ public class AuthService {
                 normalizedAvatarUrl(request.avatarUrl()));
 
         return CurrentUserResponse.from(userRepository.saveAndFlush(user));
+    }
+
+    @Transactional
+    public AvatarUploadResponse requestCurrentUserAvatarUpload(AvatarUploadRequest request) {
+        User user = ensureUserEntity();
+        String contentType = AvatarStorageSupport.normalizedContentType(request.contentType());
+        long sizeBytes = request.sizeBytes();
+        AvatarUploadTarget target = avatarStorageService.createUploadTarget(user.getId(), contentType, sizeBytes);
+        return new AvatarUploadResponse(
+                target.bucket(),
+                target.objectKey(),
+                contentType,
+                sizeBytes,
+                target.uploadMethod(),
+                target.uploadUrl());
+    }
+
+    @Transactional
+    public CurrentUserResponse uploadCurrentUserAvatar(MultipartFile file, Long expectedVersion) {
+        User user = ensureUserEntity();
+        requireCurrentProfileVersion(user, expectedVersion);
+
+        avatarStorageService.store(user.getId(), file);
+        user.updateProfile(user.getDisplayName(), user.getPhone(), safeAvatarUrl(user.getId(), user.getVersion() + 1));
+
+        return CurrentUserResponse.from(userRepository.saveAndFlush(user));
+    }
+
+    @Transactional
+    public void uploadCurrentUserAvatarContent(String contentType, byte[] bytes) {
+        User user = ensureUserEntity();
+        avatarStorageService.uploadObject(user.getId(), contentType, bytes);
+    }
+
+    @Transactional
+    public CurrentUserResponse confirmCurrentUserAvatarUpload(
+            AvatarUploadConfirmRequest request,
+            Long expectedVersion) {
+        User user = ensureUserEntity();
+        requireCurrentProfileVersion(user, expectedVersion);
+
+        avatarStorageService.verifyUploaded(
+                user.getId(),
+                request.objectKey(),
+                request.contentType(),
+                request.sizeBytes());
+        avatarStorageService.deleteOtherContentTypes(user.getId(), request.contentType());
+        user.updateProfile(user.getDisplayName(), user.getPhone(), safeAvatarUrl(user.getId(), user.getVersion() + 1));
+
+        return CurrentUserResponse.from(userRepository.saveAndFlush(user));
+    }
+
+    @Transactional
+    public CurrentUserResponse deleteCurrentUserAvatar(Long expectedVersion) {
+        User user = ensureUserEntity();
+        requireCurrentProfileVersion(user, expectedVersion);
+
+        avatarStorageService.delete(user.getId());
+        user.updateProfile(user.getDisplayName(), user.getPhone(), null);
+
+        return CurrentUserResponse.from(userRepository.saveAndFlush(user));
+    }
+
+    @Transactional(readOnly = true)
+    public AvatarContent publicAvatar(String userId) {
+        User user = userRepository.findById(userId)
+                .filter(candidate -> "ACTIVE".equals(candidate.getStatus()))
+                .filter(candidate -> candidate.getAvatarUrl() != null && !candidate.getAvatarUrl().isBlank())
+                .orElseThrow(AvatarNotFoundException::new);
+        return avatarStorageService.read(user.getId()).orElseThrow(AvatarNotFoundException::new);
     }
 
     public User ensureUserEntity() {
@@ -141,6 +214,9 @@ public class AuthService {
         if (trimmed.length() > 2048) {
             throw new IllegalArgumentException("Avatar URL is too long");
         }
+        if (trimmed.matches("^/api/v1/public/user-avatars/[0-7][0-9A-HJKMNP-TV-Z]{25}(\\?v=[0-9]+)?$")) {
+            return trimmed;
+        }
         try {
             URI uri = new URI(trimmed);
             String scheme = uri.getScheme();
@@ -154,6 +230,16 @@ public class AuthService {
             throw new IllegalArgumentException("Avatar URL is invalid");
         }
         return trimmed;
+    }
+
+    private void requireCurrentProfileVersion(User user, Long expectedVersion) {
+        if (expectedVersion != null && user.getVersion() != expectedVersion) {
+            throw new ProfileVersionConflictException();
+        }
+    }
+
+    private String safeAvatarUrl(String userId, long version) {
+        return "/api/v1/public/user-avatars/" + userId + "?v=" + version;
     }
 
     private String firstPresent(String... values) {

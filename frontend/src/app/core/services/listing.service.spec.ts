@@ -13,7 +13,7 @@ import {
   PublicListing,
 } from '../models/listing.model';
 
-describe('ListingService', () => {
+describe('ListingService gateway and listing API regression', () => {
   let service: ListingService;
   let httpMock: HttpTestingController;
 
@@ -255,6 +255,110 @@ describe('ListingService', () => {
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush([publicListing]);
+  });
+
+  it('loads individual marketplace search through the split public contract without browser tokens', () => {
+    service.searchMarketplaceListings({
+      q: 'bike',
+      categoryId: categories[0].id,
+      condition: 'GOOD',
+      minPrice: 10,
+      maxPrice: 300,
+      city: 'Irvine',
+      county: 'Orange County',
+      sort: 'price_asc',
+    }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+      expect(response.page.hasMore).toBeTrue();
+      expect(response.page.nextCursor).toBe('next-page');
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/marketplace/listings/search');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.params.get('q')).toBe('bike');
+    expect(request.request.params.get('categoryId')).toBe(categories[0].id);
+    expect(request.request.params.get('condition')).toBe('GOOD');
+    expect(request.request.params.get('minPrice')).toBe('10');
+    expect(request.request.params.get('maxPrice')).toBe('300');
+    expect(request.request.params.get('city')).toBe('Irvine');
+    expect(request.request.params.get('county')).toBe('Orange County');
+    expect(request.request.params.get('sort')).toBe('price_asc');
+    request.flush({ data: [publicListing], page: { nextCursor: 'next-page', hasMore: true } });
+  });
+
+  it('omits empty marketplace search params including default sort', () => {
+    service.searchMarketplaceListings({ q: '', sort: 'none' }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/marketplace/listings/search');
+    expect(request.request.params.keys()).toEqual([]);
+    request.flush({ data: [publicListing], page: { nextCursor: null, hasMore: false } });
+  });
+
+  it('sends marketplace search cursor and limit when loading more', () => {
+    service.searchMarketplaceListings({ cursor: 'cursor-1', limit: 12 }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/marketplace/listings/search');
+    expect(request.request.params.get('cursor')).toBe('cursor-1');
+    expect(request.request.params.get('limit')).toBe('12');
+    request.flush({ data: [publicListing], page: { nextCursor: null, hasMore: false } });
+  });
+
+  it('loads business store listing search through the split public contract without browser tokens', () => {
+    service.searchBusinessStoreListings({
+      q: 'plush',
+      categoryId: categories[0].id,
+      condition: 'NEW',
+      minPrice: 5,
+      maxPrice: 80,
+      city: 'Irvine',
+      county: 'Orange County',
+      sort: 'price_desc',
+    }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+      expect(response.page.hasMore).toBeTrue();
+      expect(response.page.nextCursor).toBe('next-store-page');
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/stores/listings/search');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.params.get('q')).toBe('plush');
+    expect(request.request.params.get('categoryId')).toBe(categories[0].id);
+    expect(request.request.params.get('condition')).toBe('NEW');
+    expect(request.request.params.get('minPrice')).toBe('5');
+    expect(request.request.params.get('maxPrice')).toBe('80');
+    expect(request.request.params.get('city')).toBe('Irvine');
+    expect(request.request.params.get('county')).toBe('Orange County');
+    expect(request.request.params.get('sort')).toBe('price_desc');
+    request.flush({ data: [publicListing], page: { nextCursor: 'next-store-page', hasMore: true } });
+  });
+
+  it('omits empty business store search params including default sort', () => {
+    service.searchBusinessStoreListings({ q: '', sort: 'none' }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/stores/listings/search');
+    expect(request.request.params.keys()).toEqual([]);
+    request.flush({ data: [publicListing], page: { nextCursor: null, hasMore: false } });
+  });
+
+  it('sends business store search cursor and limit when loading more', () => {
+    service.searchBusinessStoreListings({ cursor: 'store-cursor-1', limit: 12 }).subscribe(response => {
+      expect(response.data).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne(req => req.url === '/api/v1/public/stores/listings/search');
+    expect(request.request.params.get('cursor')).toBe('store-cursor-1');
+    expect(request.request.params.get('limit')).toBe('12');
+    request.flush({ data: [publicListing], page: { nextCursor: null, hasMore: false } });
   });
 
   it('loads current seller listings through the gateway without browser tokens', () => {

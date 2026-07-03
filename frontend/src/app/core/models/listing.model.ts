@@ -210,8 +210,37 @@ export interface PublicListing {
   images: PublicListingImage[];
 }
 
+export type PublicListingSort = 'none' | 'newest' | 'price_asc' | 'price_desc';
+
+export interface PublicListingSearchParams {
+  q?: string | null;
+  categoryId?: string | null;
+  condition?: ListingCondition | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  city?: string | null;
+  county?: string | null;
+  sort?: PublicListingSort | null;
+  cursor?: string | null;
+  limit?: number | null;
+}
+
+export interface PublicListingSearchPage {
+  data: PublicListing[];
+  page: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
+export type MarketplaceListingSort = PublicListingSort;
+export type MarketplaceListingSearchParams = PublicListingSearchParams;
+export type MarketplaceListingSearchPage = PublicListingSearchPage;
 export type MarketplaceBrowseListing = PublicListing;
 export type BusinessStoreListing = PublicListing;
+export type BusinessStoreListingSort = PublicListingSort;
+export type BusinessStoreListingSearchParams = PublicListingSearchParams;
+export type BusinessStoreListingSearchPage = PublicListingSearchPage;
 
 export interface AdminListingModerationCase {
   id: string;

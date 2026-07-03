@@ -9,7 +9,11 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -138,28 +142,7 @@ public class ListingDraftRepository {
                   and l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                 """,
-                (rs, rowNum) -> new PublicListingResponse(
-                        rs.getString("id"),
-                        rs.getString("seller_type"),
-                        sellerId(rs),
-                        null,
-                        null,
-                        rs.getString("category_id"),
-                        rs.getString("category_slug"),
-                        rs.getString("category_name"),
-                        rs.getString("title"),
-                        rs.getString("description"),
-                        rs.getString("condition_code"),
-                        rs.getString("condition_notes"),
-                        rs.getBigDecimal("price_amount"),
-                        rs.getString("currency"),
-                        rs.getBoolean("negotiable"),
-                        rs.getInt("quantity"),
-                        rs.getString("public_city"),
-                        rs.getString("public_region"),
-                        rs.getTimestamp("published_at").toInstant(),
-                        null,
-                        List.of()),
+                (rs, rowNum) -> publicListingResponse(rs),
                 listingId);
         return matches.stream().findFirst();
     }
@@ -178,29 +161,139 @@ public class ListingDraftRepository {
                 order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
                 """,
-                (rs, rowNum) -> new PublicListingResponse(
-                        rs.getString("id"),
-                        rs.getString("seller_type"),
-                        sellerId(rs),
-                        null,
-                        null,
-                        rs.getString("category_id"),
-                        rs.getString("category_slug"),
-                        rs.getString("category_name"),
-                        rs.getString("title"),
-                        rs.getString("description"),
-                        rs.getString("condition_code"),
-                        rs.getString("condition_notes"),
-                        rs.getBigDecimal("price_amount"),
-                        rs.getString("currency"),
-                        rs.getBoolean("negotiable"),
-                        rs.getInt("quantity"),
-                        rs.getString("public_city"),
-                        rs.getString("public_region"),
-                        rs.getTimestamp("published_at").toInstant(),
-                        null,
-                        List.of()),
+                (rs, rowNum) -> publicListingResponse(rs),
                 limit);
+    }
+
+    public List<PublicListingResponse> findPublicListingsBySellerType(String sellerType, int limit) {
+        return jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and l.seller_type = ?
+                order by l.published_at desc, l.updated_at desc, l.id desc
+                limit ?
+                """,
+                (rs, rowNum) -> publicListingResponse(rs),
+                sellerType,
+                limit);
+    }
+
+    public List<PublicListingResponse> searchPublicListingsBySellerType(String sellerType, PublicListingSearchCriteria criteria, int limit) {
+        StringBuilder sql = new StringBuilder("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and l.seller_type = ?
+                """);
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(sellerType);
+
+        if (hasText(criteria.keyword())) {
+            String keyword = "%" + escapedLike(criteria.keyword().toLowerCase(Locale.ROOT)) + "%";
+            sql.append("""
+                    and (
+                         lower(l.title) like ? escape '!'
+                      or lower(l.description) like ? escape '!'
+                      or lower(c.name) like ? escape '!'
+                      or lower(c.slug) like ? escape '!'
+                      or lower(l.condition_code) like ? escape '!'
+                      or lower(l.public_city) like ? escape '!'
+                      or lower(l.public_region) like ? escape '!'
+                    )
+                    """);
+            for (int index = 0; index < 7; index++) {
+                parameters.add(keyword);
+            }
+        }
+        if (hasText(criteria.categoryId())) {
+            sql.append(" and l.category_id = ?\n");
+            parameters.add(criteria.categoryId());
+        }
+        if (hasText(criteria.condition())) {
+            sql.append(" and l.condition_code = ?\n");
+            parameters.add(criteria.condition());
+        }
+        if (criteria.minPrice() != null) {
+            sql.append(" and l.price_amount >= ?\n");
+            parameters.add(criteria.minPrice());
+        }
+        if (criteria.maxPrice() != null) {
+            sql.append(" and l.price_amount <= ?\n");
+            parameters.add(criteria.maxPrice());
+        }
+        if (hasText(criteria.city())) {
+            sql.append(" and lower(l.public_city) = ?\n");
+            parameters.add(criteria.city().toLowerCase(Locale.ROOT));
+        }
+        if (hasText(criteria.county())) {
+            sql.append(" and lower(l.public_region) = ?\n");
+            parameters.add(criteria.county().toLowerCase(Locale.ROOT));
+        }
+        appendCursorPredicate(sql, parameters, criteria);
+
+        sql.append(searchOrderBy(criteria.sort()));
+        sql.append(" limit ?");
+        parameters.add(limit);
+
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> publicListingResponse(rs), parameters.toArray());
+    }
+
+    public List<PublicListingResponse> findPublicListingsByIds(List<String> listingIds) {
+        if (listingIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", listingIds.stream().map(id -> "?").toList());
+        List<PublicListingResponse> listings = jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and l.id in (%s)
+                """.formatted(placeholders),
+                (rs, rowNum) -> publicListingResponse(rs),
+                listingIds.toArray());
+        Map<String, PublicListingResponse> byId = new HashMap<>();
+        for (PublicListingResponse listing : listings) {
+            byId.put(listing.id(), listing);
+        }
+        return listingIds.stream()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    public List<PublicListingResponse> findAllPublicListingsForSearchIndex() {
+        return jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                order by coalesce(l.published_at, l.updated_at) desc, l.id desc
+                """,
+                (rs, rowNum) -> publicListingResponse(rs));
     }
 
     public long countPendingReview() {
@@ -412,6 +505,87 @@ public class ListingDraftRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 List.of());
+    }
+
+    // Builds the safe public listing projection shared by public browse/search contracts.
+    private PublicListingResponse publicListingResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new PublicListingResponse(
+                rs.getString("id"),
+                rs.getString("seller_type"),
+                sellerId(rs),
+                null,
+                null,
+                rs.getString("category_id"),
+                rs.getString("category_slug"),
+                rs.getString("category_name"),
+                rs.getString("title"),
+                rs.getString("description"),
+                rs.getString("condition_code"),
+                rs.getString("condition_notes"),
+                rs.getBigDecimal("price_amount"),
+                rs.getString("currency"),
+                rs.getBoolean("negotiable"),
+                rs.getInt("quantity"),
+                rs.getString("public_city"),
+                rs.getString("public_region"),
+                rs.getTimestamp("published_at").toInstant(),
+                null,
+                List.of());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private String escapedLike(String value) {
+        return value
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+    }
+
+    private String searchOrderBy(String sort) {
+        return switch (sort) {
+            case "price_asc" -> " order by l.price_amount asc, coalesce(l.published_at, l.updated_at) desc, l.id desc\n";
+            case "price_desc" -> " order by l.price_amount desc, coalesce(l.published_at, l.updated_at) desc, l.id desc\n";
+            default -> " order by coalesce(l.published_at, l.updated_at) desc, l.id desc\n";
+        };
+    }
+
+    private void appendCursorPredicate(StringBuilder sql, List<Object> parameters, PublicListingSearchCriteria criteria) {
+        if (!hasText(criteria.cursorListingId()) || criteria.cursorPublishedAt() == null) {
+            return;
+        }
+        Timestamp cursorPublishedAt = Timestamp.from(criteria.cursorPublishedAt());
+        if ("price_asc".equals(criteria.sort()) || "price_desc".equals(criteria.sort())) {
+            if (criteria.cursorPrice() == null) {
+                return;
+            }
+            String priceOperator = "price_asc".equals(criteria.sort()) ? ">" : "<";
+            sql.append("""
+                    and (
+                         l.price_amount %s ?
+                      or (l.price_amount = ? and coalesce(l.published_at, l.updated_at) < ?)
+                      or (l.price_amount = ? and coalesce(l.published_at, l.updated_at) = ? and l.id < ?)
+                    )
+                    """.formatted(priceOperator));
+            parameters.add(criteria.cursorPrice());
+            parameters.add(criteria.cursorPrice());
+            parameters.add(cursorPublishedAt);
+            parameters.add(criteria.cursorPrice());
+            parameters.add(cursorPublishedAt);
+            parameters.add(criteria.cursorListingId());
+            return;
+        }
+        sql.append("""
+                and (
+                     coalesce(l.published_at, l.updated_at) < ?
+                  or (coalesce(l.published_at, l.updated_at) = ? and l.id < ?)
+                )
+                """);
+        parameters.add(cursorPublishedAt);
+        parameters.add(cursorPublishedAt);
+        parameters.add(criteria.cursorListingId());
     }
 
     private String sellerId(java.sql.ResultSet rs) throws java.sql.SQLException {

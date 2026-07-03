@@ -77,6 +77,28 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldExposePublicMarketplaceSearchWithoutLogin() {
+		RestAssured.given()
+				.queryParam("sort", "price_asc")
+				.when()
+				.get("/api/v1/public/marketplace/listings/search")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldExposePublicStoreSearchWithoutLogin() {
+		RestAssured.given()
+				.queryParam("sort", "price_desc")
+				.when()
+				.get("/api/v1/public/stores/listings/search")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldRouteAuthOwnedAdminEndpointsThroughGateway() {
 		RestAssured.given()
 				.header("Authorization", "Bearer token")
@@ -92,6 +114,16 @@ class ApiGatewayApplicationTests {
 		RestAssured.given()
 				.when()
 				.get("/api/v1/public/listing-media/01I00000000000000000000001")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldExposePublicUserAvatarsWithoutLogin() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/public/user-avatars/01JY0000000000000000000000")
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));

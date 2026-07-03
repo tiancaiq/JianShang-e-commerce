@@ -20,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -2009,6 +2010,336 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void individualMarketplaceSearchReturnsOnlyApprovedIndividualListings() throws Exception {
+        String individualListingId = "01S00000000000000000000001";
+        String businessListingId = "01S00000000000000000000002";
+        try {
+            insertApprovedPublicListing(individualListingId, Instant.parse("2099-06-17T12:00:00Z"), "INDIVIDUAL");
+            insertApprovedPublicListing(businessListingId, Instant.parse("2099-06-17T12:00:01Z"), "BUSINESS");
+
+            mockMvc.perform(get("/api/v1/public/marketplace/listings/search"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(individualListingId)))
+                    .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(businessListingId))))
+                    .andExpect(jsonPath("$.data[?(@.id == '%s')].sellerType".formatted(individualListingId), hasItem("INDIVIDUAL")))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(false)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", individualListingId, businessListingId);
+        }
+    }
+
+    @Test
+    void individualMarketplaceSearchAppliesKeywordCategoryConditionPriceAndLocationFilters() throws Exception {
+        String matchingListingId = "01S00000000000000000000005";
+        String nonMatchingListingId = "01S00000000000000000000006";
+        try {
+            insertApprovedPublicListing(
+                    matchingListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "INDIVIDUAL",
+                    "Anime bicycle",
+                    "Cute figure basket included",
+                    "GOOD",
+                    new BigDecimal("50.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    nonMatchingListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "INDIVIDUAL",
+                    "Laptop stand",
+                    "Desk accessory",
+                    "LIKE_NEW",
+                    new BigDecimal("90.00"),
+                    "Tustin",
+                    "Orange County",
+                    "01K00000000000000000000002");
+
+            mockMvc.perform(get("/api/v1/public/marketplace/listings/search")
+                            .param("q", "bicycle")
+                            .param("categoryId", CATEGORY_ID)
+                            .param("condition", "GOOD")
+                            .param("minPrice", "40.00")
+                            .param("maxPrice", "60.00")
+                            .param("city", "irvine")
+                            .param("county", "orange county"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(matchingListingId)))
+                    .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(nonMatchingListingId))));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", matchingListingId, nonMatchingListingId);
+        }
+    }
+
+    @Test
+    void individualMarketplaceSearchSortsByPrice() throws Exception {
+        String lowPriceListingId = "01S00000000000000000000007";
+        String highPriceListingId = "01S00000000000000000000008";
+        try {
+            insertApprovedPublicListing(
+                    highPriceListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "INDIVIDUAL",
+                    "Collector figure",
+                    "Individual price sort fixture",
+                    "GOOD",
+                    new BigDecimal("80.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    lowPriceListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "INDIVIDUAL",
+                    "Small plush",
+                    "Individual price sort fixture",
+                    "GOOD",
+                    new BigDecimal("20.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+
+            mockMvc.perform(get("/api/v1/public/marketplace/listings/search")
+                            .param("q", "individual price sort fixture")
+                            .param("sort", "price_asc"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[0].id", equalTo(lowPriceListingId)))
+                    .andExpect(jsonPath("$.data[1].id", equalTo(highPriceListingId)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", lowPriceListingId, highPriceListingId);
+        }
+    }
+
+    @Test
+    void individualMarketplaceSearchUsesCursorPaginationWithoutRepeatingRows() throws Exception {
+        String newestListingId = "01S00000000000000000000013";
+        String olderListingId = "01S00000000000000000000014";
+        try {
+            insertApprovedPublicListing(
+                    olderListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "INDIVIDUAL",
+                    "Cursor pagination fixture older",
+                    "Individual cursor fixture",
+                    "GOOD",
+                    new BigDecimal("20.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    newestListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "INDIVIDUAL",
+                    "Cursor pagination fixture newest",
+                    "Individual cursor fixture",
+                    "GOOD",
+                    new BigDecimal("20.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+
+            String firstPage = mockMvc.perform(get("/api/v1/public/marketplace/listings/search")
+                            .param("q", "individual cursor fixture")
+                            .param("limit", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()", equalTo(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(newestListingId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(true)))
+                    .andExpect(jsonPath("$.page.nextCursor", notNullValue()))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+            String cursor = objectMapper.readTree(firstPage).get("page").get("nextCursor").asText();
+
+            mockMvc.perform(get("/api/v1/public/marketplace/listings/search")
+                            .param("q", "individual cursor fixture")
+                            .param("limit", "1")
+                            .param("cursor", cursor))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()", equalTo(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(olderListingId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(false)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", newestListingId, olderListingId);
+        }
+    }
+
+    @Test
+    void individualMarketplaceSearchRejectsInvalidSort() throws Exception {
+        mockMvc.perform(get("/api/v1/public/marketplace/listings/search")
+                        .param("sort", "popular"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
+    }
+
+    @Test
+    void businessStoreListingsSearchReturnsOnlyApprovedBusinessListings() throws Exception {
+        String individualListingId = "01S00000000000000000000003";
+        String businessListingId = "01S00000000000000000000004";
+        try {
+            insertApprovedPublicListing(individualListingId, Instant.parse("2099-06-17T12:00:00Z"), "INDIVIDUAL");
+            insertApprovedPublicListing(businessListingId, Instant.parse("2099-06-17T12:00:01Z"), "BUSINESS");
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(businessListingId)))
+                    .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(individualListingId))))
+                    .andExpect(jsonPath("$.data[?(@.id == '%s')].sellerType".formatted(businessListingId), hasItem("BUSINESS")))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(false)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", individualListingId, businessListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchAppliesKeywordCategoryConditionPriceAndLocationFilters() throws Exception {
+        String matchingListingId = "01S00000000000000000000009";
+        String nonMatchingListingId = "01S00000000000000000000010";
+        try {
+            insertApprovedPublicListing(
+                    matchingListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "BUSINESS",
+                    "Store plush",
+                    "Business storefront fixture",
+                    "NEW",
+                    new BigDecimal("30.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    nonMatchingListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "BUSINESS",
+                    "Store laptop stand",
+                    "Business storefront fixture",
+                    "LIKE_NEW",
+                    new BigDecimal("90.00"),
+                    "Tustin",
+                    "Orange County",
+                    "01K00000000000000000000002");
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "plush")
+                            .param("categoryId", CATEGORY_ID)
+                            .param("condition", "NEW")
+                            .param("minPrice", "20.00")
+                            .param("maxPrice", "40.00")
+                            .param("city", "irvine")
+                            .param("county", "orange county"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(matchingListingId)))
+                    .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(nonMatchingListingId))));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", matchingListingId, nonMatchingListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchSortsByPrice() throws Exception {
+        String lowPriceListingId = "01S00000000000000000000011";
+        String highPriceListingId = "01S00000000000000000000012";
+        try {
+            insertApprovedPublicListing(
+                    highPriceListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "BUSINESS",
+                    "Store premium figure",
+                    "Business price sort fixture",
+                    "NEW",
+                    new BigDecimal("80.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    lowPriceListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "BUSINESS",
+                    "Store small plush",
+                    "Business price sort fixture",
+                    "NEW",
+                    new BigDecimal("20.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "business price sort fixture")
+                            .param("sort", "price_asc"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[0].id", equalTo(lowPriceListingId)))
+                    .andExpect(jsonPath("$.data[1].id", equalTo(highPriceListingId)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", lowPriceListingId, highPriceListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchUsesPriceCursorPaginationWithoutRepeatingRows() throws Exception {
+        String lowPriceListingId = "01S00000000000000000000015";
+        String highPriceListingId = "01S00000000000000000000016";
+        try {
+            insertApprovedPublicListing(
+                    highPriceListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "BUSINESS",
+                    "Store cursor high",
+                    "Business cursor fixture",
+                    "NEW",
+                    new BigDecimal("80.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            insertApprovedPublicListing(
+                    lowPriceListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "BUSINESS",
+                    "Store cursor low",
+                    "Business cursor fixture",
+                    "NEW",
+                    new BigDecimal("20.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+
+            String firstPage = mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "business cursor fixture")
+                            .param("sort", "price_asc")
+                            .param("limit", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()", equalTo(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(lowPriceListingId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(true)))
+                    .andExpect(jsonPath("$.page.nextCursor", notNullValue()))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+            String cursor = objectMapper.readTree(firstPage).get("page").get("nextCursor").asText();
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "business cursor fixture")
+                            .param("sort", "price_asc")
+                            .param("limit", "1")
+                            .param("cursor", cursor))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()", equalTo(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(highPriceListingId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(false)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", lowPriceListingId, highPriceListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchRejectsInvalidSort() throws Exception {
+        mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                        .param("sort", "popular"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
+    }
+
+    @Test
     void publicBrowseIsCappedToFixedMvpLimit() throws Exception {
         Instant basePublishedAt = Instant.parse("2099-06-17T12:00:00Z");
         try {
@@ -2135,6 +2466,37 @@ class ListingDraftApiTests {
     }
 
     private void insertApprovedPublicListing(String listingId, Instant publishedAt) {
+        insertApprovedPublicListing(listingId, publishedAt, "INDIVIDUAL");
+    }
+
+    private void insertApprovedPublicListing(String listingId, Instant publishedAt, String sellerType) {
+        insertApprovedPublicListing(
+                listingId,
+                publishedAt,
+                sellerType,
+                "Public browse fixture " + listingId,
+                "Public browse fixture",
+                "GOOD",
+                new BigDecimal("10.00"),
+                "Irvine",
+                "CA",
+                CATEGORY_ID);
+    }
+
+    private void insertApprovedPublicListing(
+            String listingId,
+            Instant publishedAt,
+            String sellerType,
+            String title,
+            String description,
+            String condition,
+            BigDecimal priceAmount,
+            String city,
+            String region,
+            String categoryId) {
+        String individualSellerUserId = "BUSINESS".equals(sellerType) ? null : USER_ID;
+        String businessId = "BUSINESS".equals(sellerType) ? BUSINESS_ID : null;
+        boolean negotiable = !"BUSINESS".equals(sellerType);
         jdbcTemplate.update("""
                 insert into listings (
                     id, seller_type, individual_seller_user_id, business_id, store_id,
@@ -2142,17 +2504,35 @@ class ListingDraftApiTests {
                     price_amount, currency, negotiable, sku, quantity, public_city, public_region,
                     status, moderation_status, published_at, version, created_at, updated_at
                 )
-                values (?, 'INDIVIDUAL', ?, null, null, ?, ?, 'Public browse fixture', 'GOOD', null,
-                        10.00, 'USD', true, null, 1, 'Irvine', 'CA',
+                values (?, ?, ?, ?, null, ?, ?, 'Public browse fixture', 'GOOD', null,
+                        10.00, 'USD', ?, null, 1, 'Irvine', 'CA',
                         'ACTIVE', 'APPROVED', ?, 0, ?, ?)
                 """,
                 listingId,
-                USER_ID,
-                CATEGORY_ID,
-                "Public browse fixture " + listingId,
+                sellerType,
+                individualSellerUserId,
+                businessId,
+                categoryId,
+                title,
+                negotiable,
                 Timestamp.from(publishedAt),
                 Timestamp.from(publishedAt),
                 Timestamp.from(publishedAt));
+        jdbcTemplate.update("""
+                update listings
+                set description = ?,
+                    condition_code = ?,
+                    price_amount = ?,
+                    public_city = ?,
+                    public_region = ?
+                where id = ?
+                """,
+                description,
+                condition,
+                priceAmount,
+                city,
+                region,
+                listingId);
     }
 
     private int decisionCount(String listingId, String decision) {

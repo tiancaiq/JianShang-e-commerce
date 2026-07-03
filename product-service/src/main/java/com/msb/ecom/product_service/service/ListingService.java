@@ -28,6 +28,12 @@ import com.msb.ecom.product_service.repository.ListingModerationDecisionReposito
 import com.msb.ecom.product_service.repository.ModerationCaseInsert;
 import com.msb.ecom.product_service.repository.ModerationCaseRepository;
 import com.msb.ecom.product_service.repository.ModerationCaseRepository.ModerationCaseEnsureResult;
+import com.msb.ecom.product_service.repository.PublicListingSearchCriteria;
+import com.msb.ecom.product_service.search.ListingSearchDocument;
+import com.msb.ecom.product_service.search.ListingSearchProperties;
+import com.msb.ecom.product_service.search.ListingSearchRebuildResponse;
+import com.msb.ecom.product_service.search.ListingSearchUnavailableException;
+import com.msb.ecom.product_service.search.OpenSearchListingSearchClient;
 import com.msb.ecom.product_service.service.UlidGenerator;
 import com.msb.ecom.product_service.dto.AdminActiveListingUpdateRequest;
 import com.msb.ecom.product_service.dto.AdminListingModerationCaseDetailResponse;
@@ -44,6 +50,8 @@ import com.msb.ecom.product_service.dto.ListingMediaResponse;
 import com.msb.ecom.product_service.dto.ListingMediaUploadRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
+import com.msb.ecom.product_service.dto.PublicListingSearchPageResponse;
+import com.msb.ecom.product_service.dto.PublicListingSearchRequest;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.UpdateListingImagesRequest;
 import com.msb.ecom.product_service.model.ListingMediaAccessDeniedException;
@@ -95,6 +103,8 @@ public class ListingService {
     private final CurrentActorProvider currentActorProvider;
     private final ListingMediaStorage listingMediaStorage;
     private final ListingMediaStorageProperties mediaStorageProperties;
+    private final ListingSearchProperties listingSearchProperties;
+    private final OpenSearchListingSearchClient openSearchListingSearchClient;
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getActiveCategories() {
@@ -155,6 +165,74 @@ public class ListingService {
         return withPublicSellerLabels(listings);
     }
 
+    @Transactional(readOnly = true)
+    // SEARCH-00 keeps individual marketplace discovery separate from business storefront browse.
+    public List<PublicListingResponse> searchIndividualMarketplaceListings() {
+        return getPublicListingsBySellerType("INDIVIDUAL");
+    }
+
+    @Transactional(readOnly = true)
+    // SEARCH-01A applies marketplace filters only to approved active individual listings.
+    public PublicListingSearchPageResponse searchIndividualMarketplaceListings(PublicListingSearchRequest request) {
+        PublicListingSearchCriteria criteria = PublicListingSearchRequests.criteria(request);
+        return pagedPublicListings(
+                "INDIVIDUAL",
+                criteria,
+                PublicListingSearchRequests.normalizedLimit(request.limit(), PUBLIC_BROWSE_LIMIT));
+    }
+
+    private PublicListingSearchPageResponse pagedPublicListings(
+            String sellerType,
+            PublicListingSearchCriteria criteria,
+            int limit) {
+        List<PublicListingResponse> fetched = searchPublicListingRows(sellerType, criteria, limit + 1).stream()
+                .map(this::publicListingWithImagesAndNotice)
+                .toList();
+        boolean hasMore = fetched.size() > limit;
+        List<PublicListingResponse> listings = hasMore ? fetched.subList(0, limit) : fetched;
+        String nextCursor = hasMore && !listings.isEmpty()
+                ? PublicListingSearchRequests.encodeCursor(criteria.sort(), listings.get(listings.size() - 1))
+                : null;
+        return new PublicListingSearchPageResponse(
+                withPublicSellerLabels(listings),
+                new PublicListingSearchPageResponse.PageMetadata(nextCursor, hasMore));
+    }
+
+    private List<PublicListingResponse> searchPublicListingRows(
+            String sellerType,
+            PublicListingSearchCriteria criteria,
+            int limit) {
+        if (!listingSearchProperties.openSearchEnabled()) {
+            return listingDraftRepository.searchPublicListingsBySellerType(sellerType, criteria, limit);
+        }
+        List<String> listingIds = openSearchListingSearchClient.searchIds(sellerType, criteria, limit);
+        // OpenSearch only chooses candidate IDs; MySQL still revalidates public visibility before response.
+        return listingDraftRepository.findPublicListingsByIds(listingIds);
+    }
+
+    @Transactional(readOnly = true)
+    // SEARCH-00 keeps business storefront discovery separate from individual marketplace search.
+    public List<PublicListingResponse> searchBusinessStoreListings() {
+        return getPublicListingsBySellerType("BUSINESS");
+    }
+
+    @Transactional(readOnly = true)
+    // SEARCH-01B applies storefront filters only to approved active business listings.
+    public PublicListingSearchPageResponse searchBusinessStoreListings(PublicListingSearchRequest request) {
+        PublicListingSearchCriteria criteria = PublicListingSearchRequests.criteria(request);
+        return pagedPublicListings(
+                "BUSINESS",
+                criteria,
+                PublicListingSearchRequests.normalizedLimit(request.limit(), PUBLIC_BROWSE_LIMIT));
+    }
+
+    private List<PublicListingResponse> getPublicListingsBySellerType(String sellerType) {
+        List<PublicListingResponse> listings = listingDraftRepository.findPublicListingsBySellerType(sellerType, PUBLIC_BROWSE_LIMIT).stream()
+                .map(this::publicListingWithImagesAndNotice)
+                .toList();
+        return withPublicSellerLabels(listings);
+    }
+
     private PublicListingResponse publicListingWithImagesAndNotice(PublicListingResponse listing) {
         return new PublicListingResponse(
                 listing.id(),
@@ -207,6 +285,7 @@ public class ListingService {
         }
 
         log.info("Updated listing draft id={} sellerType={}", listing.id(), listing.sellerType());
+        removeListingFromSearchIndex(listing.id());
         return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
@@ -224,6 +303,7 @@ public class ListingService {
         }
 
         log.info("Closed listing id={} sellerType={}", listing.id(), listing.sellerType());
+        removeListingFromSearchIndex(listing.id());
         return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
@@ -257,6 +337,7 @@ public class ListingService {
         log.info("Submitted listing for review id={} sellerType={} moderationCaseId={} moderationCaseCreated={} submittedByUserId={}",
                 listing.id(), listing.sellerType(), moderationCase.id(), moderationCase.created(),
                 submission.submittedByUserId());
+        removeListingFromSearchIndex(listing.id());
         return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
@@ -300,6 +381,7 @@ public class ListingService {
         }
         recordAdminListingAction(listing.id(), "ADMIN_EDIT", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin edited active listing listingId={} adminUserId={}", listing.id(), admin.userId());
+        upsertListingSearchProjection(listing.id());
         return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
@@ -318,7 +400,29 @@ public class ListingService {
         }
         recordAdminListingAction(listing.id(), "ADMIN_REMOVE", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin removed active listing listingId={} adminUserId={}", listing.id(), admin.userId());
+        removeListingFromSearchIndex(listing.id());
         return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+    }
+
+    // Rebuilds the derived OpenSearch listing projection from authoritative MySQL rows.
+    public ListingSearchRebuildResponse rebuildPublicListingSearchIndex() {
+        requirePlatformAdmin();
+        if (!listingSearchProperties.openSearchEnabled()) {
+            return new ListingSearchRebuildResponse(
+                    listingSearchProperties.engine(),
+                    listingSearchProperties.opensearch().index(),
+                    0);
+        }
+        List<ListingSearchDocument> documents = listingDraftRepository.findAllPublicListingsForSearchIndex().stream()
+                .map(ListingSearchDocument::from)
+                .toList();
+        int indexed = openSearchListingSearchClient.rebuild(documents);
+        log.info("Rebuilt listing search projection index={} indexedCount={}",
+                openSearchListingSearchClient.indexName(), indexed);
+        return new ListingSearchRebuildResponse(
+                listingSearchProperties.engine(),
+                openSearchListingSearchClient.indexName(),
+                indexed);
     }
 
     @Transactional(readOnly = true)
@@ -512,6 +616,11 @@ public class ListingService {
                         reviewerUserId,
                         expectedVersion + 1,
                         now));
+        if ("APPROVE".equals(decision)) {
+            upsertListingSearchProjection(listing.id());
+        } else {
+            removeListingFromSearchIndex(listing.id());
+        }
         return response;
     }
 
@@ -711,9 +820,36 @@ public class ListingService {
 
         listingMediaRepository.replaceImages(listing.id(), inserts);
         listingDraftRepository.markSellerEdited(listing.id(), now);
+        removeListingFromSearchIndex(listing.id());
         List<ListingImageResponse> images = listingMediaRepository.findImagesByListingId(listing.id());
         log.info("Updated listing images listingId={} count={}", listing.id(), images.size());
         return images;
+    }
+
+    // Projection failures are logged but do not roll back the authoritative listing transaction.
+    private void upsertListingSearchProjection(String listingId) {
+        if (!listingSearchProperties.openSearchEnabled()) {
+            return;
+        }
+        try {
+            listingDraftRepository.findPublicListingById(listingId)
+                    .map(ListingSearchDocument::from)
+                    .ifPresent(openSearchListingSearchClient::upsert);
+        } catch (ListingSearchUnavailableException exception) {
+            log.warn("Listing search projection upsert skipped listingId={} reason={}", listingId, exception.getMessage());
+        }
+    }
+
+    // Delete failures leave MySQL authoritative and can be repaired by a rebuild.
+    private void removeListingFromSearchIndex(String listingId) {
+        if (!listingSearchProperties.openSearchEnabled()) {
+            return;
+        }
+        try {
+            openSearchListingSearchClient.delete(listingId);
+        } catch (ListingSearchUnavailableException exception) {
+            log.warn("Listing search projection delete skipped listingId={} reason={}", listingId, exception.getMessage());
+        }
     }
 
     private ListingDraftResponse createIndividualDraft(CreateListingDraftRequest request) {

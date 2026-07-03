@@ -78,14 +78,14 @@ public class SecurityConfig {
                         .ignoringRequestMatchers(
                                 new AntPathRequestMatcher("/api/v1/webhooks/business-verification")))
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(new AntPathRequestMatcher("/api/v1/public/**"))
+                        .permitAll()
                         .requestMatchers(
                                 "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**",
                                 "/swagger-resources/**", "/aggregate/**",
                                 "/actuator/health/**", "/fallbackRoute",
                                 "/api/v1/webhooks/business-verification",
                                 "/api/v1/categories", "/api/v1/categories/**",
-                                "/api/v1/public/listings", "/api/v1/public/listings/**",
-                                "/api/v1/public/listing-media/**",
                                 "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/session",
                                 "/api/v1/auth/native/login", "/api/v1/auth/native/register",
                                 "/api/v1/auth/callback/**", "/oauth2/authorization/**",

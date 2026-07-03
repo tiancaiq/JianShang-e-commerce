@@ -32,9 +32,12 @@ import javax.crypto.spec.SecretKeySpec;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +59,8 @@ class AuthServiceApplicationTests {
         registry.add("spring.flyway.locations", () -> "classpath:db/migration/identity");
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> "http://localhost:8181/realms/msb-local");
         registry.add("business.verification.webhook-secret", () -> "test-webhook-secret");
+        registry.add("user.avatar.storage", () -> "local-demo");
+        registry.add("user.avatar.storage-dir", () -> "target/test-auth-avatars");
     }
 
     @MockitoBean
@@ -201,6 +206,36 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void profileUpdateAcceptsInternalAvatarUrl() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-profile-internal-avatar")
+                        .claim("email", "profile-internal-avatar@example.com"))))
+                .andExpect(status().isOk());
+
+        Long version = jdbcTemplate.queryForObject(
+                "select version from users where keycloak_sub = ?",
+                Long.class,
+                "keycloak-sub-profile-internal-avatar");
+
+        mockMvc.perform(patch("/api/v1/users/me")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-profile-internal-avatar")
+                                .claim("email", "profile-internal-avatar@example.com")))
+                        .header(HttpHeaders.IF_MATCH, version)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Internal Avatar",
+                                  "phone": "+19495551234",
+                                  "avatarUrl": "/api/v1/public/user-avatars/01KWE72Y1247CX4DE7DGW5X2NQ?v=4"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value(
+                        "/api/v1/public/user-avatars/01KWE72Y1247CX4DE7DGW5X2NQ?v=4"));
+    }
+
+    @Test
     void unauthenticatedProfileUpdateReturns401() throws Exception {
         mockMvc.perform(patch("/api/v1/users/me")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -274,6 +309,108 @@ class AuthServiceApplicationTests {
                         .content("{\"displayName\":\"Conflict\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("VERSION_CONFLICT"));
+    }
+
+    @Test
+    void authenticatedUserCanUploadAndDeleteAvatarImage() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-avatar")
+                        .claim("email", "avatar@example.com")
+                        .claim("name", "Avatar User"))))
+                .andExpect(status().isOk());
+
+        Long version = jdbcTemplate.queryForObject(
+                "select version from users where keycloak_sub = ?",
+                Long.class,
+                "keycloak-sub-avatar");
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                "keycloak-sub-avatar");
+        String objectKey = "users/" + userId + "/avatar.png";
+        byte[] avatarBytes = "avatar-bytes".getBytes(StandardCharsets.UTF_8);
+
+        mockMvc.perform(post("/api/v1/users/me/avatar/upload-request")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-avatar")
+                                .claim("email", "avatar@example.com")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/png",
+                                  "fileName": "avatar.png",
+                                  "sizeBytes": 12
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.objectKey").value(objectKey))
+                .andExpect(jsonPath("$.data.uploadMethod").value("PUT"))
+                .andExpect(jsonPath("$.data.uploadUrl").value("/api/v1/users/me/avatar/content"));
+
+        mockMvc.perform(put("/api/v1/users/me/avatar/content")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-avatar")
+                                .claim("email", "avatar@example.com")))
+                        .contentType("image/png")
+                        .content(avatarBytes))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/users/me/avatar/confirm")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-avatar")
+                                .claim("email", "avatar@example.com")))
+                        .header(HttpHeaders.IF_MATCH, version)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "objectKey": "%s",
+                                  "contentType": "image/png",
+                                  "sizeBytes": 12
+                                }
+                                """.formatted(objectKey)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value("/api/v1/public/user-avatars/" + userId + "?v=" + (version + 1)))
+                .andExpect(jsonPath("$.data.version").value(version + 1));
+
+        mockMvc.perform(get("/api/v1/public/user-avatars/{userId}", userId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                .andExpect(content().bytes(avatarBytes));
+
+        mockMvc.perform(delete("/api/v1/users/me/avatar")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-avatar")
+                                .claim("email", "avatar@example.com")))
+                        .header(HttpHeaders.IF_MATCH, version + 1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.version").value(version + 2));
+
+        mockMvc.perform(get("/api/v1/public/user-avatars/{userId}", userId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("AVATAR_NOT_FOUND"));
+    }
+
+    @Test
+    void avatarUploadRejectsUnsupportedImageTypes() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject("keycloak-sub-avatar-invalid")
+                        .claim("email", "avatar-invalid@example.com"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/users/me/avatar/upload-request")
+                        .with(jwt().jwt(token -> token
+                                .subject("keycloak-sub-avatar-invalid")
+                                .claim("email", "avatar-invalid@example.com")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/gif",
+                                  "fileName": "avatar.gif",
+                                  "sizeBytes": 12
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

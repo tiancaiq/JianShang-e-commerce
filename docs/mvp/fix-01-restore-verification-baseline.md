@@ -6,4 +6,4 @@ This top-level file is kept only to avoid broken links from older notes.
 
 Current source of truth:
 
-- `docs/mvp/fix/fix-01-restore-verification-baseline.md`
+- `docs/mvp/fix/stabilization/general/fix-01-restore-verification-baseline.md`
