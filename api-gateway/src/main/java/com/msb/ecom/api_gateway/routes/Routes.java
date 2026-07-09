@@ -24,6 +24,9 @@ public class Routes {
         @Value("${service.product.url}")
         private String productServiceUrl;
 
+        @Value("${service.chat.url}")
+        private String chatServiceUrl;
+
         @Value("${service.order.url}")
         private String orderServiceUrl;
 
@@ -38,12 +41,31 @@ public class Routes {
 
         @Bean
         @Order(0)
+        public RouterFunction<ServerResponse> chatServiceRoute() {
+                return route("chat_service")
+                                .route(RequestPredicates.path("/api/v1/listings/*/conversations"),
+                                                http(chatServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/conversations"),
+                                                http(chatServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/conversations/**"),
+                                                http(chatServiceUrl))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("chatServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(1)
         public RouterFunction<ServerResponse> productServiceRoute() {
                 return route("product_service")
                                 .route(RequestPredicates.path("/api/product/**")
                                                 .or(RequestPredicates.path("/api/v1/listings"))
                                                 .or(RequestPredicates.path("/api/v1/listings/**"))
                                                 .or(RequestPredicates.path("/api/v1/users/me/listings"))
+                                                .or(RequestPredicates.path("/api/v1/users/me/liked-listings"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/store/items"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/store/items/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/listings/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/search/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/moderation/**")),
@@ -55,10 +77,12 @@ public class Routes {
         }
 
         @Bean
-        @Order(1)
+        @Order(2)
         public RouterFunction<ServerResponse> publicAuthServiceRoute() {
                 return route("public_auth_service")
                                 .route(RequestPredicates.path("/api/v1/public/user-avatars/**"),
+                                                http(authServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/stores/*"),
                                                 http(authServiceUrl))
                                 .filter(circuitBreaker("publicAuthServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
@@ -66,7 +90,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(2)
+        @Order(3)
         public RouterFunction<ServerResponse> publicListingServiceRoute() {
                 return route("public_listing_service")
                                 .route(RequestPredicates.path("/api/v1/public/listings")
@@ -81,7 +105,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(3)
+        @Order(4)
         public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
                 return route("public_category_service")
                                 .route(RequestPredicates.path("/api/v1/categories")
@@ -129,7 +153,9 @@ public class Routes {
                                 .route(RequestPredicates.path("/api/v1/users/me")
                                                 .or(RequestPredicates.path("/api/v1/users/me/avatar/**"))
                                                 .or(RequestPredicates.path("/api/v1/individual-seller/**"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/me/store-context"))
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/membership/me"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/store"))
                                                 .or(RequestPredicates.path("/api/v1/business-applications/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/me"))
                                                 .or(RequestPredicates.path("/api/v1/admin/dashboard-summary"))

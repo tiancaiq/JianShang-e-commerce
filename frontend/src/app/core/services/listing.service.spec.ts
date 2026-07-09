@@ -31,6 +31,7 @@ describe('ListingService gateway and listing API regression', () => {
     sellerType: 'INDIVIDUAL',
     individualSellerUserId: '01U00000000000000000000001',
     businessId: null,
+    storeId: null,
     categoryId: categories[0].id,
     title: 'Used bicycle',
     description: 'A reliable city bike.',
@@ -110,6 +111,8 @@ describe('ListingService gateway and listing API regression', () => {
     publicRegion: 'CA',
     publishedAt: '2026-06-17T12:00:00Z',
     transactionNotice: 'Payment and delivery are arranged directly by participants.',
+    visitCount: 2,
+    likeCount: 1,
     images: [{
       id: image.id,
       displayOrder: 0,
@@ -245,6 +248,104 @@ describe('ListingService gateway and listing API regression', () => {
     request.flush(publicListing);
   });
 
+  it('records an authenticated listing visit through the gateway without browser tokens', () => {
+    service.recordListingVisit(draft.id).subscribe(response => {
+      expect(response).toEqual({
+        listingId: draft.id,
+        visitCount: 3,
+        likeCount: 1,
+        visitedByMe: true,
+        likedByMe: false,
+      });
+    });
+
+    const request = httpMock.expectOne(`/api/v1/listings/${draft.id}/visit`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    expect(request.request.body).toBeNull();
+    request.flush({
+      listingId: draft.id,
+      visitCount: 3,
+      likeCount: 1,
+      visitedByMe: true,
+      likedByMe: false,
+    });
+  });
+
+  it('likes and unlikes a listing through the gateway without browser tokens', () => {
+    service.likeListing(draft.id).subscribe(response => {
+      expect(response.likedByMe).toBeTrue();
+      expect(response.likeCount).toBe(2);
+    });
+
+    const likeRequest = httpMock.expectOne(`/api/v1/listings/${draft.id}/like`);
+    expect(likeRequest.request.method).toBe('POST');
+    expect(likeRequest.request.withCredentials).toBeTrue();
+    expect(likeRequest.request.headers.has('Authorization')).toBeFalse();
+    expect(likeRequest.request.body).toBeNull();
+    likeRequest.flush({
+      listingId: draft.id,
+      visitCount: 2,
+      likeCount: 2,
+      visitedByMe: false,
+      likedByMe: true,
+    });
+
+    service.unlikeListing(draft.id).subscribe(response => {
+      expect(response.likedByMe).toBeFalse();
+      expect(response.likeCount).toBe(1);
+    });
+
+    const unlikeRequest = httpMock.expectOne(`/api/v1/listings/${draft.id}/like`);
+    expect(unlikeRequest.request.method).toBe('DELETE');
+    expect(unlikeRequest.request.withCredentials).toBeTrue();
+    expect(unlikeRequest.request.headers.has('Authorization')).toBeFalse();
+    unlikeRequest.flush({
+      listingId: draft.id,
+      visitCount: 2,
+      likeCount: 1,
+      visitedByMe: false,
+      likedByMe: false,
+    });
+  });
+
+  it('loads current user listing engagement through the gateway without browser tokens', () => {
+    service.getMyListingEngagement(draft.id).subscribe(response => {
+      expect(response).toEqual({
+        listingId: draft.id,
+        visitCount: 2,
+        likeCount: 1,
+        visitedByMe: true,
+        likedByMe: true,
+      });
+    });
+
+    const request = httpMock.expectOne(`/api/v1/listings/${draft.id}/engagement/me`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush({
+      listingId: draft.id,
+      visitCount: 2,
+      likeCount: 1,
+      visitedByMe: true,
+      likedByMe: true,
+    });
+  });
+
+  it('loads current user liked listings through the gateway without browser tokens', () => {
+    service.getMyLikedListings().subscribe(response => {
+      expect(response).toEqual([publicListing]);
+    });
+
+    const request = httpMock.expectOne('/api/v1/users/me/liked-listings');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush([publicListing]);
+  });
+
   it('loads public approved listing browse through the gateway without browser tokens', () => {
     service.getPublicListings().subscribe(response => {
       expect(response).toEqual([publicListing]);
@@ -371,6 +472,88 @@ describe('ListingService gateway and listing API regression', () => {
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush([draft]);
+  });
+
+  it('loads business store items through the business-scoped contract', () => {
+    const businessId = '01B00000000000000000000001';
+    const storeDraft = {
+      ...draft,
+      sellerType: 'BUSINESS' as const,
+      individualSellerUserId: null,
+      businessId,
+      storeId: '01S00000000000000000000001',
+      sku: 'SKU-STORE-1',
+      negotiable: false,
+      publicCity: null,
+      publicRegion: null,
+    };
+
+    service.getBusinessStoreItems(businessId).subscribe(response => {
+      expect(response).toEqual([storeDraft]);
+    });
+
+    const request = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush([storeDraft]);
+  });
+
+  it('creates, reads, and updates business store items through business-scoped routes', () => {
+    const businessId = '01B00000000000000000000001';
+    const storeDraft = {
+      ...draft,
+      sellerType: 'BUSINESS' as const,
+      individualSellerUserId: null,
+      businessId,
+      storeId: '01S00000000000000000000001',
+      sku: 'SKU-STORE-1',
+      negotiable: false,
+      publicCity: null,
+      publicRegion: null,
+    };
+    const payload = {
+      sellerType: 'BUSINESS' as const,
+      businessId,
+      categoryId: categories[0].id,
+      title: 'Store keyboard',
+      description: 'A clean store item draft.',
+      condition: 'GOOD' as const,
+      price: { amount: 49.99, currency: 'USD' },
+      negotiable: false,
+      sku: 'SKU-STORE-1',
+      quantity: 3,
+    };
+
+    service.createBusinessStoreItem(businessId, payload).subscribe(response => {
+      expect(response).toEqual(storeDraft);
+    });
+
+    const createRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items`);
+    expect(createRequest.request.method).toBe('POST');
+    expect(createRequest.request.withCredentials).toBeTrue();
+    expect(createRequest.request.body).toEqual(payload);
+    createRequest.flush(storeDraft);
+
+    service.getBusinessStoreItem(businessId, storeDraft.id).subscribe(response => {
+      expect(response).toEqual(storeDraft);
+    });
+
+    const readRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${storeDraft.id}`);
+    expect(readRequest.request.method).toBe('GET');
+    expect(readRequest.request.withCredentials).toBeTrue();
+    readRequest.flush(storeDraft);
+
+    service.updateBusinessStoreItem(businessId, storeDraft.id, storeDraft.version, payload).subscribe(response => {
+      expect(response).toEqual({ ...storeDraft, version: 1 });
+    });
+
+    const updateRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${storeDraft.id}`);
+    expect(updateRequest.request.method).toBe('PATCH');
+    expect(updateRequest.request.headers.get('If-Match')).toBe('0');
+    expect(updateRequest.request.withCredentials).toBeTrue();
+    expect(updateRequest.request.body).toEqual(payload);
+    updateRequest.flush({ ...storeDraft, version: 1 });
   });
 
   it('loads admin listing moderation queue through the gateway without browser tokens', () => {
@@ -626,6 +809,55 @@ describe('ListingService gateway and listing API regression', () => {
       sizeBytes: 1024,
     });
     request.flush(media);
+  });
+
+  it('uses business-scoped store item media routes through the gateway', () => {
+    const businessId = '01B00000000000000000000001';
+    const storeMedia = {
+      ...media,
+      sellerType: 'BUSINESS' as const,
+      individualSellerUserId: null,
+      businessId,
+      uploadUrl: `/api/v1/businesses/${businessId}/store/items/${draft.id}/media/${media.id}/content`,
+    };
+
+    service.requestBusinessStoreItemMediaUpload(businessId, draft.id, {
+      contentType: 'image/png',
+      fileName: 'bike.png',
+      sizeBytes: 1024,
+    }).subscribe(response => {
+      expect(response).toEqual(storeMedia);
+    });
+
+    const uploadRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${draft.id}/media/upload-request`);
+    expect(uploadRequest.request.method).toBe('POST');
+    expect(uploadRequest.request.withCredentials).toBeTrue();
+    uploadRequest.flush(storeMedia);
+
+    service.confirmBusinessStoreItemMediaUpload(businessId, draft.id, media.id, {
+      sizeBytes: 1024,
+    }).subscribe(response => {
+      expect(response).toEqual({ ...storeMedia, uploadStatus: 'UPLOADED' });
+    });
+
+    const confirmRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${draft.id}/media/${media.id}/confirm`);
+    expect(confirmRequest.request.method).toBe('POST');
+    expect(confirmRequest.request.withCredentials).toBeTrue();
+    confirmRequest.flush({ ...storeMedia, uploadStatus: 'UPLOADED' });
+
+    service.updateBusinessStoreItemImages(businessId, draft.id, {
+      images: [{ mediaId: media.id, altText: 'bike.png' }],
+    }).subscribe(response => {
+      expect(response).toEqual([image]);
+    });
+
+    const imagesRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${draft.id}/images`);
+    expect(imagesRequest.request.method).toBe('PUT');
+    expect(imagesRequest.request.withCredentials).toBeTrue();
+    expect(imagesRequest.request.body).toEqual({
+      images: [{ mediaId: media.id, altText: 'bike.png' }],
+    });
+    imagesRequest.flush([image]);
   });
 
   it('confirms listing media upload through the gateway without browser tokens', () => {

@@ -673,6 +673,41 @@ Acceptance criteria:
 
 - A teammate can run the app, run tests, pick one slice, and avoid V2/V3 work.
 
+### STAB-P2-06 Active Backend Migration Boundary
+
+Status: complete.
+
+Reference:
+
+- `docs/mvp/fix/stabilization/general/stab-p2-06-active-backend-migration-boundary.md`
+
+Problem:
+
+- The active Maven reactor now includes `common-storage` and `chat-service`.
+- Architecture guardrails still only checked the earlier MVP service set.
+- Active Flyway migrations use service-owned subfolders, but the repository
+  still contains archived root-level tutorial SQL that can confuse future
+  backend work.
+
+Tasks:
+
+- Include `chat-service` and `common-storage` in architecture guardrails.
+- Pin active Flyway locations for identity, catalog, and chat schemas.
+- Reject new root-level Flyway SQL for active MVP services.
+- Mark the old auth-service root migration as archived documentation-only
+  history.
+
+Tests:
+
+- `python tools/architecture_checks.py`
+- `python tools/architecture_checks.py --self-test`
+
+Acceptance criteria:
+
+- Backend boundary checks match the active MVP module set.
+- Teammates know where new service-owned migrations belong.
+- No schema or product behavior changes.
+
 ## Recommended Order
 
 1. STAB-P0-01

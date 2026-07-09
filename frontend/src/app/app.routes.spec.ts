@@ -3,6 +3,8 @@ import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 import { MarketplaceHomeComponent } from './features/marketplace/marketplace-home.component';
 import { PublicListingDetailComponent } from './features/marketplace/public-listing-detail.component';
+import { NotFoundComponent } from './features/not-found/not-found.component';
+import { BusinessAccountComponent } from './features/business/business-account.component';
 import { BusinessStoresComponent } from './features/stores/business-stores.component';
 
 describe('app routes', () => {
@@ -86,7 +88,19 @@ describe('app routes', () => {
       canActivate: [authGuard],
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/liked',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/seller-profile',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/messages',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/messages/:conversationId',
       canActivate: [authGuard],
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
@@ -124,11 +138,35 @@ describe('app routes', () => {
     }));
     expect(sellerRoute?.children).toContain(jasmine.objectContaining({
       path: 'profile',
-      redirectTo: '/account/profile',
+      redirectTo: '/seller/account',
     }));
     expect(sellerRoute?.children).toContain(jasmine.objectContaining({
       path: 'business/apply',
     }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'businesses/:businessId/store',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'store/items',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'store/items/new',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'store/items/:listingId/edit',
+    }));
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account',
+    }));
+  });
+
+  it('keeps seller account inside the business seller surface', async () => {
+    const sellerRoute = routes.find(route => route.path === 'seller');
+    const accountRoute = sellerRoute?.children?.find(route => route.path === 'account');
+
+    expect(accountRoute?.redirectTo).toBeUndefined();
+    expect(accountRoute?.loadComponent).toBeTruthy();
+    await expectAsync(Promise.resolve(accountRoute?.loadComponent?.())).toBeResolvedTo(BusinessAccountComponent);
   });
 
   it('keeps compatibility redirects for old console paths', () => {
@@ -168,7 +206,7 @@ describe('app routes', () => {
     }));
     expect(consoleRoute?.children).toContain(jasmine.objectContaining({
       path: 'profile',
-      redirectTo: '/account/profile',
+      redirectTo: '/seller/account',
     }));
   });
 
@@ -188,6 +226,14 @@ describe('app routes', () => {
     };
 
     visit(routes);
+  });
+
+  it('shows a branded not found page for unknown routes', async () => {
+    const wildcardRoute = routes.find(route => route.path === '**');
+
+    expect(wildcardRoute?.redirectTo).toBeUndefined();
+    expect(wildcardRoute?.loadComponent).toBeTruthy();
+    await expectAsync(Promise.resolve(wildcardRoute?.loadComponent?.())).toBeResolvedTo(NotFoundComponent);
   });
 
   it('does not expose V2 demo commerce routes in the active MVP route tree', () => {

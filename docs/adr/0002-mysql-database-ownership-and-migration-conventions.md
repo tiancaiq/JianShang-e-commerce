@@ -29,13 +29,13 @@ legacy migrations.
 |---|---|---|---|---|
 | Credentials, login sessions, password recovery, email verification, MFA | Keycloak | `keycloak` | MVP | Keycloak-managed MySQL schema |
 | Application user identity mapping, profile, account status, platform roles | `auth-service` | `identity` | MVP | MySQL |
-| Individual seller profile | Marketplace module in evolved `product-service` | `marketplace` | MVP | MySQL |
-| Business applications, businesses, memberships, invitations, stores, policies | Marketplace module in evolved `product-service` | `marketplace` | MVP | MySQL |
-| Categories, listings, listing attributes, media metadata, listing status history | Marketplace module in evolved `product-service` | `marketplace` | MVP | MySQL |
-| Media file bytes and derivatives | Marketplace module | None | MVP | S3-compatible object storage |
+| Individual seller profile | `auth-service` | `identity` | MVP | MySQL |
+| Business applications, businesses, memberships, invitations, stores, policies | `auth-service` | `identity` | MVP | MySQL |
+| Categories, listings, listing attributes, media metadata, listing status history | `product-service` | `catalog` | MVP | MySQL |
+| Media file bytes and derivatives | Owning service through `common-storage` adapters | None | MVP | S3-compatible object storage |
 | Listing search projection | Search projector | None | MVP | OpenSearch, rebuilt from marketplace data/events |
 | Basic business and listing moderation | Moderation module deployed with marketplace administration | `marketplace` | MVP | MySQL |
-| Conversations, participants, and messages | Future `trade-service` | `trade` | MVP | MySQL |
+| Conversations, participants, and messages | `chat-service` | `chat` | MVP | MySQL |
 | Individual trade completion and seller reputation | Future `trade-service` | `trade` | V3 | MySQL |
 | Cart | Commerce flow | None | V2 | Redis, revalidated before checkout |
 | Inventory items, movements, and reservations | `inventory-service` | `inventory` | V2 | MySQL |
@@ -335,13 +335,23 @@ DDL, indexes, constraints, locking, or SQL behavior.
 
 ## Legacy Repository Impact
 
-Current repository storage is mixed:
+At P1-05 acceptance time, repository storage was mixed:
 
-- `auth-service` uses PostgreSQL and a `V1__init_users.sql` migration.
-- `product-service` uses MongoDB.
-- Order, inventory, and payment modules already use MySQL and Flyway.
+- `auth-service` had a PostgreSQL-style `V1__init_users.sql` migration.
+- `product-service` still reflected tutorial-era product storage direction.
+- Order, inventory, and payment modules had MySQL/Flyway tutorial stubs.
 
-P1-05 does not migrate or delete any of these paths. Future feature slices:
+The current MVP backend uses service-owned MySQL schemas for active services:
+
+- `auth-service`: `identity`
+- `product-service`: `catalog`
+- `chat-service`: `chat`
+
+The old root auth-service migration remains archived in repository history,
+but active auth-service Flyway configuration points to
+`db/migration/identity`.
+
+P1-05 did not migrate or delete any legacy paths. Future feature slices:
 
 1. Add new MySQL schemas and forward migrations under their owning service.
 2. Introduce dual-read/backfill only through an approved migration plan.
@@ -349,7 +359,8 @@ P1-05 does not migrate or delete any of these paths. Future feature slices:
 4. Remove PostgreSQL or MongoDB dependencies only after data verification and
    rollback criteria are satisfied.
 
-No new MVP table may be added to the legacy PostgreSQL or MongoDB paths.
+No new MVP table may be added to archived tutorial paths or root-level
+migration folders outside the active service-owned Flyway locations.
 
 ## Consequences
 

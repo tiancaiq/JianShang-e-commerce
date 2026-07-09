@@ -9,7 +9,11 @@ public interface AuthServiceClient {
 
     IndividualSellerAuthorization requireActiveIndividualSeller(String bearerToken);
 
+    CurrentUser requireCurrentUser(String bearerToken);
+
     BusinessMembershipAuthorization requireBusinessListingPermission(String bearerToken, String businessId);
+
+    BusinessStoreContextAuthorization requireBusinessStoreContext(String bearerToken, String businessId);
 
     PlatformAdminAuthorization requirePlatformAdmin(String bearerToken);
 
@@ -27,12 +31,40 @@ public interface AuthServiceClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    record CurrentUser(
+            String id,
+            String status
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record BusinessMembershipAuthorization(
             String businessId,
             String userId,
             String role,
             String status,
             List<String> permissions
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BusinessStoreContextAuthorization(
+            String businessId,
+            String businessLegalName,
+            String businessStatus,
+            String membershipRole,
+            List<String> permissions,
+            BusinessStoreAuthorization store
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BusinessStoreAuthorization(
+            String id,
+            String businessId,
+            String slug,
+            String name,
+            String status
     ) {
     }
 

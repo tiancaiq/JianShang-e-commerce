@@ -40,10 +40,7 @@ Each deployable service owns one Java package root:
 | --- | --- |
 | `api-gateway` | `com.msb.ecom.api_gateway` |
 | `auth-service` | `com.msb.ecom.auth_service` |
-| `inventory-service` | `com.msb.ecom.inventory_service` |
-| `notification-service` | `com.msb.ecom.notification_service` |
-| `order-service` | `com.msb.ecom.order_service` |
-| `payment-service` | `com.msb.ecom.payment_service` |
+| `chat-service` | `com.msb.ecom.chat_service` |
 | `product-service` | `com.msb.ecom.product_service` |
 
 Java source in a service must stay under its package root.
@@ -55,6 +52,7 @@ Shared Java modules own these package roots:
 | Module | Package root |
 | --- | --- |
 | `common-core` | `com.msb.ecom.common.core` |
+| `common-storage` | `com.msb.ecom.common.storage` |
 | `common-web` | `com.msb.ecom.common.web` |
 | `common-testing` | `com.msb.ecom.common.testing` |
 
@@ -77,6 +75,18 @@ another service schema.
 
 This is a guardrail for the MVP rule: one service owns one schema, and no
 service queries another service database.
+
+Active MVP Flyway locations are also pinned by service:
+
+| Module | Flyway location |
+| --- | --- |
+| `auth-service` | `classpath:db/migration/identity` |
+| `product-service` | `classpath:db/migration/catalog` |
+| `chat-service` | `classpath:db/migration/chat` |
+
+New root-level SQL files under `src/main/resources/db/migration/` are rejected
+for active MVP services. The old auth-service `V1__init_users.sql` is treated
+as an archived pre-MVP migration and is not an active Flyway location.
 
 ### No Business Code In Common Modules
 
@@ -112,6 +122,7 @@ files and verifies the scanner catches:
 - JPA entity code in a common module
 - domain package names in a common module
 - datasource access to another service database
+- root-level Flyway SQL under an active service-owned migration folder
 
 No invalid example code is committed to the repository.
 

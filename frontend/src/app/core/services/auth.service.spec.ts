@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { HttpClient, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { firstValueFrom } from 'rxjs';
+import { CurrentUser } from '../models/auth.model';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -24,6 +25,7 @@ describe('AuthService', () => {
   });
 
   afterEach(() => {
+    service.stopSessionActivityMonitor();
     httpMock.verify();
   });
 
@@ -96,6 +98,39 @@ describe('AuthService', () => {
     expect(state.authenticated).toBeTrue();
     expect(state.user?.email).toBe('buyer@example.com');
     expect(service.isAuthenticated()).toBeTrue();
+  });
+
+  it('refreshes the gateway session on throttled browser activity for signed-in users', () => {
+    spyOn(Date, 'now').and.returnValues(1000, 2000);
+    service.setCurrentUser(currentUserFixture());
+
+    service.startSessionActivityMonitor();
+    window.dispatchEvent(new Event('pointerdown'));
+
+    const sessionRequest = httpMock.expectOne('/api/v1/auth/session');
+    expect(sessionRequest.request.method).toBe('GET');
+    expect(sessionRequest.request.withCredentials).toBeTrue();
+    sessionRequest.flush({
+      authenticated: true,
+      user: {
+        subject: 'keycloak-sub-1',
+        email: 'buyer@example.com',
+        displayName: 'Buyer One',
+        roles: ['buyer'],
+        expiresAt: '2026-06-16T12:00:00Z',
+      },
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token',
+      },
+    });
+    httpMock.expectOne('/api/v1/users/me').flush({ data: currentUserFixture() });
+
+    window.dispatchEvent(new Event('keydown'));
+
+    expect(service.isAuthenticated()).toBeTrue();
+    httpMock.expectNone('/api/v1/auth/session');
   });
 
   it('redirects login to the marketplace gateway login endpoint by default', () => {
@@ -479,3 +514,21 @@ describe('AuthService', () => {
     form?.remove();
   });
 });
+
+function currentUserFixture(overrides: Partial<CurrentUser> = {}): CurrentUser {
+  return {
+    id: '01JY0000000000000000000000',
+    keycloakSub: 'keycloak-sub-1',
+    email: 'buyer@example.com',
+    emailVerified: true,
+    displayName: 'Buyer One',
+    phone: null,
+    phoneVerified: false,
+    avatarUrl: null,
+    status: 'ACTIVE',
+    version: 0,
+    createdAt: '2026-06-16T12:00:00Z',
+    updatedAt: '2026-06-16T12:00:00Z',
+    ...overrides,
+  };
+}

@@ -28,14 +28,17 @@ import java.io.IOException;
 public class AvatarUploadProxyController {
 
     private final OAuth2AuthorizedClientService authorizedClientService;
+    private final OAuth2SessionTokenRefresher tokenRefresher;
     private final RestClient restClient;
     private final String authServiceUrl;
 
     public AvatarUploadProxyController(
             OAuth2AuthorizedClientService authorizedClientService,
+            OAuth2SessionTokenRefresher tokenRefresher,
             RestClient.Builder restClientBuilder,
             @Value("${service.auth.url}") String authServiceUrl) {
         this.authorizedClientService = authorizedClientService;
+        this.tokenRefresher = tokenRefresher;
         this.restClient = restClientBuilder.build();
         this.authServiceUrl = authServiceUrl;
     }
@@ -115,6 +118,7 @@ public class AvatarUploadProxyController {
         if (!(authentication instanceof OAuth2AuthenticationToken oauth2Authentication)) {
             return null;
         }
+        tokenRefresher.refreshIfNecessary(authentication);
         OAuth2AuthorizedClient authorizedClient = authorizedClientService.loadAuthorizedClient(
                 oauth2Authentication.getAuthorizedClientRegistrationId(),
                 oauth2Authentication.getName());

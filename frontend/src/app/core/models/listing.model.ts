@@ -78,6 +78,7 @@ export interface ListingDraft {
   sellerType: ListingSellerType;
   individualSellerUserId: string | null;
   businessId: string | null;
+  storeId?: string | null;
   sellerDisplayName?: string | null;
   categoryId: string;
   title: string;
@@ -207,7 +208,17 @@ export interface PublicListing {
   publicRegion: string | null;
   publishedAt: string;
   transactionNotice: string | null;
+  visitCount: number;
+  likeCount: number;
   images: PublicListingImage[];
+}
+
+export interface ListingEngagement {
+  listingId: string;
+  visitCount: number;
+  likeCount: number;
+  visitedByMe: boolean;
+  likedByMe: boolean;
 }
 
 export type PublicListingSort = 'none' | 'newest' | 'price_asc' | 'price_desc';

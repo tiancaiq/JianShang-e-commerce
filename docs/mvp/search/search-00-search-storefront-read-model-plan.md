@@ -17,7 +17,10 @@ payment, inventory, orders, or shipping.
 - Start with a MySQL-backed public read path owned by `product-service`.
 - Use the authoritative `listings`, `categories`, `listing_images`, and
   `listing_media_objects` tables as the source of truth.
-- Return only listings with `status=ACTIVE` and `moderation_status=APPROVED`.
+- Return only public-visible listings. Individual marketplace listings require
+  `status=ACTIVE` and `moderation_status=APPROVED`. Planned business store
+  item publishing (`BUS-LIST-00`) returns active business self-published store
+  items without item-level admin approval.
 - Reuse the same safe public projection for listing cards and listing detail.
 - Split public discovery into two MVP user experiences:
   - individual marketplace search for `INDIVIDUAL` listings
@@ -67,7 +70,7 @@ Storefront responses may expose:
 - public description
 - website URL, when approved for public display
 - public logo/banner URL when media support exists
-- approved active business listing cards for that store
+- active public business store item cards for that store
 
 Storefront responses must not expose:
 
@@ -154,6 +157,8 @@ Do not introduce OpenSearch until:
 
 - public browse works from MySQL
 - business storefronts work from MySQL
+- planned business store item publishing can expose active business
+  self-published items without item-level admin approval
 - filter and sort contracts are stable
 - active listing changes have clear events or rebuild logic
 - detail endpoints continue to revalidate public visibility from source data

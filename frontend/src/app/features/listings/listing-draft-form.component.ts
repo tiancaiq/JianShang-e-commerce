@@ -1,7 +1,9 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { BusinessStoreContext } from '../../core/models/business-store.model';
 import { Category, ListingCondition, ListingDraft, ListingImage, ListingSellerType } from '../../core/models/listing.model';
+import { BusinessStoreService } from '../../core/services/business-store.service';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 import {
@@ -32,14 +34,14 @@ interface PendingListingMedia {
     <section class="listing-page">
       <header class="page-header">
         <div>
-          <h1>{{ isEditMode() ? 'Edit Listing Draft' : 'New Listing Draft' }}</h1>
-          <p>{{ isEditMode() ? 'Update your marketplace draft before review.' : 'Build a marketplace draft, add photos, and submit it for review.' }}</p>
+          <h1>{{ pageTitle() }}</h1>
+          <p>{{ pageDescription() }}</p>
         </div>
       </header>
 
       <form class="draft-form" (ngSubmit)="saveDraft()">
         <div class="form-grid">
-          @if (!marketplaceAccountMode()) {
+          @if (!marketplaceAccountMode() && !businessStoreMode()) {
             <label class="field">
               <span>Seller type</span>
               <select name="sellerType" [(ngModel)]="sellerType" [disabled]="!canEditDraft() || saving() || isEditMode()">
@@ -49,7 +51,7 @@ interface PendingListingMedia {
             </label>
           }
 
-          @if (sellerType === 'BUSINESS') {
+          @if (sellerType === 'BUSINESS' && !businessStoreMode()) {
             <label class="field">
               <span>Business ID</span>
               <input name="businessId" [(ngModel)]="businessId" maxlength="26" [disabled]="!canEditDraft() || saving() || isEditMode()" />
@@ -142,6 +144,10 @@ interface PendingListingMedia {
           </div>
         }
 
+        @if (businessStoreMode() && storeContext()) {
+          <div class="success-message">Store: {{ storeContext()?.store?.name }}</div>
+        }
+
         <section class="media-panel" aria-label="Listing media">
           <label class="field">
             <span>Listing images</span>
@@ -207,18 +213,18 @@ interface PendingListingMedia {
 
         <div class="actions">
           <button type="button" class="secondary-btn" (click)="router.navigate([listingBasePath()])" [disabled]="saving() || submitting()">Cancel</button>
-          @if (isEditMode() && canCloseListing()) {
+          @if (!businessStoreMode() && isEditMode() && canCloseListing()) {
             <button type="button" class="danger-btn" (click)="closeListing()" [disabled]="saving() || submitting() || uploadingMedia()">
               Close listing
             </button>
           }
-          @if (isEditMode() && canEditDraft()) {
+          @if (!businessStoreMode() && isEditMode() && canEditDraft()) {
             <button type="button" class="secondary-btn" (click)="submitForReview()" [disabled]="!canSubmitForReview() || saving() || submitting()">
               {{ submitting() ? 'Submitting' : 'Submit for review' }}
             </button>
           }
           @if (canEditDraft()) {
-            <button type="submit" class="primary-btn" [disabled]="saving() || submitting() || loadingCategories()">
+            <button type="submit" class="primary-btn" [disabled]="saving() || submitting() || loadingCategories() || loadingStoreContext()">
               {{ saving() ? 'Saving' : (isEditMode() ? 'Update draft' : 'Save draft') }}
             </button>
           }
@@ -482,6 +488,7 @@ interface PendingListingMedia {
 })
 export class ListingDraftFormComponent implements OnInit {
   private listingService = inject(ListingService);
+  private businessStoreService = inject(BusinessStoreService);
   private mediaUploadService = inject(ListingMediaUploadService);
   private toastService = inject(ToastService);
   private route = inject(ActivatedRoute);
@@ -489,6 +496,7 @@ export class ListingDraftFormComponent implements OnInit {
 
   categories = signal<Category[]>([]);
   loadingCategories = signal(false);
+  loadingStoreContext = signal(false);
   loadingDraft = signal(false);
   saving = signal(false);
   submitting = signal(false);
@@ -501,6 +509,7 @@ export class ListingDraftFormComponent implements OnInit {
   mediaMessage = signal('');
   mediaItems = signal<ListingImage[]>([]);
   pendingMediaItems = signal<PendingListingMedia[]>([]);
+  storeContext = signal<BusinessStoreContext | null>(null);
   formSubmitted = signal(false);
   readonly maxImageCount = MAX_LISTING_IMAGE_COUNT;
   private editListingId = '';
@@ -529,8 +538,15 @@ export class ListingDraftFormComponent implements OnInit {
       this.sellerType = 'INDIVIDUAL';
       this.businessId = '';
     }
+    if (this.businessStoreMode()) {
+      this.sellerType = 'BUSINESS';
+      this.negotiable = false;
+      this.publicCity = '';
+      this.publicRegion = '';
+      this.loadStoreContext();
+    }
     this.loadCategories();
-    if (this.editListingId) {
+    if (this.editListingId && !this.businessStoreMode()) {
       this.loadDraft(this.editListingId);
     }
   }
@@ -569,10 +585,15 @@ export class ListingDraftFormComponent implements OnInit {
     this.mediaMessage.set('');
 
     const request = buildListingDraftRequest(this.formState());
+    const context = this.storeContext();
 
-    const save = this.isEditMode()
-      ? this.listingService.updateDraft(this.editListingId, this.currentVersion, request)
-      : this.listingService.createDraft(request);
+    const save = this.businessStoreMode()
+      ? this.isEditMode()
+        ? this.listingService.updateBusinessStoreItem(context?.businessId || '', this.editListingId, this.currentVersion, request)
+        : this.listingService.createBusinessStoreItem(context?.businessId || '', request)
+      : this.isEditMode()
+        ? this.listingService.updateDraft(this.editListingId, this.currentVersion, request)
+        : this.listingService.createDraft(request);
 
     save.subscribe({
       next: listing => {
@@ -677,7 +698,12 @@ export class ListingDraftFormComponent implements OnInit {
 
     this.uploadingMedia.set(true);
     this.mediaError.set('');
-    this.listingService.updateListingImages(this.savedId(), { images: nextImages }).subscribe({
+    const businessId = this.businessMediaBusinessId();
+    const updateImages = businessId
+      ? this.listingService.updateBusinessStoreItemImages(businessId, this.savedId(), { images: nextImages })
+      : this.listingService.updateListingImages(this.savedId(), { images: nextImages });
+
+    updateImages.subscribe({
       next: images => {
         this.mediaItems.set(images);
         this.mediaMessage.set('Image removed.');
@@ -696,10 +722,16 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   canCloseListing(): boolean {
+    if (this.businessStoreMode()) {
+      return false;
+    }
     return isClosableListingStatus(this.listingStatus());
   }
 
   canSubmitForReview(): boolean {
+    if (this.businessStoreMode()) {
+      return false;
+    }
     return canSubmitListingForReview({
       editMode: this.isEditMode(),
       status: this.listingStatus(),
@@ -811,7 +843,12 @@ export class ListingDraftFormComponent implements OnInit {
     this.mediaError.set('');
     this.mediaMessage.set('');
 
-    this.mediaUploadService.uploadAndAttachMany(listingId, pendingItems.map(item => item.file), this.mediaItems()).subscribe({
+    this.mediaUploadService.uploadAndAttachMany(
+      listingId,
+      pendingItems.map(item => item.file),
+      this.mediaItems(),
+      this.businessMediaBusinessId(),
+    ).subscribe({
       next: attachedImages => this.finishMediaUpload(listingId, attachedImages, draftJustCreated),
       error: error => {
         this.saving.set(false);
@@ -867,8 +904,33 @@ export class ListingDraftFormComponent implements OnInit {
     return this.router.url.startsWith('/account/listings') || this.router.url.startsWith('/listings');
   }
 
+  businessStoreMode(): boolean {
+    return this.router.url.startsWith('/seller/store/items');
+  }
+
+  pageTitle(): string {
+    if (this.businessStoreMode()) {
+      return this.isEditMode() ? 'Edit Store Item' : 'New Store Item';
+    }
+    return this.isEditMode() ? 'Edit Listing Draft' : 'New Listing Draft';
+  }
+
+  pageDescription(): string {
+    if (this.businessStoreMode()) {
+      return this.isEditMode()
+        ? 'Update this store item draft before it is made public later.'
+        : 'Create a store item draft for your approved business catalog.';
+    }
+    return this.isEditMode()
+      ? 'Update your marketplace draft before review.'
+      : 'Build a marketplace draft, add photos, and submit it for review.';
+  }
+
   // Keeps individual listing draft navigation inside the marketplace account surface.
   listingBasePath(): string {
+    if (this.businessStoreMode()) {
+      return '/seller/store/items';
+    }
     return '/account/listings';
   }
 
@@ -882,6 +944,18 @@ export class ListingDraftFormComponent implements OnInit {
       this.sellerType = 'INDIVIDUAL';
       this.businessId = '';
       this.sku = '';
+    }
+    if (this.businessStoreMode()) {
+      const context = this.storeContext();
+      if (!context) {
+        this.errorMsg.set('An approved business store is required before creating item drafts.');
+        return false;
+      }
+      this.sellerType = 'BUSINESS';
+      this.businessId = context.businessId;
+      this.negotiable = false;
+      this.publicCity = '';
+      this.publicRegion = '';
     }
     const result = validateListingDraftForm(this.formState());
     if (!result.valid) {
@@ -906,6 +980,43 @@ export class ListingDraftFormComponent implements OnInit {
     });
   }
 
+  private loadStoreContext(): void {
+    this.loadingStoreContext.set(true);
+    this.businessStoreService.getCurrentStoreContext().subscribe({
+      next: context => {
+        this.loadingStoreContext.set(false);
+        this.storeContext.set(context);
+        if (!context) {
+          this.errorMsg.set('An approved business store is required before creating item drafts.');
+          return;
+        }
+        this.sellerType = 'BUSINESS';
+        this.businessId = context.businessId;
+        if (this.editListingId) {
+          this.loadBusinessStoreItem(context.businessId, this.editListingId);
+        }
+      },
+      error: () => {
+        this.loadingStoreContext.set(false);
+        this.errorMsg.set('Business store context could not be loaded.');
+      },
+    });
+  }
+
+  private loadBusinessStoreItem(businessId: string, listingId: string): void {
+    this.loadingDraft.set(true);
+    this.listingService.getBusinessStoreItem(businessId, listingId).subscribe({
+      next: listing => {
+        this.populateFromDraft(listing);
+        this.loadingDraft.set(false);
+      },
+      error: error => {
+        this.loadingDraft.set(false);
+        this.errorMsg.set(error.error?.error?.message || 'Store item draft could not be loaded.');
+      },
+    });
+  }
+
   private populateFromDraft(listing: ListingDraft): void {
     const state = listingDraftToFormState(listing);
     this.savedId.set(listing.id);
@@ -919,9 +1030,10 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   private formState(): ListingDraftFormState {
+    const context = this.storeContext();
     return {
-      sellerType: this.marketplaceAccountMode() ? 'INDIVIDUAL' : this.sellerType,
-      businessId: this.marketplaceAccountMode() ? '' : this.businessId,
+      sellerType: this.marketplaceAccountMode() ? 'INDIVIDUAL' : (this.businessStoreMode() ? 'BUSINESS' : this.sellerType),
+      businessId: this.marketplaceAccountMode() ? '' : (this.businessStoreMode() ? (context?.businessId || this.businessId) : this.businessId),
       categoryId: this.categoryId,
       title: this.title,
       description: this.description,
@@ -929,17 +1041,17 @@ export class ListingDraftFormComponent implements OnInit {
       conditionNotes: this.conditionNotes,
       price: this.price,
       currency: this.currency,
-      publicCity: this.publicCity,
-      publicRegion: this.publicRegion,
-      negotiable: this.negotiable,
+      publicCity: this.businessStoreMode() ? '' : this.publicCity,
+      publicRegion: this.businessStoreMode() ? '' : this.publicRegion,
+      negotiable: this.businessStoreMode() ? false : this.negotiable,
       sku: this.sku,
       quantity: this.quantity,
     };
   }
 
   private applyFormState(state: ListingDraftFormState): void {
-    this.sellerType = this.marketplaceAccountMode() ? 'INDIVIDUAL' : state.sellerType;
-    this.businessId = this.marketplaceAccountMode() ? '' : state.businessId;
+    this.sellerType = this.marketplaceAccountMode() ? 'INDIVIDUAL' : (this.businessStoreMode() ? 'BUSINESS' : state.sellerType);
+    this.businessId = this.marketplaceAccountMode() ? '' : (this.businessStoreMode() ? (this.storeContext()?.businessId || state.businessId) : state.businessId);
     this.categoryId = state.categoryId;
     this.title = state.title;
     this.description = state.description;
@@ -947,15 +1059,19 @@ export class ListingDraftFormComponent implements OnInit {
     this.conditionNotes = state.conditionNotes;
     this.price = state.price;
     this.currency = state.currency;
-    this.publicCity = state.publicCity;
-    this.publicRegion = state.publicRegion;
-    this.negotiable = state.negotiable;
+    this.publicCity = this.businessStoreMode() ? '' : state.publicCity;
+    this.publicRegion = this.businessStoreMode() ? '' : state.publicRegion;
+    this.negotiable = this.businessStoreMode() ? false : state.negotiable;
     this.sku = state.sku;
     this.quantity = state.quantity || 1;
   }
 
   private refreshDraftAfterMediaChange(listingId: string): void {
-    this.listingService.getListing(listingId).subscribe({
+    const businessId = this.businessMediaBusinessId();
+    const refresh = businessId
+      ? this.listingService.getBusinessStoreItem(businessId, listingId)
+      : this.listingService.getListing(listingId);
+    refresh.subscribe({
       next: listing => {
         this.currentVersion = listing.version;
         this.listingStatus.set(listing.status);
@@ -978,6 +1094,13 @@ export class ListingDraftFormComponent implements OnInit {
 
   private formRequestSnapshot(): string {
     return listingDraftRequestSnapshot(this.formState());
+  }
+
+  private businessMediaBusinessId(): string | undefined {
+    if (!this.businessStoreMode()) {
+      return undefined;
+    }
+    return this.storeContext()?.businessId || this.businessId || undefined;
   }
 
   private mediaUploadErrorMessage(error: unknown): string {

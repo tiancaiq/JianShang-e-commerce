@@ -124,6 +124,29 @@ services:
       - auth-service
     restart: unless-stopped
 
+  chat-service:
+    build:
+      context: ./chat-service
+      dockerfile: Dockerfile
+    container_name: msb-demo-chat-service
+    ports:
+      - "127.0.0.1:${CHAT_SERVICE_PORT:-8092}:8092"
+    environment:
+      CHAT_DB_HOST: mysql
+      CHAT_DB_PORT: 3306
+      CHAT_DB_NAME: ${CHAT_DB_NAME:-chat}
+      CHAT_DB_USERNAME: ${CHAT_DB_USERNAME:-root}
+      CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      AUTH_SERVICE_URL: http://auth-service:8085
+      PRODUCT_SERVICE_URL: http://product-service:8091
+    depends_on:
+      - mysql
+      - keycloak
+      - auth-service
+      - product-service
+    restart: unless-stopped
+
   api-gateway:
     build:
       context: ./api-gateway
@@ -134,6 +157,7 @@ services:
     environment:
       SERVER_FORWARD_HEADERS_STRATEGY: framework
       PRODUCT_SERVICE_URL: http://product-service:8091
+      CHAT_SERVICE_URL: http://chat-service:8092
       AUTH_SERVICE_URL: http://auth-service:8085
       ORDER_SERVICE_URL: http://order-service-disabled:8081
       INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
@@ -156,6 +180,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-demo-change-me-at-least-32-bytes-long}
     depends_on:
       - product-service
+      - chat-service
       - auth-service
       - keycloak
     restart: unless-stopped

@@ -20,6 +20,7 @@ import com.msb.ecom.product_service.repository.ListingDraftInsert;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.repository.ListingDraftRepository.ListingOwnerSnapshot;
 import com.msb.ecom.product_service.repository.ListingDraftUpdate;
+import com.msb.ecom.product_service.repository.ListingEngagementRepository;
 import com.msb.ecom.product_service.repository.ListingImageInsert;
 import com.msb.ecom.product_service.repository.ListingMediaInsert;
 import com.msb.ecom.product_service.repository.ListingMediaRepository;
@@ -41,7 +42,10 @@ import com.msb.ecom.product_service.dto.AdminListingModerationCaseResponse;
 import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
 import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
 import com.msb.ecom.product_service.dto.CategoryResponse;
+import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
+import com.msb.ecom.product_service.dto.ChatTradeCompletionRequest;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
+import com.msb.ecom.product_service.dto.ListingEngagementResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
 import com.msb.ecom.product_service.dto.ListingImageRequest;
 import com.msb.ecom.product_service.dto.ListingImageResponse;
@@ -50,6 +54,7 @@ import com.msb.ecom.product_service.dto.ListingMediaResponse;
 import com.msb.ecom.product_service.dto.ListingMediaUploadRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionRequest;
 import com.msb.ecom.product_service.dto.ListingModerationDecisionResponse;
+import com.msb.ecom.product_service.dto.PublicListingImageResponse;
 import com.msb.ecom.product_service.dto.PublicListingSearchPageResponse;
 import com.msb.ecom.product_service.dto.PublicListingSearchRequest;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
@@ -95,6 +100,7 @@ public class ListingService {
 
     private final CategoryRepository categoryRepository;
     private final ListingDraftRepository listingDraftRepository;
+    private final ListingEngagementRepository listingEngagementRepository;
     private final ListingMediaRepository listingMediaRepository;
     private final ListingModerationDecisionRepository listingModerationDecisionRepository;
     private final ModerationCaseRepository moderationCaseRepository;
@@ -148,6 +154,35 @@ public class ListingService {
         return withSellerLabels(withImages(listingDraftRepository.findByBusinessId(membership.businessId())));
     }
 
+    @Transactional
+    // Creates a business store item draft from the current approved store context; no public publishing occurs here.
+    public ListingDraftResponse createBusinessStoreItemDraft(String businessId, CreateListingDraftRequest request) {
+        return createDraft(businessStoreItemRequest(normalizedRequiredId("Business ID", businessId), request));
+    }
+
+    @Transactional(readOnly = true)
+    public ListingDraftResponse getBusinessStoreItem(String businessId, String listingId) {
+        String normalizedBusinessId = normalizedRequiredId("Business ID", businessId);
+        ListingDraftResponse listing = getOwnedListing(listingId);
+        if (!"BUSINESS".equals(listing.sellerType()) || !normalizedBusinessId.equals(listing.businessId())) {
+            throw new ListingAuthorizationException("Listing belongs to another business.");
+        }
+        return listing;
+    }
+
+    @Transactional
+    public ListingDraftResponse updateBusinessStoreItemDraft(
+            String businessId,
+            String listingId,
+            long expectedVersion,
+            CreateListingDraftRequest request) {
+        ListingDraftResponse listing = getBusinessStoreItem(businessId, listingId);
+        return updateDraft(
+                listing.id(),
+                expectedVersion,
+                businessStoreItemRequest(normalizedRequiredId("Business ID", businessId), request));
+    }
+
     @Transactional(readOnly = true)
     // Public detail exposes only approved active listing data and safe image metadata.
     public PublicListingResponse getPublicListing(String listingId) {
@@ -157,9 +192,79 @@ public class ListingService {
     }
 
     @Transactional(readOnly = true)
+    // Chat creation needs owner IDs, but only for active approved individual listings.
+    public ChatListingEligibilityResponse chatListingEligibility(String listingId) {
+        ChatListingEligibilityResponse eligibility = listingDraftRepository
+                .findChatListingEligibility(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new);
+        if (!"INDIVIDUAL".equals(eligibility.sellerType()) || eligibility.sellerUserId() == null) {
+            throw new IllegalArgumentException("Only individual listings can start MVP chat.");
+        }
+        List<PublicListingImageResponse> images = listingMediaRepository.findPublicImagesByListingId(eligibility.listingId());
+        String thumbnailUrl = images.isEmpty() ? null : images.get(0).url();
+        return new ChatListingEligibilityResponse(
+                eligibility.listingId(),
+                true,
+                eligibility.sellerType(),
+                eligibility.sellerUserId(),
+                eligibility.quantity(),
+                eligibility.title(),
+                eligibility.publicCity(),
+                eligibility.publicRegion(),
+                thumbnailUrl,
+                transactionNotice(eligibility.sellerType()));
+    }
+
+    @Transactional
+    // Chat-service closes an individual listing only after buyer confirmation in the fixed listing conversation.
+    public ListingDraftResponse completeChatTrade(String listingId, ChatTradeCompletionRequest request) {
+        String normalizedListingId = normalizedRequiredId("Listing ID", listingId);
+        String sellerUserId = normalizedRequiredId("Seller user ID", request == null ? null : request.sellerUserId());
+        normalizedRequiredId("Buyer user ID", request == null ? null : request.buyerUserId());
+        normalizedRequiredId("Conversation ID", request == null ? null : request.conversationId());
+
+        ListingDraftResponse listing = listingDraftRepository.findOptionalById(normalizedListingId)
+                .orElseThrow(ListingNotFoundException::new);
+        if (!"INDIVIDUAL".equals(listing.sellerType()) || !sellerUserId.equals(listing.individualSellerUserId())) {
+            throw new ListingAuthorizationException("Listing belongs to another seller.");
+        }
+        int quantitySold = request.quantitySold() == null ? 1 : request.quantitySold();
+        if (quantitySold < 1 || quantitySold > listing.quantity()) {
+            throw new IllegalArgumentException("Quantity sold must be between 1 and listing quantity.");
+        }
+        if ("CLOSED".equals(listing.status())) {
+            return withSellerLabels(withImages(listing));
+        }
+        if (!"ACTIVE".equals(listing.status()) || !"APPROVED".equals(listing.moderationStatus())) {
+            throw new IllegalArgumentException("Only active approved individual listings can be completed from chat.");
+        }
+
+        int updated = listingDraftRepository.closeActiveIndividualListingFromChat(normalizedListingId, sellerUserId, Instant.now());
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        removeListingFromSearchIndex(normalizedListingId);
+        log.info("Closed listing from chat completion listingId={} sellerUserId={} conversationId={} quantitySold={}",
+                normalizedListingId, sellerUserId, request.conversationId(), quantitySold);
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(normalizedListingId)
+                .orElseThrow(ListingNotFoundException::new)));
+    }
+
+    @Transactional(readOnly = true)
     // Public browse is intentionally fixed-size until SEARCH-03 adds cursor pagination.
     public List<PublicListingResponse> getPublicListings() {
         List<PublicListingResponse> listings = listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT).stream()
+                .map(this::publicListingWithImagesAndNotice)
+                .toList();
+        return withPublicSellerLabels(listings);
+    }
+
+    @Transactional(readOnly = true)
+    // Returns the current account's active likes using the same safe public listing projection as browse.
+    public List<PublicListingResponse> getMyLikedListings() {
+        List<PublicListingResponse> listings = listingDraftRepository
+                .findPublicLikedListingsForUser(currentUserId(), PUBLIC_BROWSE_LIMIT)
+                .stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
         return withPublicSellerLabels(listings);
@@ -255,7 +360,43 @@ public class ListingService {
                 listing.publicRegion(),
                 listing.publishedAt(),
                 transactionNotice(listing.sellerType()),
+                listing.visitCount(),
+                listing.likeCount(),
                 listingMediaRepository.findPublicImagesByListingId(listing.id()));
+    }
+
+    @Transactional
+    // Records at most one public visit per authenticated account without changing the listing aggregate version.
+    public ListingEngagementResponse recordListingVisit(String listingId) {
+        PublicListingResponse listing = publicListingForEngagement(listingId);
+        String userId = currentUserId();
+        Instant now = Instant.now();
+        listingEngagementRepository.recordVisit(listing.id(), userId, now);
+        return listingEngagementRepository.findEngagement(listing.id(), userId);
+    }
+
+    @Transactional
+    // Likes are account-scoped and idempotent; every authenticated account can like a public listing once.
+    public ListingEngagementResponse likeListing(String listingId) {
+        PublicListingResponse listing = publicListingForEngagement(listingId);
+        String userId = currentUserId();
+        Instant now = Instant.now();
+        listingEngagementRepository.activateLike(listing.id(), userId, now);
+        return listingEngagementRepository.findEngagement(listing.id(), userId);
+    }
+
+    @Transactional
+    public ListingEngagementResponse unlikeListing(String listingId) {
+        PublicListingResponse listing = publicListingForEngagement(listingId);
+        String userId = currentUserId();
+        listingEngagementRepository.deactivateLike(listing.id(), userId, Instant.now());
+        return listingEngagementRepository.findEngagement(listing.id(), userId);
+    }
+
+    @Transactional(readOnly = true)
+    public ListingEngagementResponse getMyListingEngagement(String listingId) {
+        PublicListingResponse listing = publicListingForEngagement(listingId);
+        return listingEngagementRepository.findEngagement(listing.id(), currentUserId());
     }
 
     @Transactional
@@ -682,6 +823,18 @@ public class ListingService {
     }
 
     @Transactional
+    // Business store media uses the same storage rules after proving the item belongs to the current active store.
+    public ListingMediaResponse requestBusinessStoreItemMediaUpload(
+            String businessId,
+            String listingId,
+            ListingMediaUploadRequest request) {
+        ListingDraftResponse listing = requireBusinessStoreItemMediaAccess(businessId, listingId);
+        return withBusinessStoreAppUploadTarget(
+                requestMediaUpload(listing.id(), request),
+                listing.businessId());
+    }
+
+    @Transactional
     // Stores seller-uploaded bytes through the service to avoid browser-to-storage CORS and credential exposure.
     public void uploadMediaContent(String listingId, String mediaId, String contentType, byte[] bytes) {
         draftListingForMedia(listingId);
@@ -701,6 +854,17 @@ public class ListingService {
         listingMediaStorage.uploadObject(media.objectKey(), media.contentType(), bytes);
         log.info("Stored listing media bytes listingId={} mediaId={} sizeBytes={}",
                 media.listingId(), media.id(), bytes.length);
+    }
+
+    @Transactional
+    public void uploadBusinessStoreItemMediaContent(
+            String businessId,
+            String listingId,
+            String mediaId,
+            String contentType,
+            byte[] bytes) {
+        ListingDraftResponse listing = requireBusinessStoreItemMediaAccess(businessId, listingId);
+        uploadMediaContent(listing.id(), mediaId, contentType, bytes);
     }
 
     @Transactional
@@ -735,6 +899,16 @@ public class ListingService {
 
         log.info("Confirmed listing media upload listingId={} mediaId={}", listingId, mediaId);
         return response;
+    }
+
+    @Transactional
+    public ListingMediaResponse confirmBusinessStoreItemMediaUpload(
+            String businessId,
+            String listingId,
+            String mediaId,
+            ListingMediaConfirmRequest request) {
+        ListingDraftResponse listing = requireBusinessStoreItemMediaAccess(businessId, listingId);
+        return confirmMediaUpload(listing.id(), mediaId, request);
     }
 
     @Transactional(readOnly = true)
@@ -826,6 +1000,15 @@ public class ListingService {
         return images;
     }
 
+    @Transactional
+    public List<ListingImageResponse> updateBusinessStoreItemImages(
+            String businessId,
+            String listingId,
+            UpdateListingImagesRequest request) {
+        ListingDraftResponse listing = requireBusinessStoreItemMediaAccess(businessId, listingId);
+        return updateListingImages(listing.id(), request);
+    }
+
     // Projection failures are logged but do not roll back the authoritative listing transaction.
     private void upsertListingSearchProjection(String listingId) {
         if (!listingSearchProperties.openSearchEnabled()) {
@@ -869,6 +1052,7 @@ public class ListingService {
                 ListingSellerType.INDIVIDUAL,
                 seller.userId(),
                 null,
+                null,
                 request.categoryId(),
                 normalizedText("Title", request.title(), 160),
                 normalizedText("Description", request.description(), 5000),
@@ -897,6 +1081,7 @@ public class ListingService {
                 listing.sellerType(),
                 listing.individualSellerUserId(),
                 listing.businessId(),
+                listing.storeId(),
                 listing.sellerDisplayName(),
                 listing.categoryId(),
                 listing.title(),
@@ -1064,14 +1249,15 @@ public class ListingService {
         }
 
         CurrentActor actor = currentActorProvider.currentActor();
-        BusinessMembershipAuthorization membership =
-                authServiceClient.requireBusinessListingPermission(actor.accessToken(), businessId);
+        AuthServiceClient.BusinessStoreContextAuthorization context =
+                authServiceClient.requireBusinessStoreContext(actor.accessToken(), businessId);
 
         return listingDraftRepository.insertDraft(new ListingDraftInsert(
                 ulidGenerator.next(),
                 ListingSellerType.BUSINESS,
                 null,
-                membership.businessId(),
+                context.businessId(),
+                context.store().id(),
                 request.categoryId(),
                 normalizedText("Title", request.title(), 160),
                 normalizedText("Description", request.description(), 5000),
@@ -1218,6 +1404,29 @@ public class ListingService {
 
     private ListingOwnerSnapshot draftListingForMedia(String listingId) {
         ListingOwnerSnapshot listing = ownedListing(listingId);
+        if (!canSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, active, or closed.");
+        }
+        return listing;
+    }
+
+    private ListingDraftResponse requireBusinessStoreItemMediaAccess(String businessId, String listingId) {
+        String normalizedBusinessId = normalizedRequiredId("Business ID", businessId);
+        String normalizedListingId = normalizedRequiredId("Listing ID", listingId);
+        CurrentActor actor = currentActorProvider.currentActor();
+        AuthServiceClient.BusinessStoreContextAuthorization context =
+                authServiceClient.requireBusinessStoreContext(actor.accessToken(), normalizedBusinessId);
+        ListingDraftResponse listing = listingDraftRepository.findOptionalById(normalizedListingId)
+                .orElseThrow(ListingNotFoundException::new);
+        if (!"BUSINESS".equals(listing.sellerType())
+                || !context.businessId().equals(listing.businessId())
+                || listing.storeId() == null
+                || context.store() == null
+                || !context.store().id().equals(listing.storeId())) {
+            log.warn("Denied business store item media access listingId={} requestedBusinessId={} listingBusinessId={}",
+                    normalizedListingId, normalizedBusinessId, listing.businessId());
+            throw new ListingAuthorizationException("Listing belongs to another business store.");
+        }
         if (!canSellerEdit(listing.status())) {
             throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, active, or closed.");
         }
@@ -1376,6 +1585,32 @@ public class ListingService {
         return null;
     }
 
+    private CreateListingDraftRequest businessStoreItemRequest(String businessId, CreateListingDraftRequest request) {
+        return new CreateListingDraftRequest(
+                ListingSellerType.BUSINESS,
+                businessId,
+                request.categoryId(),
+                request.title(),
+                request.description(),
+                request.condition(),
+                request.conditionNotes(),
+                request.price(),
+                false,
+                null,
+                request.sku(),
+                request.quantity());
+    }
+
+    private PublicListingResponse publicListingForEngagement(String listingId) {
+        return listingDraftRepository.findPublicListingById(normalizedRequiredId("Listing ID", listingId))
+                .orElseThrow(ListingNotFoundException::new);
+    }
+
+    private String currentUserId() {
+        CurrentActor actor = currentActorProvider.currentActor();
+        return authServiceClient.requireCurrentUser(actor.accessToken()).id();
+    }
+
     private String requireListingOwner(ListingOwnerSnapshot listing) {
         CurrentActor actor = currentActorProvider.currentActor();
         if (listing.sellerType() == ListingSellerType.INDIVIDUAL) {
@@ -1462,6 +1697,15 @@ public class ListingService {
                 uploadTarget.objectKey(),
                 "PUT",
                 "/api/v1/listings/" + response.listingId() + "/media/" + response.id() + "/content"));
+    }
+
+    private ListingMediaResponse withBusinessStoreAppUploadTarget(ListingMediaResponse response, String businessId) {
+        return withUploadTarget(response, new StorageUploadTarget(
+                response.objectBucket(),
+                response.objectKey(),
+                "PUT",
+                "/api/v1/businesses/" + businessId + "/store/items/" + response.listingId()
+                        + "/media/" + response.id() + "/content"));
     }
 
     private String normalizedChecksum(String value) {

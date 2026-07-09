@@ -14,6 +14,8 @@ describe('MarketplaceHomeComponent public browse regression', () => {
 
   const listing = publicListing({
     conditionNotes: null,
+    visitCount: 7,
+    likeCount: 3,
     images: [
       publicListingImage(),
       publicListingImage({
@@ -93,6 +95,8 @@ describe('MarketplaceHomeComponent public browse regression', () => {
     expect(fixture.nativeElement.textContent).toContain('Used bicycle');
     expect(fixture.nativeElement.textContent).toContain('250.00 USD');
     expect(fixture.nativeElement.textContent).toContain('Irvine, CA');
+    expect(fixture.nativeElement.textContent).toContain('♡ 3');
+    expect(fixture.nativeElement.textContent).toContain('👁 7');
     expect(fixture.nativeElement.querySelector('.listing-image img')?.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000001');
   });
 
@@ -127,13 +131,17 @@ describe('MarketplaceHomeComponent public browse regression', () => {
     expect(fixture.nativeElement.textContent).not.toContain('All sellers');
   });
 
-  it('routes the listing call to action through the marketplace account seller entry', () => {
+  it('surfaces marketplace hero calls to action while preserving the browse-tab listing entry', () => {
     fixture.detectChanges();
 
-    const sellLink = fixture.nativeElement.querySelector('.secondary-link') as HTMLAnchorElement;
+    const host = fixture.nativeElement as HTMLElement;
+    const hero = host.querySelector('app-marketplace-hero-banner');
+    const listItemLink = Array.from(host.querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'List an Item') as HTMLAnchorElement | undefined;
 
-    expect(sellLink.textContent?.trim()).toBe('My Listings');
-    expect(sellLink.getAttribute('href')).toBe('/account/listings');
+    expect(hero?.textContent).toContain('Browse Listings');
+    expect(hero?.textContent).toContain('Sell an Item');
+    expect(listItemLink?.getAttribute('href')).toBe('/account/listings');
   });
 
   it('shows an empty state when no public listings exist', () => {
@@ -141,7 +149,7 @@ describe('MarketplaceHomeComponent public browse regression', () => {
 
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No approved individual listings yet.');
+    expect(fixture.nativeElement.textContent).toContain('No approved individual listings yet');
   });
 
   it('shows a load error state', () => {

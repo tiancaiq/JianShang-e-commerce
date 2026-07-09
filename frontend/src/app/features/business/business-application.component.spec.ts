@@ -1,6 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { BusinessApplication } from '../../core/models/business-application.model';
 import { BusinessApplicationService } from '../../core/services/business-application.service';
@@ -12,7 +12,7 @@ describe('BusinessApplicationComponent', () => {
   let component: BusinessApplicationComponent;
   let businessApplicationService: jasmine.SpyObj<BusinessApplicationService>;
   let toastService: jasmine.SpyObj<ToastService>;
-  let router: jasmine.SpyObj<Router>;
+  let router: Router;
 
   const application: BusinessApplication = {
     id: '01JY0000000000000000000002',
@@ -38,10 +38,13 @@ describe('BusinessApplicationComponent', () => {
   };
 
   beforeEach(async () => {
-    businessApplicationService = jasmine.createSpyObj<BusinessApplicationService>('BusinessApplicationService', ['createDraft', 'submit']);
+    businessApplicationService = jasmine.createSpyObj<BusinessApplicationService>(
+      'BusinessApplicationService',
+      ['getCurrentApplication', 'createDraft', 'submit']
+    );
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
-    router = jasmine.createSpyObj<Router>('Router', ['navigate']);
 
+    businessApplicationService.getCurrentApplication.and.returnValue(of(null));
     businessApplicationService.createDraft.and.returnValue(of(application));
     businessApplicationService.submit.and.returnValue(of({
       ...application,
@@ -58,11 +61,14 @@ describe('BusinessApplicationComponent', () => {
       imports: [BusinessApplicationComponent],
       providers: [
         provideZonelessChangeDetection(),
+        provideRouter([]),
         { provide: BusinessApplicationService, useValue: businessApplicationService },
         { provide: ToastService, useValue: toastService },
-        { provide: Router, useValue: router },
       ],
     }).compileComponents();
+
+    router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
 
     fixture = TestBed.createComponent(BusinessApplicationComponent);
     component = fixture.componentInstance;
@@ -87,6 +93,67 @@ describe('BusinessApplicationComponent', () => {
     });
     expect(component.application()).toEqual(application);
     expect(toastService.success).toHaveBeenCalledWith('Business application draft saved.');
+  });
+
+  it('shows approved business account instead of a new application form', () => {
+    businessApplicationService.getCurrentApplication.and.returnValue(of({
+      ...application,
+      status: 'APPROVED',
+      approvedBusinessId: '01JY0000000000000000000999',
+      decisionReason: 'Business information verified',
+      decidedAt: '2026-06-17T12:00:00Z',
+    }));
+
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('Business account approved');
+    expect(host.textContent).toContain('This user already has an approved business account');
+    expect(host.textContent).toContain('Store profile');
+    expect(host.querySelector('form')).toBeNull();
+    expect(businessApplicationService.createDraft).not.toHaveBeenCalled();
+  });
+
+  it('shows pending application state without showing a new application form', () => {
+    businessApplicationService.getCurrentApplication.and.returnValue(of({
+      ...application,
+      status: 'PENDING_VERIFICATION',
+      submittedAt: '2026-06-16T13:00:00Z',
+      version: 1,
+    }));
+
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('Application pending');
+    expect(host.textContent).toContain('New applications are disabled while review is active');
+    expect(host.querySelector('form')).toBeNull();
+    expect(host.textContent).not.toContain('Start new application');
+  });
+
+  it('shows rejected reason and can reveal a new application form', () => {
+    businessApplicationService.getCurrentApplication.and.returnValue(of({
+      ...application,
+      status: 'REJECTED',
+      decisionReason: 'Unable to verify business information',
+      decidedAt: '2026-06-17T12:00:00Z',
+      version: 2,
+    }));
+
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('Application rejected');
+    expect(host.textContent).toContain('Unable to verify business information');
+    expect(host.querySelector('form')).toBeNull();
+
+    const startButton = Array.from(host.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Start new application') as HTMLButtonElement;
+    startButton.click();
+    fixture.detectChanges();
+
+    expect(component.application()).toBeNull();
+    expect(host.querySelector('form')).not.toBeNull();
   });
 
   it('validates contact email before calling the API', () => {
@@ -151,7 +218,7 @@ describe('BusinessApplicationComponent', () => {
 
     component.createDraft();
 
-    expect(component.errorMsg()).toBe('A draft business application already exists.');
+    expect(component.errorMsg()).toBe('A business application or approved business account already exists.');
   });
 
   function fillValidForm(): void {

@@ -14,7 +14,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
         <nav class="portal-nav" aria-label="Seller navigation">
           <a routerLink="/seller/dashboard" routerLinkActive="active">Dashboard</a>
           <a routerLink="/seller/business/apply" routerLinkActive="active">Business Apply</a>
-          <a routerLink="/account/profile" routerLinkActive="active">Account</a>
+          <a routerLink="/seller/account" routerLinkActive="active">Business Account</a>
         </nav>
         <a routerLink="/" class="back-link">Marketplace</a>
       </aside>

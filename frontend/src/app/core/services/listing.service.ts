@@ -11,6 +11,7 @@ import {
   BusinessStoreListingSearchParams,
   Category,
   CreateListingDraftRequest,
+  ListingEngagement,
   ListingDraft,
   ListingImage,
   ListingMedia,
@@ -62,6 +63,36 @@ export class ListingService {
     });
   }
 
+  recordListingVisit(listingId: string): Observable<ListingEngagement> {
+    return this.http.post<ListingEngagement>(`${this.baseUrl}/listings/${listingId}/visit`, null, {
+      withCredentials: true,
+    });
+  }
+
+  likeListing(listingId: string): Observable<ListingEngagement> {
+    return this.http.post<ListingEngagement>(`${this.baseUrl}/listings/${listingId}/like`, null, {
+      withCredentials: true,
+    });
+  }
+
+  unlikeListing(listingId: string): Observable<ListingEngagement> {
+    return this.http.delete<ListingEngagement>(`${this.baseUrl}/listings/${listingId}/like`, {
+      withCredentials: true,
+    });
+  }
+
+  getMyListingEngagement(listingId: string): Observable<ListingEngagement> {
+    return this.http.get<ListingEngagement>(`${this.baseUrl}/listings/${listingId}/engagement/me`, {
+      withCredentials: true,
+    });
+  }
+
+  getMyLikedListings(): Observable<PublicListing[]> {
+    return this.http.get<PublicListing[]>(`${this.baseUrl}/users/me/liked-listings`, {
+      withCredentials: true,
+    });
+  }
+
   searchMarketplaceListings(params: MarketplaceListingSearchParams = {}): Observable<MarketplaceListingSearchPage> {
     return this.http.get<MarketplaceListingSearchPage>(`${this.baseUrl}/public/marketplace/listings/search`, {
       params: this.listingSearchHttpParams(params),
@@ -80,6 +111,40 @@ export class ListingService {
     return this.http.get<ListingDraft[]>(`${this.baseUrl}/users/me/listings`, {
       withCredentials: true,
     });
+  }
+
+  getBusinessStoreItems(businessId: string): Observable<ListingDraft[]> {
+    return this.http.get<ListingDraft[]>(`${this.baseUrl}/businesses/${businessId}/store/items`, {
+      withCredentials: true,
+    });
+  }
+
+  createBusinessStoreItem(businessId: string, request: CreateListingDraftRequest): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(`${this.baseUrl}/businesses/${businessId}/store/items`, request, {
+      withCredentials: true,
+    });
+  }
+
+  getBusinessStoreItem(businessId: string, listingId: string): Observable<ListingDraft> {
+    return this.http.get<ListingDraft>(`${this.baseUrl}/businesses/${businessId}/store/items/${listingId}`, {
+      withCredentials: true,
+    });
+  }
+
+  updateBusinessStoreItem(
+    businessId: string,
+    listingId: string,
+    version: number,
+    request: CreateListingDraftRequest,
+  ): Observable<ListingDraft> {
+    return this.http.patch<ListingDraft>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}`,
+      request,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
   }
 
   getPendingModerationListings(): Observable<ListingDraft[]> {
@@ -204,6 +269,20 @@ export class ListingService {
     });
   }
 
+  requestBusinessStoreItemMediaUpload(
+    businessId: string,
+    listingId: string,
+    request: ListingMediaUploadRequest,
+  ): Observable<ListingMedia> {
+    return this.http.post<ListingMedia>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/media/upload-request`,
+      request,
+      {
+        withCredentials: true,
+      },
+    );
+  }
+
   uploadMediaFile(uploadUrl: string, file: File): Observable<void> {
     if (uploadUrl.startsWith('local-demo://')) {
       return of(undefined);
@@ -222,10 +301,39 @@ export class ListingService {
     });
   }
 
+  confirmBusinessStoreItemMediaUpload(
+    businessId: string,
+    listingId: string,
+    mediaId: string,
+    request: ListingMediaConfirmRequest,
+  ): Observable<ListingMedia> {
+    return this.http.post<ListingMedia>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/media/${mediaId}/confirm`,
+      request,
+      {
+        withCredentials: true,
+      },
+    );
+  }
+
   updateListingImages(listingId: string, request: UpdateListingImagesRequest): Observable<ListingImage[]> {
     return this.http.put<ListingImage[]>(`${this.baseUrl}/listings/${listingId}/images`, request, {
       withCredentials: true,
     });
+  }
+
+  updateBusinessStoreItemImages(
+    businessId: string,
+    listingId: string,
+    request: UpdateListingImagesRequest,
+  ): Observable<ListingImage[]> {
+    return this.http.put<ListingImage[]>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/images`,
+      request,
+      {
+        withCredentials: true,
+      },
+    );
   }
 
   decideListing(

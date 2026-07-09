@@ -31,6 +31,11 @@ public class BusinessApplicationController {
         return new ApiDataResponse<>(businessApplicationService.createDraft(request));
     }
 
+    @GetMapping("/me")
+    public ApiDataResponse<BusinessApplicationResponse> getCurrent() {
+        return new ApiDataResponse<>(businessApplicationService.getCurrentOwned());
+    }
+
     @GetMapping("/{id}")
     public ApiDataResponse<BusinessApplicationResponse> get(@PathVariable String id) {
         return new ApiDataResponse<>(businessApplicationService.getOwned(id));

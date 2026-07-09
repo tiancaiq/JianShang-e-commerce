@@ -26,14 +26,20 @@ describe('ListingMediaUploadService', () => {
   beforeEach(() => {
     listingService = jasmine.createSpyObj<ListingService>('ListingService', [
       'requestMediaUpload',
+      'requestBusinessStoreItemMediaUpload',
       'uploadMediaFile',
       'confirmMediaUpload',
+      'confirmBusinessStoreItemMediaUpload',
       'updateListingImages',
+      'updateBusinessStoreItemImages',
     ]);
     listingService.requestMediaUpload.and.returnValue(of(pendingMedia));
+    listingService.requestBusinessStoreItemMediaUpload.and.returnValue(of(pendingMedia));
     listingService.uploadMediaFile.and.returnValue(of(undefined));
     listingService.confirmMediaUpload.and.returnValue(of(confirmedMedia));
+    listingService.confirmBusinessStoreItemMediaUpload.and.returnValue(of(confirmedMedia));
     listingService.updateListingImages.and.returnValue(of([attachedImage]));
+    listingService.updateBusinessStoreItemImages.and.returnValue(of([attachedImage]));
 
     service = new ListingMediaUploadService(listingService);
   });
@@ -53,6 +59,29 @@ describe('ListingMediaUploadService', () => {
       expect(listingService.updateListingImages).toHaveBeenCalledOnceWith(listingId, {
         images: [{ mediaId: confirmedMedia.id, altText: confirmedMedia.originalFileName }],
       });
+      done();
+    });
+  });
+
+  it('uses business-scoped store item media endpoints when a business id is supplied', done => {
+    const businessId = '01B00000000000000000000001';
+
+    service.uploadAndAttach(listingId, file, [], businessId).subscribe(images => {
+      expect(images).toEqual([attachedImage]);
+      expect(listingService.requestBusinessStoreItemMediaUpload).toHaveBeenCalledOnceWith(businessId, listingId, {
+        contentType: 'image/png',
+        fileName: 'bike.png',
+        sizeBytes: 1,
+      });
+      expect(listingService.confirmBusinessStoreItemMediaUpload).toHaveBeenCalledOnceWith(businessId, listingId, pendingMedia.id, {
+        sizeBytes: 1,
+      });
+      expect(listingService.updateBusinessStoreItemImages).toHaveBeenCalledOnceWith(businessId, listingId, {
+        images: [{ mediaId: confirmedMedia.id, altText: confirmedMedia.originalFileName }],
+      });
+      expect(listingService.requestMediaUpload).not.toHaveBeenCalled();
+      expect(listingService.confirmMediaUpload).not.toHaveBeenCalled();
+      expect(listingService.updateListingImages).not.toHaveBeenCalled();
       done();
     });
   });

@@ -2,15 +2,23 @@
 
 Status: complete.
 
+Planned update: `BUS-LIST-00` changes business store item visibility so
+approved businesses can publish complete store items to `/stores` without
+item-level admin approval. This slice describes the current implemented
+approved-listing search behavior; `BUS-LIST-00` supersedes that approval rule
+for business store items.
+
 ## Goal
 
-Let guests search approved active business listings as a separate experience
-from individual marketplace search.
+Let guests search active business listings as a separate experience from
+individual marketplace search.
 
 ## Scope
 
 - Use the guest-readable `GET /api/v1/public/stores/listings/search` endpoint.
-- Return only approved active `BUSINESS` listings.
+- Current implementation returns only approved active `BUSINESS` listings.
+  The planned store item flow returns active business self-published store
+  items without item-level admin approval.
 - Filter by keyword, category, condition, min/max price, city, and county.
 - Sort by newest, price low to high, or price high to low when the user
   explicitly selects sorting. The default UI state sends no `sort` parameter.
@@ -28,7 +36,7 @@ from individual marketplace search.
 
 ## Acceptance Criteria
 
-- Guests can search approved active business listings.
+- Guests can search active business store items.
 - Suspended, inactive, draft, pending-review, rejected, closed, and individual
   listings do not appear in the store listing path.
 - Public response does not expose business application internals, staff

@@ -38,6 +38,7 @@ public class BusinessApplicationService {
     private static final String PENDING_VERIFICATION = "PENDING_VERIFICATION";
     private static final String UNDER_REVIEW = "UNDER_REVIEW";
     private static final String VERIFICATION_FAILED = "VERIFICATION_FAILED";
+    private static final String REJECTED = "REJECTED";
     private static final String PLATFORM_ADMIN_ROLE = "PLATFORM_ADMIN";
     private static final String APPROVE = "APPROVE";
     private static final String REJECT = "REJECT";
@@ -54,8 +55,9 @@ public class BusinessApplicationService {
     @Transactional
     public BusinessApplicationResponse createDraft(BusinessApplicationDraftRequest request) {
         User user = authService.ensureUserEntity();
-        if (businessApplicationRepository.existsByApplicantUserIdAndStatus(user.getId(), DRAFT)) {
-            throw new BusinessApplicationConflictException("A draft business application already exists.");
+        if (businessApplicationRepository.existsByApplicantUserIdAndStatusNot(user.getId(), REJECTED)) {
+            throw new BusinessApplicationConflictException(
+                    "A business application or approved business account already exists.");
         }
 
         BusinessApplication application = BusinessApplication.draft(
@@ -74,6 +76,19 @@ public class BusinessApplicationService {
         BusinessApplication saved = businessApplicationRepository.saveAndFlush(application);
         log.info("Created business application draft id={} applicantUserId={}", saved.getId(), user.getId());
         return BusinessApplicationResponse.from(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public BusinessApplicationResponse getCurrentOwned() {
+        User user = authService.ensureUserEntity();
+        List<BusinessApplication> applications =
+                businessApplicationRepository.findByApplicantUserIdOrderByCreatedAtDescIdDesc(user.getId());
+        return applications.stream()
+                .filter(application -> !REJECTED.equals(application.getStatus()))
+                .findFirst()
+                .or(() -> applications.stream().findFirst())
+                .map(BusinessApplicationResponse::from)
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -187,6 +202,7 @@ public class BusinessApplicationService {
             String businessId = ulidGenerator.next();
             insertApprovedBusiness(application, reviewerUserId, businessId, now);
             insertOwnerMembership(businessId, application.getApplicantUserId(), reviewerUserId, now);
+            insertDefaultStore(application, businessId, now);
             application.approve(reviewerUserId, businessId, reason, now);
         } else if (REJECT.equals(decision)) {
             application.reject(reviewerUserId, reason, now);
@@ -333,6 +349,25 @@ public class BusinessApplicationService {
                 application.getCountry(),
                 Timestamp.from(now),
                 reviewerUserId,
+                Timestamp.from(now),
+                Timestamp.from(now));
+    }
+
+    private void insertDefaultStore(BusinessApplication application, String businessId, Instant now) {
+        jdbcTemplate.update("""
+                insert into stores (
+                    id, business_id, slug, name, description, logo_url, banner_url,
+                    support_email, support_phone, status, version, created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, null, null, ?, ?, 'ACTIVE', 0, ?, ?)
+                """,
+                ulidGenerator.next(),
+                businessId,
+                "business-" + businessId.toLowerCase(Locale.ROOT),
+                application.getLegalName(),
+                application.getDescription(),
+                application.getContactEmail(),
+                application.getContactPhone(),
                 Timestamp.from(now),
                 Timestamp.from(now));
     }

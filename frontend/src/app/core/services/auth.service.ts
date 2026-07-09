@@ -34,12 +34,19 @@ export interface NativeRegisterRequest {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
+  private static readonly ACTIVITY_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  private static readonly VISIBLE_SESSION_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
+  private static readonly ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'scroll', 'touchstart', 'focus'];
+
   private readonly gatewayUrl = environment.apiGatewayUrl;
   private readonly currentUser = signal<CurrentUser | null>(null);
   private readonly csrfToken = signal<CsrfSummary | null>(null);
   private readonly isLoading = signal(false);
   private readonly initialized = signal(false);
   private sessionRequest: Observable<AuthState> | null = null;
+  private activityMonitorCleanup: (() => void) | null = null;
+  private activityRefreshInFlight = false;
+  private lastActivityRefreshAt = 0;
 
   readonly user = this.currentUser.asReadonly();
   readonly csrf = this.csrfToken.asReadonly();
@@ -72,6 +79,38 @@ export class AuthService {
   setCurrentUser(user: CurrentUser): void {
     this.currentUser.set(user);
     this.initialized.set(true);
+  }
+
+  startSessionActivityMonitor(): void {
+    if (this.activityMonitorCleanup || !isPlatformBrowser(this.platformId)) {
+      return;
+    }
+
+    const win = this.document.defaultView;
+    if (!win) {
+      return;
+    }
+
+    const refreshFromActivity = () => this.refreshSessionFromActivity();
+    const intervalId = win.setInterval(refreshFromActivity, AuthService.VISIBLE_SESSION_REFRESH_INTERVAL_MS);
+    for (const eventName of AuthService.ACTIVITY_EVENTS) {
+      win.addEventListener(eventName, refreshFromActivity, { passive: true });
+    }
+    this.document.addEventListener('visibilitychange', refreshFromActivity);
+    this.activityMonitorCleanup = () => {
+      for (const eventName of AuthService.ACTIVITY_EVENTS) {
+        win.removeEventListener(eventName, refreshFromActivity);
+      }
+      win.clearInterval(intervalId);
+      this.document.removeEventListener('visibilitychange', refreshFromActivity);
+    };
+  }
+
+  stopSessionActivityMonitor(): void {
+    this.activityMonitorCleanup?.();
+    this.activityMonitorCleanup = null;
+    this.activityRefreshInFlight = false;
+    this.lastActivityRefreshAt = 0;
   }
 
   login(client: LoginClient = 'marketplace', returnUrl?: string | null): void {
@@ -226,6 +265,33 @@ export class AuthService {
   clearUser(): void {
     this.currentUser.set(null);
     this.initialized.set(true);
+  }
+
+  // Touches the BFF session only while a signed-in user is actively using the site.
+  private refreshSessionFromActivity(): void {
+    if (!this.isAuthenticated() || this.activityRefreshInFlight) {
+      return;
+    }
+
+    if (this.document.visibilityState === 'hidden') {
+      return;
+    }
+
+    const now = Date.now();
+    if (this.lastActivityRefreshAt > 0 && now - this.lastActivityRefreshAt < AuthService.ACTIVITY_REFRESH_INTERVAL_MS) {
+      return;
+    }
+
+    this.lastActivityRefreshAt = now;
+    this.activityRefreshInFlight = true;
+    this.refreshSession().pipe(take(1)).subscribe({
+      error: () => {
+        this.activityRefreshInFlight = false;
+      },
+      complete: () => {
+        this.activityRefreshInFlight = false;
+      },
+    });
   }
 
   private loadSession(): Observable<AuthState> {

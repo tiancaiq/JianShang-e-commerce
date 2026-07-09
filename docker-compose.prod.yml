@@ -137,6 +137,29 @@ services:
     restart: unless-stopped
 
   # ── API Gateway (routes to all services) ───────────────────
+  chat-service:
+    build:
+      context: ./chat-service
+      dockerfile: Dockerfile
+    container_name: chat-service
+    ports:
+      - "127.0.0.1:8092:8092"
+    environment:
+      CHAT_DB_HOST: mysql
+      CHAT_DB_PORT: 3306
+      CHAT_DB_NAME: ${CHAT_DB_NAME:-chat}
+      CHAT_DB_USERNAME: ${CHAT_DB_USERNAME:-root}
+      CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      AUTH_SERVICE_URL: http://auth-service:8085
+      PRODUCT_SERVICE_URL: http://product-service:8091
+    depends_on:
+      - mysql
+      - keycloak
+      - auth-service
+      - product-service
+    restart: unless-stopped
+
   api-gateway:
     build:
       context: ./api-gateway
@@ -146,6 +169,7 @@ services:
       - "9000:9000"
     environment:
       PRODUCT_SERVICE_URL: http://product-service:8091
+      CHAT_SERVICE_URL: http://chat-service:8092
       ORDER_SERVICE_URL: http://order-service:8081
       INVENTORY_SERVICE_URL: http://inventory-service:8082
       PAYMENT_SERVICE_URL: http://payment-service:8084
@@ -164,6 +188,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437}
     depends_on:
       - product-service
+      - chat-service
       - auth-service
       - keycloak
     restart: unless-stopped

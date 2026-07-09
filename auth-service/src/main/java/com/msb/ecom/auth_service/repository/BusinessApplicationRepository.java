@@ -11,7 +11,11 @@ public interface BusinessApplicationRepository extends JpaRepository<BusinessApp
 
     boolean existsByApplicantUserIdAndStatus(String applicantUserId, String status);
 
+    boolean existsByApplicantUserIdAndStatusNot(String applicantUserId, String status);
+
     Optional<BusinessApplication> findByIdAndApplicantUserId(String id, String applicantUserId);
+
+    List<BusinessApplication> findByApplicantUserIdOrderByCreatedAtDescIdDesc(String applicantUserId);
 
     List<BusinessApplication> findByStatusInOrderBySubmittedAtAscIdAsc(Collection<String> statuses);
 }

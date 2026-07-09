@@ -52,7 +52,10 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
       min-height: 520px;
       overflow: hidden;
       border-radius: 8px;
-      background: linear-gradient(135deg, rgba(255, 226, 240, 0.92), rgba(239, 232, 255, 0.92));
+      background:
+        radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.78), transparent 20%),
+        linear-gradient(135deg, rgba(255, 226, 240, 0.92), rgba(239, 232, 255, 0.92));
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.58);
     }
 
     .image-track {
@@ -83,14 +86,16 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
       width: 42px;
       height: 52px;
       transform: translateY(-50%);
-      border: 0;
+      border: 1px solid rgba(255, 255, 255, 0.72);
       border-radius: 8px;
-      background: rgba(35, 22, 43, 0.78);
-      color: #fff;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--market-accent-dark);
       cursor: pointer;
       font-size: 2rem;
       font-weight: 900;
       line-height: 1;
+      box-shadow: 0 12px 24px rgba(96, 61, 120, 0.18);
+      backdrop-filter: blur(12px);
     }
 
     .image-arrow.previous {
@@ -103,8 +108,8 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
 
     .image-arrow:hover,
     .image-arrow:focus-visible {
-      background: rgba(35, 22, 43, 0.92);
-      outline: 2px solid rgba(255, 255, 255, 0.8);
+      background: #fff;
+      outline: 2px solid rgba(244, 114, 182, 0.34);
       outline-offset: 2px;
     }
 
@@ -122,6 +127,7 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
       padding: 0;
       background: linear-gradient(135deg, #ffe5f0, #efe8ff);
       cursor: pointer;
+      box-shadow: 0 8px 18px rgba(143, 92, 144, 0.08);
     }
 
     .thumb-grid button.active {

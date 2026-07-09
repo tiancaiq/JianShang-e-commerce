@@ -1,12 +1,20 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
+import { AuthService } from './core/services/auth.service';
 
 describe('App', () => {
+  let authService: jasmine.SpyObj<AuthService>;
+
   beforeEach(async () => {
+    authService = jasmine.createSpyObj<AuthService>('AuthService', ['startSessionActivityMonitor']);
+
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [provideZonelessChangeDetection()]
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: AuthService, useValue: authService },
+      ]
     }).compileComponents();
   });
 
@@ -14,6 +22,7 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     expect(app).toBeTruthy();
+    expect(authService.startSessionActivityMonitor).toHaveBeenCalled();
   });
 
   it('should render the router outlet', () => {

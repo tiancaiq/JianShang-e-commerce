@@ -21,6 +21,7 @@
 		<module>common-storage</module>
 		<module>common-testing</module>
 		<module>product-service</module>
+		<module>chat-service</module>
 		<module>api-gateway</module>
 		<module>auth-service</module>
 	</modules>

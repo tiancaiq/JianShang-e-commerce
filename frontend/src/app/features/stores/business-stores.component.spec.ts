@@ -20,7 +20,7 @@ describe('BusinessStoresComponent public storefront regression', () => {
     sellerDisplayName: 'Mochi Store',
     title: 'Business plush',
     publicCity: 'Irvine',
-    publicRegion: 'CA',
+    publicRegion: 'Orange County',
   });
   const category = {
     id: businessListing.categoryId,
@@ -53,7 +53,7 @@ describe('BusinessStoresComponent public storefront regression', () => {
     fixture = TestBed.createComponent(BusinessStoresComponent);
   });
 
-  it('shows business storefront listings separately from individual listings', () => {
+  it('presents verified business storefronts instead of individual listings', () => {
     fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
@@ -70,19 +70,45 @@ describe('BusinessStoresComponent public storefront regression', () => {
       sort: null,
       cursor: null,
     });
+    expect(text).toContain('Browse verified stores');
+    expect(text).toContain('Shop from approved business sellers and discover local storefronts.');
+    expect(text).toContain('Business Storefronts');
+    expect(text).toContain('1 store found');
     expect(text).toContain('Mochi Store');
-    expect(text).toContain('Business plush');
+    expect(text).toContain('Verified');
+    expect(text).toContain('Irvine, Orange County');
+    expect(text).toContain('1 active listing');
+    expect(text).toContain(businessListing.categoryName);
+    expect(text).toContain('Visit store');
+    expect(text).toContain('Create store');
     expect(text).not.toContain('Individual bike');
+    expect(text).not.toContain('Condition');
+    expect(text).not.toContain('Min price');
+    expect(text).not.toContain('Max price');
+    expect(text).not.toContain('No approved business storefront listings yet');
     expect(text).not.toContain('Cart');
     expect(text).not.toContain('Checkout');
+
+    const createStoreLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'Create store');
+    expect(createStoreLink?.getAttribute('href')).toBe('/business/apply');
+
+    const visitStoreLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'Visit store');
+    expect(visitStoreLink?.getAttribute('href')).toBe('/stores');
   });
 
-  it('shows an empty state when there are no business listings', () => {
+  it('shows the requested empty state when there are no business stores', () => {
     listingService.searchBusinessStoreListings.and.returnValue(of(searchPage([individualListing])));
 
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No approved business storefront listings yet.');
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('0 stores found');
+    expect(text).toContain('No verified stores found');
+    expect(text).toContain('Try changing your filters or search another city.');
+    expect(text).toContain('Clear filters');
+    expect(text).not.toContain('No approved business storefront listings yet');
   });
 
   it('shows a load error state', () => {
@@ -93,17 +119,13 @@ describe('BusinessStoresComponent public storefront regression', () => {
     expect(fixture.nativeElement.textContent).toContain('Business stores could not be loaded. HTTP 503.');
   });
 
-  it('sends store filters to backend search', () => {
+  it('sends store-relevant filters to backend search', () => {
     fixture.detectChanges();
     listingService.searchBusinessStoreListings.calls.reset();
 
     const component = fixture.componentInstance;
     component.searchTerm = 'plush';
     component.selectedCategoryId = category.id;
-    component.selectedCondition = 'NEW';
-    component.sortMode = 'price_desc';
-    component.minPrice = '5';
-    component.maxPrice = '80';
     component.city = 'Irvine';
     component.county = 'Orange County';
     component.runSearch();
@@ -111,31 +133,38 @@ describe('BusinessStoresComponent public storefront regression', () => {
     expect(listingService.searchBusinessStoreListings).toHaveBeenCalledWith({
       q: 'plush',
       categoryId: category.id,
-      condition: 'NEW',
-      minPrice: 5,
-      maxPrice: 80,
+      condition: null,
+      minPrice: null,
+      maxPrice: null,
       city: 'Irvine',
       county: 'Orange County',
-      sort: 'price_desc',
+      sort: null,
       cursor: null,
     });
+    expect(component.hasActiveSearch()).toBeTrue();
   });
 
-  it('handles numeric price inputs from browser number controls', () => {
+  it('clears storefront filters back to the verified active default', () => {
     fixture.detectChanges();
     listingService.searchBusinessStoreListings.calls.reset();
 
     const component = fixture.componentInstance;
-    component.minPrice = 1;
-    component.maxPrice = 2;
-    component.runSearch();
+    component.searchTerm = 'plush';
+    component.selectedCategoryId = category.id;
+    component.city = 'Irvine';
+    component.county = 'Orange County';
+    component.verifiedOnly = false;
+    component.hasActiveListingsOnly = false;
+    component.clearFilters();
 
-    expect(listingService.searchBusinessStoreListings).toHaveBeenCalledWith(jasmine.objectContaining({
-      minPrice: 1,
-      maxPrice: 2,
-    }));
-    expect(component.hasActiveSearch()).toBeTrue();
-    expect(component.loading()).toBeFalse();
+    expect(component.searchTerm).toBe('');
+    expect(component.selectedCategoryId).toBe('ALL');
+    expect(component.city).toBe('');
+    expect(component.county).toBe('');
+    expect(component.verifiedOnly).toBeTrue();
+    expect(component.hasActiveListingsOnly).toBeTrue();
+    expect(component.hasActiveSearch()).toBeFalse();
+    expect(listingService.searchBusinessStoreListings).toHaveBeenCalled();
   });
 
   it('loads the next business store page with the returned cursor', () => {
@@ -144,6 +173,8 @@ describe('BusinessStoresComponent public storefront regression', () => {
       sellerType: 'BUSINESS',
       sellerDisplayName: 'Mochi Store',
       title: 'Store figure',
+      publicCity: 'Irvine',
+      publicRegion: 'Orange County',
     });
     listingService.searchBusinessStoreListings.and.returnValues(
       of(searchPage([businessListing], 'cursor-2', true)),
@@ -157,5 +188,6 @@ describe('BusinessStoresComponent public storefront regression', () => {
       cursor: 'cursor-2',
     }));
     expect(fixture.componentInstance.listings()).toEqual([businessListing, secondBusinessListing]);
+    expect(fixture.componentInstance.stores()[0].activeListings).toBe(2);
   });
 });

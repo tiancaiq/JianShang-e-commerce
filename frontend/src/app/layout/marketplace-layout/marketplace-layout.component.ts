@@ -1,85 +1,84 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink, RouterOutlet } from '@angular/router';
+import { Router, RouterOutlet } from '@angular/router';
 import { take } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { FloatingChatComponent } from '../../features/chat/floating-chat.component';
+import { MarketplaceNavbarComponent } from '../../features/marketplace/components/marketplace-navbar.component';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
+import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
 
 @Component({
   selector: 'app-marketplace-layout',
   standalone: true,
-  imports: [FormsModule, RouterLink, RouterOutlet, ToastContainerComponent],
+  imports: [BrandMascotComponent, FloatingChatComponent, FormsModule, MarketplaceNavbarComponent, RouterOutlet, ToastContainerComponent],
   template: `
-    <div class="marketplace-shell">
-      <header class="marketplace-header">
-        <a routerLink="/" class="brand" aria-label="MSBCommerce marketplace home">
-          <span class="brand-mark">M</span>
-          <span>MSB<span>Commerce</span></span>
-        </a>
-        <nav class="public-nav" aria-label="Marketplace navigation">
-          <a routerLink="/marketplace">Marketplace</a>
-          <a routerLink="/stores">Stores</a>
-          @if (authService.isAuthenticated()) {
-            <a routerLink="/account/listings">My Listings</a>
-            <a routerLink="/account">Account</a>
-            <button type="button" (click)="authService.logout()">Logout</button>
-          } @else {
-            <button type="button" (click)="openAuthDialog()">Login</button>
-          }
-        </nav>
-      </header>
+    <div class="marketplace-shell" [class.account-dashboard-shell]="isAccountDashboardView()">
+      <app-marketplace-navbar
+        [authenticated]="authService.isAuthenticated()"
+        [currentUser]="authService.user()"
+        (loginRequested)="openAuthDialog()"
+        (logoutRequested)="authService.logout()"
+        (searchRequested)="searchMarketplace($event)"
+      />
 
       @if (authDialogOpen()) {
         <section class="auth-overlay" aria-label="Marketplace sign in">
           <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-auth-title">
             <button type="button" class="auth-close" aria-label="Close sign in" (click)="closeAuthDialog()">x</button>
-            <div class="auth-mark">M</div>
-            <p class="auth-kicker">MSB marketplace account</p>
-            <h2 id="marketplace-auth-title">Sign in to keep shopping local.</h2>
-            <p class="auth-copy">
-              Create listings, manage your profile, and come back to your saved marketplace flow.
-            </p>
-            <div class="auth-tabs" role="tablist" aria-label="Account action">
-              <button type="button" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')">Sign in</button>
-              <button type="button" [class.active]="authMode() === 'register'" (click)="setAuthMode('register')">Create account</button>
+            <div class="auth-illustration">
+              <app-brand-mascot variant="login" alt="MSB marketplace mascot sign in illustration" />
             </div>
-            @if (authDialogError()) {
-              <p class="auth-error">{{ authDialogError() }}</p>
-            }
-            <form class="auth-form" (ngSubmit)="submitNativeAuth()">
-              @if (authMode() === 'register') {
-                <label>
-                  Display name
-                  <input name="displayName" autocomplete="name" [(ngModel)]="authDisplayName" [disabled]="authDialogBusy()" />
-                </label>
+            <div class="auth-content">
+              <div class="auth-mark">M</div>
+              <p class="auth-kicker">MSB marketplace account</p>
+              <h2 id="marketplace-auth-title">Sign in to keep trading local.</h2>
+              <p class="auth-copy">
+                Create listings, manage your profile, and return to saved marketplace flows.
+              </p>
+              <div class="auth-tabs" role="tablist" aria-label="Account action">
+                <button type="button" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')">Sign in</button>
+                <button type="button" [class.active]="authMode() === 'register'" (click)="setAuthMode('register')">Create account</button>
+              </div>
+              @if (authDialogError()) {
+                <p class="auth-error">{{ authDialogError() }}</p>
               }
-              <label>
-                Email
-                <input name="email" type="email" autocomplete="email" [(ngModel)]="authEmail" [disabled]="authDialogBusy()" required />
-              </label>
-              <label>
-                Password
-                <input
-                  name="password"
-                  type="password"
-                  [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
-                  [(ngModel)]="authPassword"
-                  [disabled]="authDialogBusy()"
-                  required
-                />
-              </label>
-              <button type="submit" class="auth-primary" [disabled]="authDialogBusy()">
-                {{ authMode() === 'login' ? 'Sign in' : 'Create account' }}
-              </button>
-            </form>
-            <p class="auth-footnote">Keycloak verifies credentials behind the gateway; MSB never stores passwords.</p>
+              <form class="auth-form" (ngSubmit)="submitNativeAuth()">
+                @if (authMode() === 'register') {
+                  <label>
+                    Display name
+                    <input name="displayName" autocomplete="name" [(ngModel)]="authDisplayName" [disabled]="authDialogBusy()" />
+                  </label>
+                }
+                <label>
+                  Email
+                  <input name="email" type="email" autocomplete="email" [(ngModel)]="authEmail" [disabled]="authDialogBusy()" required />
+                </label>
+                <label>
+                  Password
+                  <input
+                    name="password"
+                    type="password"
+                    [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
+                    [(ngModel)]="authPassword"
+                    [disabled]="authDialogBusy()"
+                    required
+                  />
+                </label>
+                <button type="submit" class="auth-primary" [disabled]="authDialogBusy()">
+                  {{ authMode() === 'login' ? 'Sign in' : 'Create account' }}
+                </button>
+              </form>
+              <p class="auth-footnote">Keycloak verifies credentials behind the gateway; MSB never stores passwords.</p>
+            </div>
           </div>
         </section>
       }
 
-      <main class="marketplace-main">
+      <main class="marketplace-main" [class.account-dashboard-main]="isAccountDashboardView()">
         <router-outlet />
       </main>
+      <app-floating-chat />
       <app-toast-container />
     </div>
   `,
@@ -87,21 +86,37 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
     .marketplace-shell {
       min-height: 100vh;
       position: relative;
-      --market-bg: #f7f4ef;
-      --market-surface: #ffffff;
-      --market-soft: #fff0f7;
-      --market-ink: #382648;
-      --market-muted: #827194;
-      --market-line: #ead7f2;
-      --market-accent: #f472b6;
+      --kawaii-bg: #fff7fb;
+      --kawaii-bg-2: #f7f0ff;
+      --kawaii-surface: #ffffff;
+      --kawaii-pink: #f472b6;
+      --kawaii-pink-light: #fbcfe8;
+      --kawaii-pink-soft: #fff0f7;
+      --kawaii-purple: #8b6fe8;
+      --kawaii-purple-light: #c7b7ff;
+      --kawaii-lavender: #ede7ff;
+      --kawaii-ink: #382648;
+      --kawaii-muted: #827194;
+      --kawaii-border: #ead7f2;
+      --kawaii-success: #38a895;
+      --kawaii-warning: #f7b84b;
+      --market-bg: var(--kawaii-bg);
+      --market-surface: var(--kawaii-surface);
+      --market-soft: var(--kawaii-pink-soft);
+      --market-ink: var(--kawaii-ink);
+      --market-muted: var(--kawaii-muted);
+      --market-line: var(--kawaii-border);
+      --market-accent: var(--kawaii-pink);
       --market-accent-dark: #be3a83;
-      --market-lavender: #8b6fe8;
-      --market-mint: #38a895;
-      --market-yellow: #f7b84b;
+      --market-lavender: var(--kawaii-purple);
+      --market-purple: var(--kawaii-purple);
+      --market-mint: var(--kawaii-success);
+      --market-success: var(--kawaii-success);
+      --market-yellow: var(--kawaii-warning);
       --market-blue: #5d98e8;
       background:
-        radial-gradient(circle at 12% 6%, rgba(255, 205, 226, 0.42) 0 18%, transparent 19%),
-        radial-gradient(circle at 92% 0%, rgba(202, 191, 255, 0.34) 0 14%, transparent 15%),
+        radial-gradient(circle at 12% 6%, rgba(255, 207, 228, 0.36) 0 18%, transparent 19%),
+        radial-gradient(circle at 92% 0%, rgba(206, 193, 255, 0.3) 0 14%, transparent 15%),
         linear-gradient(180deg, #fff7fb 0%, #f9f2ff 52%, #fffaf0 100%);
       color: var(--market-ink);
     }
@@ -119,87 +134,17 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       z-index: 0;
     }
 
-    .marketplace-header {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 1rem;
-      margin: 0.75rem clamp(0.75rem, 2vw, 1.25rem) 0;
-      padding: 0.65rem clamp(0.75rem, 2vw, 1rem);
-      background: rgba(255, 255, 255, 0.9);
-      border-bottom: 1px solid var(--market-line);
-      border: 1px solid rgba(234, 215, 242, 0.92);
-      border-radius: 8px;
-      box-shadow: 0 14px 36px rgba(150, 96, 144, 0.13);
-      backdrop-filter: blur(18px);
-    }
-
-    .brand {
-      color: var(--market-ink);
-      font-family: var(--font-display);
-      font-weight: 800;
-      font-size: 1.15rem;
-      text-decoration: none;
-      white-space: nowrap;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.55rem;
-    }
-
-    .brand > span:last-child span {
-      color: var(--market-accent);
-    }
-
-    .brand-mark {
-      width: 2.1rem;
-      height: 2.1rem;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      background: linear-gradient(135deg, #ff9fcb, #9476ee);
-      color: #fff;
-      box-shadow: 0 8px 18px rgba(190, 58, 131, 0.22);
-      font-size: 1rem;
-    }
-
-    .public-nav {
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
-    }
-
-    .public-nav a,
-    .public-nav button {
-      color: var(--market-muted);
-      background: transparent;
-      border: 0;
-      font: inherit;
-      font-size: 0.875rem;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-      min-height: 36px;
-      display: inline-flex;
-      align-items: center;
-      padding: 0 0.75rem;
-      border-radius: 8px;
-    }
-
-    .public-nav a:hover,
-    .public-nav button:hover {
-      color: var(--market-accent-dark);
-      background: var(--market-soft);
-    }
-
     .marketplace-main {
       position: relative;
       z-index: 1;
-      max-width: 1500px;
+      max-width: 1560px;
       margin: 0 auto;
-      padding: 1rem clamp(0.75rem, 3vw, 2rem) 4rem;
+      padding: 1.5rem clamp(1rem, 3vw, 2rem) 4rem;
+    }
+
+    .marketplace-main.account-dashboard-main {
+      max-width: none;
+      padding: 0;
     }
 
     .auth-overlay {
@@ -215,13 +160,24 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 
     .auth-dialog {
       position: relative;
-      width: min(100%, 430px);
-      padding: 1.4rem;
+      width: min(100%, 860px);
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem;
       border: 1px solid rgba(234, 215, 242, 0.95);
-      border-radius: 8px;
+      border-radius: 24px;
       background: rgba(255, 255, 255, 0.96);
       color: var(--market-ink);
       box-shadow: 0 28px 70px rgba(98, 62, 108, 0.24);
+    }
+
+    .auth-content {
+      padding: 1rem;
+    }
+
+    .auth-illustration {
+      min-width: 0;
     }
 
     .auth-close {
@@ -249,7 +205,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       height: 2.6rem;
       display: grid;
       place-items: center;
-      border-radius: 8px;
+      border-radius: 12px;
       background: linear-gradient(135deg, #ff9fcb, #9476ee);
       color: #fff;
       font-weight: 850;
@@ -332,7 +288,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       min-height: 42px;
       padding: 0 0.75rem;
       border: 1px solid var(--market-line);
-      border-radius: 8px;
+      border-radius: 14px;
       background: #fff;
       color: var(--market-ink);
       font: inherit;
@@ -360,14 +316,13 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       box-shadow: 0 14px 26px rgba(190, 58, 131, 0.2);
     }
 
-    @media (max-width: 640px) {
-      .marketplace-header {
-        align-items: flex-start;
-        flex-direction: column;
+    @media (max-width: 760px) {
+      .auth-dialog {
+        grid-template-columns: 1fr;
       }
 
-      .public-nav {
-        flex-wrap: wrap;
+      .auth-illustration {
+        display: none;
       }
     }
   `],
@@ -415,6 +370,16 @@ export class MarketplaceLayoutComponent implements OnInit {
     }
     this.authMode.set(mode);
     this.authDialogError.set(null);
+  }
+
+  searchMarketplace(query: string): void {
+    this.router.navigate(['/marketplace'], {
+      queryParams: query ? { q: query } : {},
+    });
+  }
+
+  isAccountDashboardView(): boolean {
+    return (this.router.url || '').split(/[?#]/)[0] === '/account';
   }
 
   submitNativeAuth(): void {

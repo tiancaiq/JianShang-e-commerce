@@ -25,9 +25,11 @@ The active Maven reactor is:
 
 - `common-core`
 - `common-web`
+- `common-storage`
 - `common-testing`
 - `auth-service`
 - `product-service`
+- `chat-service`
 - `api-gateway`
 
 ## V2 Reintroduction Rule

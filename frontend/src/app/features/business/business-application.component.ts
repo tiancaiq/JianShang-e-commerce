@@ -1,6 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { BusinessApplication } from '../../core/models/business-application.model';
 import { BusinessApplicationService } from '../../core/services/business-application.service';
 import { ToastService } from '../../core/services/toast.service';
@@ -9,7 +9,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
 @Component({
   selector: 'app-business-application',
   standalone: true,
-  imports: [FormsModule, StatusPillComponent],
+  imports: [FormsModule, RouterLink, StatusPillComponent],
   template: `
     <section class="business-page">
       <header class="business-header">
@@ -22,9 +22,15 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
         }
       </header>
 
-      @if (application()) {
+      @if (loading()) {
         <section class="success-panel">
-          <h2>{{ application()?.status === 'DRAFT' ? 'Draft saved' : 'Application submitted' }}</h2>
+          <h2>Loading business account</h2>
+          <p class="status-copy">Checking your current business application status.</p>
+        </section>
+      } @else if (application()) {
+        <section class="success-panel">
+          <h2>{{ applicationTitle() }}</h2>
+          <p class="status-copy">{{ applicationDescription() }}</p>
           <dl>
             <div>
               <dt>Legal name</dt>
@@ -59,6 +65,20 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
               </div>
             }
           </dl>
+          @if (application()?.approvedBusinessId) {
+            <div class="approved-actions">
+              <a class="secondary-link" [routerLink]="['/seller/businesses', application()?.approvedBusinessId, 'store']">
+                Store profile
+              </a>
+            </div>
+          }
+          @if (application()?.status === 'REJECTED') {
+            <div class="approved-actions">
+              <button type="button" class="secondary-button" (click)="startNewApplication()">
+                Start new application
+              </button>
+            </div>
+          }
           @if (errorMsg()) {
             <div class="error-message">{{ errorMsg() }}</div>
           }
@@ -259,6 +279,45 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       justify-content: flex-end;
     }
 
+    .approved-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 1rem;
+    }
+
+    .secondary-link {
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 0.875rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      color: var(--color-accent);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .secondary-button {
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 0.875rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--color-accent);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .secondary-link:hover,
+    .secondary-button:hover {
+      background: var(--color-accent-muted);
+    }
+
     .primary-btn {
       min-height: 40px;
       padding: 0 0.875rem;
@@ -282,6 +341,14 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
     .success-panel h2 {
       font-size: 1.125rem;
       margin-bottom: 1rem;
+    }
+
+    .status-copy {
+      margin: -0.5rem 0 1rem;
+      color: var(--color-text-muted);
+      font-size: 0.875rem;
+      font-weight: 700;
+      line-height: 1.5;
     }
 
     .success-panel dl {
@@ -311,8 +378,11 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
         justify-content: stretch;
       }
 
-      .primary-btn {
+      .primary-btn,
+      .secondary-link,
+      .secondary-button {
         width: 100%;
+        justify-content: center;
       }
 
       .phone-input {
@@ -321,11 +391,12 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
     }
   `]
 })
-export class BusinessApplicationComponent {
+export class BusinessApplicationComponent implements OnInit {
   private businessApplicationService = inject(BusinessApplicationService);
   private toastService = inject(ToastService);
   private router = inject(Router);
 
+  loading = signal(false);
   saving = signal(false);
   submitting = signal(false);
   errorMsg = signal('');
@@ -350,6 +421,30 @@ export class BusinessApplicationComponent {
     { code: '+86', label: 'CN +86' },
     { code: '+91', label: 'IN +91' },
   ];
+
+  ngOnInit(): void {
+    this.loadCurrentApplication();
+  }
+
+  loadCurrentApplication(): void {
+    this.loading.set(true);
+    this.errorMsg.set('');
+
+    this.businessApplicationService.getCurrentApplication().subscribe({
+      next: application => {
+        this.application.set(application);
+        this.loading.set(false);
+      },
+      error: error => {
+        this.loading.set(false);
+        if (error.status === 401) {
+          this.router.navigate(['/login']);
+          return;
+        }
+        this.errorMsg.set('Business account status could not be loaded.');
+      },
+    });
+  }
 
   createDraft(): void {
     if (!this.validate()) {
@@ -382,7 +477,7 @@ export class BusinessApplicationComponent {
           return;
         }
         if (error.status === 409) {
-          this.errorMsg.set('A draft business application already exists.');
+          this.errorMsg.set('A business application or approved business account already exists.');
           return;
         }
         this.errorMsg.set('Business application could not be saved.');
@@ -418,6 +513,56 @@ export class BusinessApplicationComponent {
         this.errorMsg.set('Business application could not be submitted.');
       },
     });
+  }
+
+  startNewApplication(): void {
+    if (this.application()?.status !== 'REJECTED') {
+      return;
+    }
+    this.application.set(null);
+    this.errorMsg.set('');
+    this.clearForm();
+  }
+
+  applicationTitle(): string {
+    switch (this.application()?.status) {
+      case 'DRAFT':
+        return 'Draft saved';
+      case 'PENDING_VERIFICATION':
+        return 'Application pending';
+      case 'UNDER_REVIEW':
+        return 'Application under review';
+      case 'APPROVED':
+        return 'Business account approved';
+      case 'REJECTED':
+        return 'Application rejected';
+      case 'INFORMATION_REQUESTED':
+        return 'More information requested';
+      case 'VERIFICATION_FAILED':
+        return 'Verification failed';
+      default:
+        return 'Business application';
+    }
+  }
+
+  applicationDescription(): string {
+    switch (this.application()?.status) {
+      case 'DRAFT':
+        return 'Finish and submit this draft when the business details are ready for review.';
+      case 'PENDING_VERIFICATION':
+      case 'UNDER_REVIEW':
+        return 'Your application is waiting for platform review. New applications are disabled while review is active.';
+      case 'APPROVED':
+        return 'This user already has an approved business account. Manage the store profile from this portal.';
+      case 'REJECTED':
+        return 'Review the decision reason, then start a new application with corrected information.';
+      case 'INFORMATION_REQUESTED':
+        return 'The reviewer needs more information before this business can be approved.';
+      case 'VERIFICATION_FAILED':
+        return 'Verification could not be completed for this application.';
+      default:
+        return 'Business onboarding status is available here.';
+    }
   }
 
   private validate(): boolean {
@@ -461,6 +606,19 @@ export class BusinessApplicationComponent {
   private trimOrNull(value: string): string | null {
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
+  }
+
+  private clearForm(): void {
+    this.legalName = '';
+    this.businessType = 'LLC';
+    this.country = 'US';
+    this.contactEmail = '';
+    this.contactPhoneCountryCode = '+1';
+    this.contactPhoneNumber = '';
+    this.publicCity = '';
+    this.publicRegion = '';
+    this.websiteUrl = '';
+    this.description = '';
   }
 
   private normalizedContactPhone(): string | null {

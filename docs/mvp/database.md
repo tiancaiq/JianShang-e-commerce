@@ -36,6 +36,17 @@ Phase 1 setup must define conventions only. It must not create feature tables.
 The table lists below define logical ownership. Exact DDL is created later in
 small Flyway migrations.
 
+Current MVP implementation uses three active MySQL schemas:
+
+- `identity`, owned by `auth-service`, for users, roles, individual seller
+  profiles, business applications, businesses, memberships, and business
+  verification audit.
+- `catalog`, owned by `product-service`, for categories, listings, listing
+  media metadata, listing images, listing moderation, and public listing
+  search source data.
+- `chat`, owned by `chat-service`, for conversations, participants, and text
+  messages.
+
 ## 2. Identity Schema
 
 ### `users`
@@ -127,18 +138,6 @@ The table must not store exact address, meeting location, payment credentials,
 delivery address, or buyer contact data. Activation also grants the local
 `INDIVIDUAL_SELLER` role in `user_roles`.
 
-### `individual_seller_profiles`
-
-| Column | Notes |
-|---|---|
-| `user_id` | Primary key and owner |
-| `public_city` | Approximate location |
-| `public_region` | Approximate location |
-| `terms_version` | Accepted version |
-| `terms_accepted_at` | UTC |
-| `status` | `ACTIVE`, `SUSPENDED`, `CLOSED` |
-| timestamps | UTC |
-
 ### `business_applications`
 
 Stores applicant, legal name, business type, country, contact data, provider
@@ -171,10 +170,16 @@ Approval creates one active `businesses` row and one active `OWNER`
 `business_memberships` row for the applicant. Rejection and information
 requests do not create a business.
 
+A generated `active_business_account_user_id` column and unique index enforce
+one non-rejected business application or approved business account per
+applicant. `REJECTED` applications keep their history but do not block the
+applicant from starting a corrected new application.
+
 Indexes:
 
 - `(applicant_user_id, status)`
 - `(status, submitted_at)` for review queue
+- unique `(active_business_account_user_id)` for the active/retry boundary
 
 ### `businesses`
 
@@ -220,6 +225,12 @@ Important columns:
 - name, description, logo, banner, support contact
 - `status`
 - version and timestamps
+
+BUS-05 creates the table, backfills one active default store for each already
+approved business, and creates one default active store in the business
+approval transaction for future approvals. Default store name comes from the
+approved business legal name; default support contact comes from the approved
+business application. Store slugs are unique and lower-case.
 
 ### `store_policy_versions`
 
@@ -285,7 +296,7 @@ business membership through service APIs before inserting or changing rows.
 | `currency` | ISO code |
 | `negotiable` | Individual only |
 | `sku` | Business only |
-| `quantity` | Individual fixed to 1 |
+| `quantity` | Individual fixed to 1; business catalog/display quantity in MVP |
 | `public_city`, `public_region` | Individual discovery |
 | `status` | Draft/review/active lifecycle, including admin removal |
 | `moderation_status` | Moderation state |
@@ -297,6 +308,9 @@ Constraints:
 
 - Exactly one seller reference matches `seller_type`.
 - Individual quantity is seller-entered and must be at least 1.
+- Business quantity is seller-entered catalog/display quantity in MVP. It is
+  not an authoritative inventory balance and cannot be reserved for checkout
+  until V2 inventory tables exist.
 - Business SKU unique within business when non-null.
 
 Indexes:
@@ -308,6 +322,14 @@ Indexes:
 
 LIST-07 public detail reads only listings where `status=ACTIVE` and
 `moderation_status=APPROVED`.
+
+BUS-LIST-00 changes the planned business store item publication path:
+approved businesses can publish complete store items to `ACTIVE` without
+item-level admin approval, and public `/stores` reads should include those
+active business store items. Do not represent self-published business items as
+admin-approved unless the schema records the publication source clearly. Add a
+forward-safe publication marker if the current status/moderation columns
+cannot distinguish business self-publication from admin moderation.
 
 ADM-LIST-04 adds `REMOVED_BY_ADMIN` as a stable listing status. Removed
 listings are not public, but their rows, versions, and moderation history stay
@@ -341,6 +363,58 @@ images.
 LIST-06 allows image/media moderation status to include `CHANGES_REQUESTED`
 when an admin asks the seller to revise a submitted listing.
 
+### `listing_visits`
+
+LIST-08 table for account-scoped public listing visits. It stores one row per
+authenticated account/listing pair.
+
+Important columns:
+
+- `listing_id`
+- `user_id`
+- `created_at`
+
+Constraints and indexes:
+
+- Primary key `(listing_id, user_id)`
+- `(user_id, created_at)`
+
+### `listing_likes`
+
+LIST-08 table for account-scoped public listing likes. A like row is retained
+with an `active` flag so unlike/re-like remains idempotent without destructive
+history loss.
+
+Important columns:
+
+- `listing_id`
+- `user_id`
+- `active`
+- `created_at`
+- `updated_at`
+
+Constraints and indexes:
+
+- Primary key `(listing_id, user_id)`
+- `(user_id, active, updated_at)`
+- `(listing_id, active)`
+
+### `listing_engagement_stats`
+
+LIST-08 count projection owned by product-service. MySQL remains authoritative;
+OpenSearch may copy these counts later only as a derived read projection.
+
+Important columns:
+
+- `listing_id`
+- `visit_count`
+- `like_count`
+- `updated_at`
+
+Counts are updated transactionally with the command that creates the unique
+visit or changes like active state. Counts must never become negative and do
+not update the listing aggregate version.
+
 ### `listing_moderation_decisions`
 
 LIST-06 append-only decision history for submitted listing review.
@@ -364,18 +438,32 @@ Append-only status change with actor, reason, and correlation ID.
 
 ## 5. Chat and Individual Trade Schema
 
+CHAT-00 selects a dedicated chat-service schema for MVP conversation and
+message data. Individual trade tables remain V3 and may be owned by a later
+trade domain once basic chat is validated.
+
 ### `conversations`
 
-MVP conversations are tied to one individual listing.
+MVP conversations are tied to one active approved individual listing and use
+conversation type `LISTING_BUYER_SELLER`.
 
-Columns include listing, buyer, seller, status, last message time, and
-timestamps.
+Columns include conversation type, subject listing, buyer, seller, status,
+last message ID, last message time, version, and timestamps.
 
-Unique: `(listing_id, buyer_user_id, seller_user_id)`.
+Unique for `LISTING_BUYER_SELLER`:
+`(subject_listing_id, buyer_user_id, seller_user_id)`.
+
+The same user may appear as buyer in one conversation and seller in another.
+Buyer/seller role is conversation-scoped and must not be inferred from global
+role lists.
 
 ### `conversation_participants`
 
-Participant state including last-read message and blocked time.
+Participant state including user, role in conversation, last-read message, and
+last-read timestamp.
+
+`CHAT-03` uses `last_read_message_id` and `last_read_at` for per-participant
+unread state. Mark-read updates only the authenticated participant row.
 
 ### `messages`
 
@@ -384,15 +472,49 @@ Participant state including last-read message and blocked time.
 | `id` | Ordered opaque ID |
 | `conversation_id` | Parent |
 | `sender_user_id` | Participant |
-| `message_type` | `TEXT`, `TRADE_EVENT`, `SYSTEM` |
-| `body` | Nullable by type |
-| `moderation_state` | Safety state |
+| `message_type` | MVP accepts user-created `TEXT` |
+| `body` | Required for MVP `TEXT`, max 2000 characters |
+| `moderation_state` | MVP starts with `VISIBLE` |
 | `created_at` | Ordering |
 
 Indexes:
 
 - `(conversation_id, created_at, id)`
-- `(sender_user_id, created_at)` for abuse investigation
+- `(sender_user_id, created_at, id)` for abuse investigation
+
+The sender must exist in `conversation_participants` for the same
+conversation. Successful message sends update the parent conversation
+last-message fields.
+
+### `listing_trade_completions`
+
+CHAT-05 stores minimal conversation-gated individual completion state in
+chat-service. This is a scoped expansion from the earlier V3 trade-completion
+placement and does not add reputation, reviews, payment, shipping, order, or
+buyer contact sharing.
+
+Important columns:
+
+- `id`
+- `listing_id`
+- `conversation_id`
+- `seller_user_id`
+- `buyer_user_id`
+- `quantity_sold`: sold quantity recorded by the seller; defaults to `1`
+- `status`: `SELLER_MARKED_DONE`, `BUYER_CONFIRMED`, `CANCELLED`
+- seller marked done, buyer confirmed, and cancelled timestamps
+- version and timestamps
+
+Rules:
+
+- `conversation_id` is unique, making seller mark-done idempotent per
+  conversation.
+- Buyer and seller IDs are copied from the fixed conversation participants,
+  not accepted from UI input.
+- `quantity_sold` is validated by chat-service against the product listing
+  quantity before seller mark-done.
+- Buyer confirmation closes the product listing through product-service APIs;
+  chat-service never writes product-service tables.
 
 ### `trades`
 

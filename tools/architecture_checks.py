@@ -18,18 +18,31 @@ from pathlib import Path
 ACTIVE_MVP_SERVICE_ROOTS = {
     "api-gateway": "api_gateway",
     "auth-service": "auth_service",
+    "chat-service": "chat_service",
     "product-service": "product_service",
 }
 
 COMMON_ROOTS = {
     "common-core": "common.core",
+    "common-storage": "common.storage",
     "common-web": "common.web",
     "common-testing": "common.testing",
 }
 
 SERVICE_DATABASE_NAMES = {
     "auth-service": {"auth_service", "identity"},
-    "product-service": {"product-service", "product_service", "marketplace"},
+    "chat-service": {"chat"},
+    "product-service": {"catalog", "marketplace", "product-service", "product_service"},
+}
+
+SERVICE_FLYWAY_LOCATIONS = {
+    "auth-service": "classpath:db/migration/identity",
+    "chat-service": "classpath:db/migration/chat",
+    "product-service": "classpath:db/migration/catalog",
+}
+
+ARCHIVED_ROOT_MIGRATIONS = {
+    Path("auth-service/src/main/resources/db/migration/V1__init_users.sql"),
 }
 
 DOMAIN_SEGMENTS_FOR_COMMON = {
@@ -71,6 +84,7 @@ BANNED_COMMON_PATTERNS = {
 PACKAGE_RE = re.compile(r"^\s*package\s+([a-zA-Z0-9_.]+)\s*;", re.MULTILINE)
 IMPORT_RE = re.compile(r"^\s*import\s+com\.msb\.ecom\.([a-zA-Z0-9_]+)\.", re.MULTILINE)
 SPRING_DATASOURCE_URL_RE = re.compile(r"spring\.datasource\.url\s*=\s*(.+)")
+SPRING_FLYWAY_LOCATIONS_RE = re.compile(r"spring\.flyway\.locations\s*=\s*(.+)")
 
 
 @dataclass(frozen=True)
@@ -218,6 +232,43 @@ def check_service_database_ownership(repo: Path) -> list[Violation]:
     return violations
 
 
+def check_service_flyway_boundaries(repo: Path) -> list[Violation]:
+    violations: list[Violation] = []
+    for service_root, expected_location in SERVICE_FLYWAY_LOCATIONS.items():
+        root = repo / service_root
+        application_properties = root / "src/main/resources/application.properties"
+        if application_properties.exists():
+            text = read_text(application_properties)
+            match = SPRING_FLYWAY_LOCATIONS_RE.search(text)
+            if not match:
+                violations.append(
+                    Violation(
+                        application_properties,
+                        f"missing explicit spring.flyway.locations={expected_location}",
+                    )
+                )
+            elif match.group(1).strip() != expected_location:
+                violations.append(
+                    Violation(
+                        application_properties,
+                        f"spring.flyway.locations must be {expected_location}",
+                    )
+                )
+
+        migration_root = root / "src/main/resources/db/migration"
+        if migration_root.exists():
+            for path in sorted(migration_root.glob("*.sql")):
+                relative_path = path.relative_to(repo)
+                if relative_path not in ARCHIVED_ROOT_MIGRATIONS:
+                    violations.append(
+                        Violation(
+                            path,
+                            "unexpected root Flyway migration; active MVP migrations use a service-owned subfolder",
+                        )
+                    )
+    return violations
+
+
 def run_checks(repo: Path) -> list[Violation]:
     checks = [
         check_service_package_ownership,
@@ -225,6 +276,7 @@ def run_checks(repo: Path) -> list[Violation]:
         check_service_import_boundaries,
         check_common_module_purity,
         check_service_database_ownership,
+        check_service_flyway_boundaries,
     ]
     violations: list[Violation] = []
     for check in checks:
@@ -259,7 +311,12 @@ def run_self_test() -> int:
         )
         write_file(
             repo / "product-service/src/main/resources/application.properties",
-            "spring.datasource.url=jdbc:mysql://localhost:3306/identity\n",
+            "spring.datasource.url=jdbc:mysql://localhost:3306/identity\n"
+            "spring.flyway.locations=classpath:db/migration/catalog\n",
+        )
+        write_file(
+            repo / "chat-service/src/main/resources/db/migration/V1__bad_root.sql",
+            "create table bad_root (id bigint primary key);\n",
         )
 
         violations = run_checks(repo)
@@ -269,6 +326,7 @@ def run_self_test() -> int:
             "common module contains JPA entity",
             "common module package contains domain segment",
             "datasource URL references another service database",
+            "unexpected root Flyway migration",
         ]
         missing = [fragment for fragment in required_fragments if fragment not in messages]
         if missing:

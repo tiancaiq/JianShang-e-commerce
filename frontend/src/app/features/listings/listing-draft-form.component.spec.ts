@@ -2,7 +2,9 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
+import { BusinessStoreContext } from '../../core/models/business-store.model';
 import { Category, ListingMedia } from '../../core/models/listing.model';
+import { BusinessStoreService } from '../../core/services/business-store.service';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 import { listingDraft, listingImage } from '../../testing/listing-test-fixtures';
@@ -12,6 +14,7 @@ describe('ListingDraftFormComponent', () => {
   let fixture: ComponentFixture<ListingDraftFormComponent>;
   let component: ListingDraftFormComponent;
   let listingService: jasmine.SpyObj<ListingService>;
+  let businessStoreService: jasmine.SpyObj<BusinessStoreService>;
   let toastService: jasmine.SpyObj<ToastService>;
   let router: jasmine.SpyObj<Router>;
 
@@ -59,6 +62,29 @@ describe('ListingDraftFormComponent', () => {
     uploadUrl: media.uploadUrl,
   });
 
+  const storeContext: BusinessStoreContext = {
+    businessId: '01B00000000000000000000001',
+    businessLegalName: 'Acme Trading LLC',
+    businessStatus: 'ACTIVE',
+    membershipRole: 'OWNER',
+    permissions: ['LISTING_DRAFT_CREATE'],
+    store: {
+      id: '01S00000000000000000000001',
+      businessId: '01B00000000000000000000001',
+      slug: 'acme-trading',
+      name: 'Acme Trading',
+      description: null,
+      logoUrl: null,
+      bannerUrl: null,
+      supportEmail: null,
+      supportPhone: null,
+      status: 'ACTIVE',
+      version: 0,
+      createdAt: '2026-07-08T12:00:00Z',
+      updatedAt: '2026-07-08T12:00:00Z',
+    },
+  };
+
   beforeEach(async () => {
     if (!URL.createObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:listing-preview' });
@@ -76,11 +102,18 @@ describe('ListingDraftFormComponent', () => {
       'submitForReview',
       'closeListing',
       'requestMediaUpload',
+      'requestBusinessStoreItemMediaUpload',
       'uploadMediaFile',
       'confirmMediaUpload',
+      'confirmBusinessStoreItemMediaUpload',
       'updateListingImages',
+      'updateBusinessStoreItemImages',
+      'getBusinessStoreItem',
+      'createBusinessStoreItem',
+      'updateBusinessStoreItem',
       'mediaUrl',
     ]);
+    businessStoreService = jasmine.createSpyObj<BusinessStoreService>('BusinessStoreService', ['getCurrentStoreContext']);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     (router as unknown as { url: string }).url = '/account/listings/new';
@@ -98,20 +131,75 @@ describe('ListingDraftFormComponent', () => {
     }));
     listingService.closeListing.and.returnValue(of({ ...draft, status: 'CLOSED', version: 1 }));
     listingService.requestMediaUpload.and.returnValue(of(media));
+    listingService.requestBusinessStoreItemMediaUpload.and.returnValue(of({
+      ...media,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      uploadUrl: `/api/v1/businesses/${storeContext.businessId}/store/items/${draft.id}/media/${media.id}/content`,
+    }));
     listingService.uploadMediaFile.and.returnValue(of(undefined));
     listingService.confirmMediaUpload.and.returnValue(of({
       ...media,
       uploadStatus: 'UPLOADED' as const,
       version: 1,
     }));
+    listingService.confirmBusinessStoreItemMediaUpload.and.returnValue(of({
+      ...media,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      uploadStatus: 'UPLOADED' as const,
+      version: 1,
+    }));
     listingService.updateListingImages.and.returnValue(of([image]));
+    listingService.updateBusinessStoreItemImages.and.returnValue(of([image]));
+    listingService.getBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      negotiable: false,
+      sku: 'SKU-STORE-1',
+      quantity: 3,
+      publicCity: null,
+      publicRegion: null,
+    }));
+    listingService.createBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      negotiable: false,
+      sku: 'SKU-STORE-1',
+      quantity: 3,
+      publicCity: null,
+      publicRegion: null,
+    }));
+    listingService.updateBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      negotiable: false,
+      sku: 'SKU-STORE-1',
+      quantity: 4,
+      publicCity: null,
+      publicRegion: null,
+      version: 1,
+    }));
     listingService.mediaUrl.and.callFake(url => url || '');
+    businessStoreService.getCurrentStoreContext.and.returnValue(of(storeContext));
 
     await TestBed.configureTestingModule({
       imports: [ListingDraftFormComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: ListingService, useValue: listingService },
+        { provide: BusinessStoreService, useValue: businessStoreService },
         { provide: ToastService, useValue: toastService },
         { provide: Router, useValue: router },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => null } } } },
@@ -371,6 +459,58 @@ describe('ListingDraftFormComponent', () => {
     }));
     expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 3);
     expect(component.errorMsg()).toBe('');
+  });
+
+  it('creates store item drafts from the approved business store context', () => {
+    (router as unknown as { url: string }).url = '/seller/store/items/new';
+    fixture.detectChanges();
+    fillCommonFields();
+    component.sku = ' SKU-STORE-1 ';
+    component.quantity = 3;
+    component.negotiable = true;
+
+    component.saveDraft();
+
+    expect(businessStoreService.getCurrentStoreContext).toHaveBeenCalled();
+    expect(listingService.createBusinessStoreItem).toHaveBeenCalledOnceWith(
+      storeContext.businessId,
+      jasmine.objectContaining({
+        sellerType: 'BUSINESS',
+        businessId: storeContext.businessId,
+        sku: 'SKU-STORE-1',
+        quantity: 3,
+        negotiable: false,
+        location: null,
+      }),
+    );
+    expect(listingService.createDraft).not.toHaveBeenCalled();
+    expect(router.navigate).toHaveBeenCalledWith(['/seller/store/items', draft.id, 'edit']);
+  });
+
+  it('uploads selected images through business store item media routes after creating a store item', () => {
+    (router as unknown as { url: string }).url = '/seller/store/items/new';
+    fixture.detectChanges();
+    fillCommonFields();
+    component.sku = ' SKU-STORE-1 ';
+    component.quantity = 3;
+
+    component.handleMediaSelected(fileInputEvent(new File(['x'], 'keyboard.png', { type: 'image/png' })));
+    component.saveDraft();
+
+    expect(listingService.createBusinessStoreItem).toHaveBeenCalled();
+    expect(listingService.requestBusinessStoreItemMediaUpload).toHaveBeenCalledOnceWith(storeContext.businessId, draft.id, {
+      contentType: 'image/png',
+      fileName: 'keyboard.png',
+      sizeBytes: 1,
+    });
+    expect(listingService.confirmBusinessStoreItemMediaUpload).toHaveBeenCalledOnceWith(storeContext.businessId, draft.id, media.id, {
+      sizeBytes: 1,
+    });
+    expect(listingService.updateBusinessStoreItemImages).toHaveBeenCalledOnceWith(storeContext.businessId, draft.id, {
+      images: [{ mediaId: media.id, altText: 'bike.png' }],
+    });
+    expect(listingService.updateListingImages).not.toHaveBeenCalled();
+    expect(toastService.success).toHaveBeenCalledWith('Listing draft and images saved.');
   });
 
   it('saves pending review listing edits before resubmitting for review', () => {

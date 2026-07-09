@@ -36,6 +36,8 @@ export function publicListing(overrides: Partial<PublicListing> = {}): PublicLis
     publicRegion: 'CA',
     publishedAt: '2026-06-17T12:00:00Z',
     transactionNotice: 'Payment and delivery are arranged directly by participants.',
+    visitCount: 0,
+    likeCount: 0,
     images: [publicListingImage()],
     ...overrides,
   };
@@ -70,6 +72,7 @@ export function listingDraft(overrides: Partial<ListingDraft> = {}): ListingDraf
     sellerType: 'INDIVIDUAL',
     individualSellerUserId: 'user-1',
     businessId: null,
+    storeId: null,
     sellerDisplayName: 'Alex Seller',
     categoryId: '01K00000000000000000000001',
     title: 'Used bicycle',

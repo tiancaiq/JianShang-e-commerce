@@ -3,33 +3,32 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { take } from 'rxjs';
 import { AuthService, LoginClient } from '../../core/services/auth.service';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
+import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [ToastContainerComponent],
+  imports: [BrandMascotComponent, ToastContainerComponent],
   template: `
     <div class="login-page bg-noise">
-      <section class="login-panel">
-        <div class="login-brand">
-          <svg width="48" height="48" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-            <rect width="28" height="28" rx="6" fill="url(#lg)"/>
-            <path d="M8 14l4-6 4 6-4 6-4-6z" fill="#0c0c0e" opacity="0.9"/>
-            <path d="M14 10l4-2v12l-4-2V10z" fill="#0c0c0e" opacity="0.6"/>
-            <defs><linearGradient id="lg" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#f98e07"/><stop offset="1" stop-color="#dd6802"/></linearGradient></defs>
-          </svg>
-          <h1 class="brand-title">MSB<span class="accent">Commerce</span></h1>
-          <p class="brand-subtitle">Sign in or create your MSB account</p>
-        </div>
+      <section class="login-shell">
+        <app-brand-mascot variant="login" alt="MSB marketplace mascot on the login page" />
+        <div class="login-panel">
+          <div class="login-brand">
+            <span class="brand-mark" aria-hidden="true">M</span>
+            <h1 class="brand-title">MSB<span class="accent">Commerce</span></h1>
+            <p class="brand-subtitle">Sign in or create your MSB account</p>
+          </div>
 
-        <button type="button" class="submit-btn" (click)="handleLogin()">
-          Continue to sign in
-        </button>
-        @if (canCreateAccount()) {
-          <button type="button" class="secondary-btn" (click)="handleRegister()">
-            Create account
+          <button type="button" class="submit-btn" (click)="handleLogin()">
+            Continue to sign in
           </button>
-        }
+          @if (canCreateAccount()) {
+            <button type="button" class="secondary-btn" (click)="handleRegister()">
+              Create account
+            </button>
+          }
+        </div>
       </section>
       <app-toast-container />
     </div>
@@ -37,23 +36,39 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
   styles: [`
     .login-page {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--color-bg-primary);
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(255, 207, 228, 0.38) 0 18%, transparent 19%),
+        radial-gradient(circle at 90% 0%, rgba(206, 193, 255, 0.34) 0 16%, transparent 17%),
+        linear-gradient(180deg, #fff7fb 0%, #f8f0ff 100%);
       position: relative;
       padding: 1.5rem;
     }
 
-    .login-panel {
+    .login-shell {
       width: 100%;
-      max-width: 400px;
-      padding: 2.5rem;
-      background: var(--color-bg-secondary);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-2xl);
-      box-shadow: var(--shadow-lg);
+      max-width: 900px;
+      display: grid;
+      grid-template-columns: minmax(280px, 420px) minmax(0, 400px);
+      gap: 1rem;
+      align-items: stretch;
+      padding: 1rem;
+      border: 1px solid rgba(234, 215, 242, 0.94);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 24px 70px rgba(132, 83, 143, 0.18);
       animation: fadeIn 0.5s ease-out;
+    }
+
+    .login-panel {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: clamp(1.2rem, 4vw, 2.5rem);
+      border: 1px solid rgba(234, 215, 242, 0.95);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
     }
 
     @keyframes fadeIn {
@@ -65,20 +80,33 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       text-align: center;
       margin-bottom: 2rem;
     }
-    .login-brand svg {
+
+    .brand-mark {
+      width: 3rem;
+      height: 3rem;
+      display: grid;
+      place-items: center;
       margin: 0 auto 1rem;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #ff9fcb, #9476ee);
+      color: #fff;
+      font-weight: 900;
+      box-shadow: 0 12px 24px rgba(190, 58, 131, 0.22);
     }
+
     .brand-title {
       font-family: var(--font-display);
       font-size: 1.75rem;
-      font-weight: 700;
-      color: var(--color-text-primary);
+      font-weight: 900;
+      color: #37214b;
       margin-bottom: 0.25rem;
     }
-    .accent { color: var(--color-accent); }
+
+    .accent { color: #be3a83; }
+
     .brand-subtitle {
       font-size: 0.875rem;
-      color: var(--color-text-muted);
+      color: #7e6d96;
     }
 
     .submit-btn {
@@ -87,20 +115,22 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       justify-content: center;
       width: 100%;
       padding: 0.75rem;
-      background: linear-gradient(135deg, var(--color-accent) 0%, #dd6802 100%);
-      color: #0c0c0e;
+      background: linear-gradient(135deg, #f472b6, #8b6fe8);
+      color: #fff;
       font-family: var(--font-display);
-      font-weight: 600;
+      font-weight: 900;
       font-size: 0.9375rem;
       border: none;
-      border-radius: var(--radius-md);
+      border-radius: 8px;
       cursor: pointer;
       transition: all var(--transition-fast);
     }
+
     .submit-btn:hover {
-      box-shadow: 0 0 24px -4px rgba(249, 142, 7, 0.4);
+      box-shadow: 0 14px 26px rgba(190, 58, 131, 0.2);
       transform: translateY(-1px);
     }
+
     .secondary-btn {
       display: flex;
       align-items: center;
@@ -108,19 +138,26 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       width: 100%;
       margin-top: 0.75rem;
       padding: 0.75rem;
-      background: transparent;
-      color: var(--color-text-primary);
+      background: #fff8fc;
+      color: #be3a83;
       font-family: var(--font-display);
-      font-weight: 600;
+      font-weight: 900;
       font-size: 0.9375rem;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
+      border: 1px solid #ead3f0;
+      border-radius: 8px;
       cursor: pointer;
       transition: all var(--transition-fast);
     }
+
     .secondary-btn:hover {
-      border-color: var(--color-accent);
-      color: var(--color-accent);
+      border-color: #f472b6;
+      color: #8b6fe8;
+    }
+
+    @media (max-width: 760px) {
+      .login-shell {
+        grid-template-columns: 1fr;
+      }
     }
   `]
 })

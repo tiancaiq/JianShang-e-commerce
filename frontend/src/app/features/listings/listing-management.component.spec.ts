@@ -16,6 +16,7 @@ describe('ListingManagementComponent', () => {
     sellerType: 'INDIVIDUAL',
     individualSellerUserId: '01U00000000000000000000001',
     businessId: null,
+    storeId: null,
     categoryId: '01K00000000000000000000001',
     title: 'Used bicycle',
     description: 'A reliable city bike.',

@@ -164,13 +164,15 @@ flowchart LR
 
     Gateway --> Identity["Identity and User"]
     Gateway --> Listing["Listing and Business"]
-    Gateway --> Trade["Chat and Individual Trade"]
+    Gateway --> Chat["Chat"]
+    Gateway -. V3 .-> Trade["Individual Trade"]
     Gateway -. V2 .-> Commerce["Cart, Inventory and Order"]
     Gateway -. V2 .-> Payment["Payment"]
     Gateway --> Review["Basic Moderation"]
     Gateway -. V3 .-> Agent["Agent Service"]
 
     Listing --> MySQL[("MySQL")]
+    Chat --> MySQL
     Trade --> MySQL
     Commerce --> MySQL
     Payment --> MySQL
@@ -178,11 +180,13 @@ flowchart LR
 
     Commerce --> Redis[("Redis")]
     Gateway --> Redis
+    Chat --> Redis
     Trade --> Redis
 
     Listing --> Kafka[("Kafka")]
     Commerce --> Kafka
     Payment --> Kafka
+    Chat --> Kafka
     Trade --> Kafka
     Kafka --> Notification["Notification"]
     Kafka --> Search["Search Projector"]
@@ -262,22 +266,43 @@ Split trigger:
 - Separate teams own the domains, or
 - Schema/release coupling becomes a measured delivery problem.
 
-### 4.4 Trade service
+### 4.4 Chat service
 
-New module when its first roadmap slice begins.
+New module when its first implementation roadmap slice begins.
 
 Responsibilities:
 
 - Individual listing conversations
 - Messages
+- Conversation participants
+- Per-participant read state
+- Cursor-paginated message history
+- Safe participant display hydration or snapshots
+
+MVP enables only `LISTING_BUYER_SELLER` conversations. Customer service,
+business-admin support, admin direct messaging, AI agent sessions, reviews,
+reports, and blocking require future domain-specific slices before they are
+enabled.
+
+Realtime delivery may use WebSocket/SSE later. HTTP remains the authoritative
+command and history interface. Persistent state remains in MySQL. Redis may
+coordinate connections and presence when realtime delivery is added.
+
+### 4.5 Individual trade service (V3)
+
+New module or chat-adjacent domain added after basic chat is validated.
+
+Responsibilities:
+
 - Seller selection of a buyer from a listing conversation
 - Individual trade state
 - Trade confirmations
 
-Realtime delivery may use WebSocket/SSE. Persistent state remains in MySQL.
-Redis may coordinate connections and presence.
+Trade APIs derive the buyer from a conversation created by chat-service. They
+must not accept replacement buyer IDs, email, phone, address, or payment
+status from the seller.
 
-### 4.5 Commerce service (V2)
+### 4.6 Commerce service (V2)
 
 Evolution path: reintroduce inventory/order modules from the archived V2
 tutorial stubs only after an approved V2 slice defines the real contracts.
@@ -299,7 +324,7 @@ commands; no service writes another service's tables.
 These capabilities are intentionally outside the MVP business seller portal.
 MVP merchants manage business profile and basic listings only.
 
-### 4.6 Payment service (V2)
+### 4.7 Payment service (V2)
 
 Archived V2 tutorial stub: `payment-service`. It is not part of the active MVP
 Maven build or CI validation.
@@ -315,7 +340,7 @@ Responsibilities:
 
 The payment service never receives raw card data.
 
-### 4.7 Notification service (V2)
+### 4.8 Notification service (V2)
 
 Archived V2 tutorial stub: `notification-service`. It is not part of the
 active MVP Maven build or CI validation.
@@ -328,7 +353,7 @@ Responsibilities:
 - Honor preferences
 - Retry and dead-letter failures
 
-### 4.8 Moderation and support module
+### 4.9 Moderation and support module
 
 Initially implemented as a module with its own API and tables. It can be
 deployed with marketplace administration until load or ownership justifies a
@@ -340,7 +365,7 @@ Responsibilities:
 - MVP: business and listing approval decisions
 - V3: reports, suspensions, support cases, operations queue, and audit search
 
-### 4.9 Agent service (V3)
+### 4.10 Agent service (V3)
 
 New isolated service added after underlying APIs are stable.
 

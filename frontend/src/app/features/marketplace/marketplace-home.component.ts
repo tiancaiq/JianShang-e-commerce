@@ -1,7 +1,6 @@
-import { DecimalPipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   Category,
   ListingCondition,
@@ -18,78 +17,45 @@ import {
   publicListingPrimaryImageUrl,
 } from '../../shared/listing/public-listing-display';
 import { AuthService } from '../../core/services/auth.service';
-import { UserProfileCardComponent } from '../account/user-profile-card.component';
+import { BrandLoadingScreenComponent } from '../../shared/components/ui/brand-loading-screen.component';
+import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
+import { MarketplaceFilterPanelComponent } from './components/marketplace-filter-panel.component';
+import { MarketplaceHeroBannerComponent } from './components/marketplace-hero-banner.component';
+import { MarketplaceProductCardComponent } from './components/marketplace-product-card.component';
+import { MarketplaceSellerCardComponent } from './components/marketplace-seller-card.component';
+import { MarketplaceSidebarComponent } from './components/marketplace-sidebar.component';
+import { MarketplaceUiProduct } from './components/marketplace-ui.model';
 
 @Component({
   selector: 'app-marketplace-home',
   standalone: true,
-  imports: [DecimalPipe, FormsModule, RouterLink, UserProfileCardComponent],
+  imports: [
+    BrandLoadingScreenComponent,
+    BrandMascotComponent,
+    FormsModule,
+    MarketplaceFilterPanelComponent,
+    MarketplaceHeroBannerComponent,
+    MarketplaceProductCardComponent,
+    MarketplaceSellerCardComponent,
+    MarketplaceSidebarComponent,
+    RouterLink,
+  ],
   template: `
     <section class="marketplace-home">
-      <section class="hero-section" aria-labelledby="marketplace-title">
-        <div class="hero-copy">
-          <p class="eyebrow">MSB cute market</p>
-          <h1 id="marketplace-title">Find sweet local treasures.</h1>
-          <p class="summary">Browse approved individual listings with clear seller labels and public pickup areas.</p>
-
-          <form class="hero-search" role="search" (submit)="runSearch(); $event.preventDefault()">
-            <label>
-              <span>Search marketplace</span>
-              <input
-                name="search"
-                type="search"
-                [(ngModel)]="searchTerm"
-                placeholder="Search figures, books, bikes, decor..."
-              />
-            </label>
-            <button type="submit">Search</button>
-          </form>
-
-          <div class="hero-actions">
-            <a href="#listings" class="primary-link">Browse Listings</a>
-            <a routerLink="/account/listings" class="secondary-link">My Listings</a>
-          </div>
-        </div>
-
-        <div class="hero-preview" aria-label="Marketplace preview">
-          <div class="preview-window">
-            <div class="preview-bar">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-
-            @if (featuredListing()) {
-              <a class="featured-card" [routerLink]="['/listings', featuredListing()?.id]">
-                <div class="featured-image">
-                  @if (featuredListing()?.images?.[0]?.url || featuredListing()?.images?.[0]?.uploadUrl) {
-                    <img [src]="imageUrl(featuredListing()!)" [alt]="featuredListing()?.images?.[0]?.altText || featuredListing()?.title || 'Featured listing'" />
-                  } @else {
-                    <span>{{ featuredListing()?.categoryName }}</span>
-                  }
-                </div>
-                <div>
-                  <span class="mini-label">Featured approved listing</span>
-                  <strong>{{ featuredListing()?.title }}</strong>
-                  <small>By {{ ownerLabel(featuredListing()) }}</small>
-                  <p>{{ featuredListing()?.priceAmount | number: '1.2-2' }} {{ featuredListing()?.currency }}</p>
-                </div>
-              </a>
-            } @else {
-              <div class="featured-empty">
-                <span>Approved listings will appear here.</span>
-              </div>
-            }
-
-            <div class="preview-notes">
-              <span>Individual trades stay off-platform</span>
-              <span>Payment and delivery are arranged directly</span>
-            </div>
-          </div>
-        </div>
-      </section>
+      <app-marketplace-hero-banner
+        [featuredProduct]="featuredProduct()"
+        [authenticated]="isSignedIn()"
+        (searchRequested)="runHeroSearch($event)"
+        (loginRequested)="startHeroSellFlow()"
+      />
 
       <section id="listings" class="browse-section" aria-labelledby="browse-title">
+        <app-marketplace-sidebar
+          [categories]="categoryOptions()"
+          [selectedCategoryId]="selectedCategoryId"
+          (categorySelected)="selectCategory($event)"
+        />
+
         <main class="listing-area">
           <div class="browse-panel">
             <div class="browse-header">
@@ -111,40 +77,38 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
               </div>
             </div>
 
+            <div class="browse-tabs" role="list" aria-label="Marketplace browse shortcuts">
+              <button type="button" [class.active]="!hasActiveSearch()" (click)="clearFilters()">All Items</button>
+              <button type="button" [class.active]="sortMode === 'newest'" (click)="selectNewest()">New Arrivals</button>
+              <button type="button" [class.active]="maxPrice === 50" (click)="selectBudgetFinds()">Under $50</button>
+              <a routerLink="/account/listings">List an Item</a>
+            </div>
+
             @if (loading()) {
-              <div class="empty-list">Loading approved listings...</div>
+              <app-brand-loading-screen
+                label="Loading approved listings"
+                detail="The marketplace mascot is arranging fresh local finds."
+              />
             } @else if (errorMsg()) {
               <div class="empty-list">{{ errorMsg() }}</div>
             } @else if (marketplaceListings().length === 0) {
-              <div class="empty-list">{{ hasActiveSearch() ? 'No listings match these filters.' : 'No approved individual listings yet.' }}</div>
+              <div class="empty-list cute-empty">
+                <app-brand-mascot variant="badge" alt="MSB marketplace mascot empty state" />
+                <div>
+                  <strong>{{ hasActiveSearch() ? 'No sweet finds yet' : 'No approved individual listings yet' }}</strong>
+                  <p>{{ hasActiveSearch() ? 'Try changing your filters or check back soon.' : 'Fresh local listings will appear here once approved.' }}</p>
+                  @if (hasActiveSearch()) {
+                    <button type="button" (click)="clearFilters()">Clear filters</button>
+                  }
+                </div>
+              </div>
             } @else {
               <div class="listing-grid">
                 @for (listing of marketplaceListings(); track listing.id) {
-                  <a class="listing-card" [routerLink]="['/listings', listing.id]">
-                    <div class="listing-image">
-                      @if (listing.images[0]?.url || listing.images[0]?.uploadUrl) {
-                        <img [src]="imageUrl(listing)" [alt]="listing.images[0]?.altText || listing.title" />
-                      } @else {
-                        <span>{{ listing.categoryName }}</span>
-                      }
-                    </div>
-                    <div class="listing-body">
-                      <div class="listing-meta">
-                        <span>{{ listing.categoryName }}</span>
-                        <span>{{ conditionLabel(listing.condition) }}</span>
-                      </div>
-                      <h3>{{ listing.title }}</h3>
-                      <p class="seller-name">By {{ ownerLabel(listing) }}</p>
-                      <p>{{ locationLabel(listing) }}</p>
-                      <div class="listing-price">
-                        {{ listing.priceAmount | number: '1.2-2' }} {{ listing.currency }}
-                      </div>
-                      <div class="card-foot">
-                        <span>Off-platform trade</span>
-                        <strong>Details</strong>
-                      </div>
-                    </div>
-                  </a>
+                  <app-marketplace-product-card
+                    [product]="productFor(listing)"
+                    [detailLink]="['/listings', listing.id]"
+                  />
                 }
               </div>
               @if (hasMore()) {
@@ -160,56 +124,24 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
 
         <aside class="marketplace-rail" aria-label="Marketplace account and filters">
           @if (authService.user(); as user) {
-            <app-user-profile-card [user]="user" />
+            <app-marketplace-seller-card [user]="user" />
           }
 
-          <section class="filter-panel" aria-label="Filter marketplace listings">
-            <div class="filter-heading">
-              <span>Filter by</span>
-              @if (hasActiveSearch()) {
-                <button type="button" class="clear-button" (click)="clearFilters()">Clear</button>
-              }
-            </div>
-
-            <form class="filter-stack" (submit)="runSearch(); $event.preventDefault()">
-              <label>
-                <span>Condition</span>
-                <select name="condition" [(ngModel)]="selectedCondition" (ngModelChange)="runSearch()">
-                  <option value="ALL">Any condition</option>
-                  <option value="NEW">New</option>
-                  <option value="OPEN_BOX">Open box</option>
-                  <option value="LIKE_NEW">Like new</option>
-                  <option value="GOOD">Good</option>
-                  <option value="FAIR">Fair</option>
-                  <option value="FOR_PARTS">For parts</option>
-                </select>
-              </label>
-
-              <div class="price-fields">
-                <label>
-                  <span>Min price</span>
-                  <input name="minPrice" type="number" min="0" inputmode="decimal" [(ngModel)]="minPrice" />
-                </label>
-
-                <label>
-                  <span>Max price</span>
-                  <input name="maxPrice" type="number" min="0" inputmode="decimal" [(ngModel)]="maxPrice" />
-                </label>
-              </div>
-
-              <label>
-                <span>City</span>
-                <input name="city" type="search" [(ngModel)]="city" placeholder="Irvine" />
-              </label>
-
-              <label>
-                <span>County</span>
-                <input name="county" type="search" [(ngModel)]="county" placeholder="Orange County" />
-              </label>
-
-              <button type="submit">Apply</button>
-            </form>
-          </section>
+          <app-marketplace-filter-panel
+            [hasActiveSearch]="hasActiveSearch()"
+            [selectedCondition]="selectedCondition"
+            [minPrice]="minPrice"
+            [maxPrice]="maxPrice"
+            [city]="city"
+            [county]="county"
+            (selectedConditionChange)="selectedCondition = $event; runSearch()"
+            (minPriceChange)="minPrice = $event"
+            (maxPriceChange)="maxPrice = $event"
+            (cityChange)="city = $event"
+            (countyChange)="county = $event"
+            (applyFilters)="runSearch()"
+            (clearFilters)="clearFilters()"
+          />
         </aside>
       </section>
     </section>
@@ -239,7 +171,7 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
     }
 
     .hero-copy,
-    .hero-preview {
+    .hero-art {
       position: relative;
       z-index: 1;
     }
@@ -341,41 +273,117 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
       box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.18);
     }
 
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-    }
-
-    .primary-link,
-    .secondary-link {
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 1rem;
+    .hero-art {
+      min-height: 320px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.72);
       border-radius: 8px;
-      font-weight: 900;
-      text-decoration: none;
+      box-shadow: 0 18px 42px rgba(132, 83, 143, 0.16);
     }
 
-    .primary-link {
-      background: linear-gradient(135deg, #ff85bd, #8b6fe8);
-      color: #fff;
-      box-shadow: 0 10px 22px rgba(190, 58, 131, 0.2);
+    .hero-art img {
+      width: 100%;
+      height: 100%;
+      min-height: inherit;
+      display: block;
+      object-fit: cover;
+      object-position: center;
     }
 
-    .secondary-link {
-      border: 1px solid var(--market-line);
+    .hero-art-card {
+      position: absolute;
+      right: 0.85rem;
+      bottom: 0.85rem;
+      width: min(78%, 270px);
+      display: grid;
+      gap: 0.18rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      border-radius: 8px;
       background: rgba(255, 255, 255, 0.86);
-      color: var(--market-accent-dark);
+      box-shadow: 0 14px 32px rgba(100, 63, 120, 0.18);
+      backdrop-filter: blur(16px);
+    }
+
+    .hero-art-card span,
+    .hero-art-card small {
+      color: var(--market-muted);
+      font-size: 0.75rem;
+      font-weight: 850;
+    }
+
+    .hero-art-card strong {
+      color: var(--market-ink);
+      font-weight: 950;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
     }
 
     .browse-section {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 280px;
+      grid-template-columns: 180px minmax(0, 1fr) 280px;
       gap: 1rem;
       align-items: start;
+      min-height: calc(100dvh - 112px);
+    }
+
+    .category-rail {
+      position: sticky;
+      top: 92px;
+      display: grid;
+      gap: 0.45rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(234, 215, 242, 0.95);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 12px 26px rgba(143, 92, 144, 0.1);
+    }
+
+    .rail-title {
+      display: grid;
+      gap: 0.1rem;
+      padding: 0.25rem 0.25rem 0.45rem;
+    }
+
+    .rail-title span,
+    .rail-note span {
+      color: var(--market-muted);
+      font-size: 0.72rem;
+      font-weight: 850;
+    }
+
+    .rail-title strong,
+    .rail-note strong {
+      color: var(--market-ink);
+      font-weight: 950;
+    }
+
+    .category-rail button {
+      width: 100%;
+      min-height: 36px;
+      justify-content: flex-start;
+      border: 0;
+      background: transparent;
+      color: var(--market-muted);
+      text-align: left;
+      font-size: 0.84rem;
+      box-shadow: none;
+    }
+
+    .category-rail button.active,
+    .category-rail button:hover {
+      background: linear-gradient(135deg, #ffe6f1, #f2ecff);
+      color: var(--market-accent-dark);
+    }
+
+    .rail-note {
+      display: grid;
+      gap: 0.2rem;
+      margin-top: 0.35rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(244, 114, 182, 0.2);
+      border-radius: 8px;
+      background: #fff6fb;
     }
 
     .marketplace-rail {
@@ -469,6 +477,37 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
       gap: 0.75rem;
     }
 
+    .browse-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .browse-tabs button,
+    .browse-tabs a {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--market-line);
+      border-radius: 8px;
+      background: #fff8fc;
+      color: var(--market-muted);
+      font-size: 0.82rem;
+      font-weight: 900;
+      padding: 0 0.75rem;
+      text-decoration: none;
+    }
+
+    .browse-tabs button.active,
+    .browse-tabs button:hover,
+    .browse-tabs a:hover {
+      border-color: rgba(244, 114, 182, 0.42);
+      background: linear-gradient(135deg, #ff8fc4, #9c83ef);
+      color: #fff;
+    }
+
     .price-fields {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -486,6 +525,41 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
       color: var(--market-muted);
       text-align: center;
       font-weight: 800;
+    }
+
+    .cute-empty {
+      grid-template-columns: auto minmax(0, 360px);
+      justify-content: center;
+      gap: 1rem;
+    }
+
+    .cute-empty div {
+      display: grid;
+      gap: 0.35rem;
+      justify-items: start;
+      text-align: left;
+    }
+
+    .cute-empty strong {
+      color: var(--market-ink);
+      font-size: 1.15rem;
+      font-weight: 950;
+    }
+
+    .cute-empty p {
+      margin: 0;
+      color: var(--market-muted);
+      font-weight: 750;
+    }
+
+    .cute-empty button {
+      min-height: 38px;
+      margin-top: 0.35rem;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #f472b6, #8b6fe8);
+      color: #fff;
+      box-shadow: 0 12px 24px rgba(190, 58, 131, 0.18);
     }
 
     .listing-grid {
@@ -543,6 +617,22 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
       object-fit: cover;
     }
 
+    .view-badge {
+      position: absolute;
+      right: 0.65rem;
+      top: 0.65rem;
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 0.55rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--market-accent-dark);
+      font-size: 0.72rem;
+      font-weight: 900;
+      box-shadow: 0 4px 12px rgba(143, 92, 144, 0.15);
+    }
+
     .listing-body {
       display: flex;
       flex-direction: column;
@@ -591,6 +681,15 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
     }
 
     @media (max-width: 1180px) {
+      .browse-section {
+        grid-template-columns: 160px minmax(0, 1fr);
+      }
+
+      .marketplace-rail {
+        grid-column: 1 / -1;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       .listing-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
@@ -600,6 +699,16 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
       .hero-section,
       .browse-section {
         grid-template-columns: 1fr;
+      }
+
+      .category-rail {
+        position: static;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .rail-title,
+      .rail-note {
+        grid-column: 1 / -1;
       }
 
       .filter-panel {
@@ -621,10 +730,19 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
         padding: 0.85rem;
       }
 
+      .hero-art {
+        min-height: 240px;
+      }
+
+      .category-rail {
+        grid-template-columns: 1fr;
+      }
+
       .preview-notes,
       .hero-search,
       .browse-tools,
       .price-fields,
+      .cute-empty,
       .listing-grid {
         grid-template-columns: 1fr;
       }
@@ -644,6 +762,8 @@ import { UserProfileCardComponent } from '../account/user-profile-card.component
 })
 export class MarketplaceHomeComponent implements OnInit {
   private readonly listingService = inject(ListingService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   readonly authService = inject(AuthService);
 
   listings = signal<PublicListing[]>([]);
@@ -668,7 +788,10 @@ export class MarketplaceHomeComponent implements OnInit {
       next: categories => this.categories.set(categories),
       error: () => this.categories.set([]),
     });
-    this.runSearch();
+    this.route.queryParamMap.subscribe(params => {
+      this.searchTerm = params.get('q') || '';
+      this.runSearch();
+    });
   }
 
   runSearch(): void {
@@ -723,6 +846,29 @@ export class MarketplaceHomeComponent implements OnInit {
     this.runSearch();
   }
 
+  runHeroSearch(query: string): void {
+    this.searchTerm = query;
+    this.runSearch();
+  }
+
+  startHeroSellFlow(): void {
+    this.router.navigateByUrl('/account/listings');
+  }
+
+  isSignedIn(): boolean {
+    return Boolean(this.authService.user());
+  }
+
+  selectNewest(): void {
+    this.sortMode = 'newest';
+    this.runSearch();
+  }
+
+  selectBudgetFinds(): void {
+    this.maxPrice = 50;
+    this.runSearch();
+  }
+
   clearFilters(): void {
     this.searchTerm = '';
     this.selectedCategoryId = 'ALL';
@@ -737,6 +883,11 @@ export class MarketplaceHomeComponent implements OnInit {
 
   featuredListing(): MarketplaceBrowseListing | null {
     return this.marketplaceListings()[0] || null;
+  }
+
+  featuredProduct(): MarketplaceUiProduct | null {
+    const listing = this.featuredListing();
+    return listing ? this.productFor(listing) : null;
   }
 
   locationLabel(listing: MarketplaceBrowseListing): string {
@@ -768,8 +919,33 @@ export class MarketplaceHomeComponent implements OnInit {
     return publicListingConditionLabel(condition);
   }
 
+  productFor(listing: MarketplaceBrowseListing): MarketplaceUiProduct {
+    const firstImage = listing.images[0];
+    const hasImage = Boolean(firstImage?.url || firstImage?.uploadUrl);
+    return {
+      id: listing.id,
+      title: listing.title,
+      sellerName: this.ownerLabel(listing),
+      priceAmount: listing.priceAmount,
+      currency: listing.currency,
+      categoryName: listing.categoryName,
+      conditionLabel: this.conditionLabel(listing.condition),
+      locationLabel: this.locationLabel(listing),
+      imageUrl: hasImage ? this.imageUrl(listing) : null,
+      imageAlt: firstImage?.altText || listing.title,
+      badge: this.productBadge(listing.id),
+      favoriteCount: listing.likeCount || 0,
+      visitCount: listing.visitCount || 0,
+    };
+  }
+
   imageUrl(listing: MarketplaceBrowseListing): string {
     return publicListingPrimaryImageUrl(listing, url => this.listingService.mediaUrl(url));
+  }
+
+  private productBadge(id: string): 'NEW' | 'HOT' | 'SALE' {
+    const badges = ['NEW', 'HOT', 'SALE'] as const;
+    return badges[id.length % badges.length];
   }
 
   private publicListingLoadMessage(error: { status?: number }): string {

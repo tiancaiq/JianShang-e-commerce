@@ -65,4 +65,16 @@ describe('UserProfileCardComponent', () => {
     expect(host.querySelector('img')).toBeNull();
     expect(host.textContent || '').toContain('HS');
   });
+
+  it('can hide the sell action when embedded in listing tabs', () => {
+    fixture.componentInstance.user = user;
+    fixture.componentInstance.showSellAction = false;
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const sellLink = Array.from(host.querySelectorAll('a'))
+      .find(link => link.textContent?.includes('Sell an Item'));
+
+    expect(sellLink).toBeUndefined();
+  });
 });

@@ -8,7 +8,10 @@ import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
 import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
 import com.msb.ecom.product_service.service.ListingService;
 import com.msb.ecom.product_service.dto.CategoryResponse;
+import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
+import com.msb.ecom.product_service.dto.ChatTradeCompletionRequest;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
+import com.msb.ecom.product_service.dto.ListingEngagementResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
 import com.msb.ecom.product_service.dto.ListingImageResponse;
 import com.msb.ecom.product_service.dto.ListingMediaConfirmRequest;
@@ -29,6 +32,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -73,9 +77,46 @@ public class ListingController {
         return listingService.getPublicListing(listingId);
     }
 
+    @PostMapping("/listings/{listingId}/visit")
+    public ListingEngagementResponse recordListingVisit(@PathVariable String listingId) {
+        return listingService.recordListingVisit(listingId);
+    }
+
+    @PostMapping("/listings/{listingId}/like")
+    public ListingEngagementResponse likeListing(@PathVariable String listingId) {
+        return listingService.likeListing(listingId);
+    }
+
+    @DeleteMapping("/listings/{listingId}/like")
+    public ListingEngagementResponse unlikeListing(@PathVariable String listingId) {
+        return listingService.unlikeListing(listingId);
+    }
+
+    @GetMapping("/listings/{listingId}/engagement/me")
+    public ListingEngagementResponse myListingEngagement(@PathVariable String listingId) {
+        return listingService.getMyListingEngagement(listingId);
+    }
+
+    @GetMapping("/internal/chat/listings/{listingId}/conversation-eligibility")
+    public ChatListingEligibilityResponse chatListingEligibility(@PathVariable String listingId) {
+        return listingService.chatListingEligibility(listingId);
+    }
+
+    @PostMapping("/internal/chat/listings/{listingId}/complete-trade")
+    public ListingDraftResponse completeChatTrade(
+            @PathVariable String listingId,
+            @RequestBody ChatTradeCompletionRequest request) {
+        return listingService.completeChatTrade(listingId, request);
+    }
+
     @GetMapping("/public/listings")
     public List<PublicListingResponse> publicListings() {
         return listingService.getPublicListings();
+    }
+
+    @GetMapping("/users/me/liked-listings")
+    public List<PublicListingResponse> myLikedListings() {
+        return listingService.getMyLikedListings();
     }
 
     @GetMapping("/public/marketplace/listings/search")
@@ -146,6 +187,39 @@ public class ListingController {
     @GetMapping("/businesses/{businessId}/listings")
     public List<ListingDraftResponse> businessListings(@PathVariable String businessId) {
         return listingService.getBusinessListings(businessId);
+    }
+
+    @GetMapping("/businesses/{businessId}/store/items")
+    public List<ListingDraftResponse> businessStoreItems(@PathVariable String businessId) {
+        return listingService.getBusinessListings(businessId);
+    }
+
+    @PostMapping("/businesses/{businessId}/store/items")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ListingDraftResponse createBusinessStoreItem(
+            @PathVariable String businessId,
+            @Valid @RequestBody CreateListingDraftRequest request) {
+        return listingService.createBusinessStoreItemDraft(businessId, request);
+    }
+
+    @GetMapping("/businesses/{businessId}/store/items/{listingId}")
+    public ListingDraftResponse businessStoreItem(
+            @PathVariable String businessId,
+            @PathVariable String listingId) {
+        return listingService.getBusinessStoreItem(businessId, listingId);
+    }
+
+    @PatchMapping("/businesses/{businessId}/store/items/{listingId}")
+    public ListingDraftResponse updateBusinessStoreItem(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody CreateListingDraftRequest request) {
+        return listingService.updateBusinessStoreItemDraft(
+                businessId,
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
+                request);
     }
 
     @GetMapping("/admin/listings/moderation")
@@ -282,12 +356,30 @@ public class ListingController {
         return listingService.requestMediaUpload(listingId, request);
     }
 
+    @PostMapping("/businesses/{businessId}/store/items/{listingId}/media/upload-request")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ListingMediaResponse requestBusinessStoreItemMediaUpload(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @Valid @RequestBody ListingMediaUploadRequest request) {
+        return listingService.requestBusinessStoreItemMediaUpload(businessId, listingId, request);
+    }
+
     @PostMapping("/listings/{listingId}/media/{mediaId}/confirm")
     public ListingMediaResponse confirmMediaUpload(
             @PathVariable String listingId,
             @PathVariable String mediaId,
             @Valid @RequestBody ListingMediaConfirmRequest request) {
         return listingService.confirmMediaUpload(listingId, mediaId, request);
+    }
+
+    @PostMapping("/businesses/{businessId}/store/items/{listingId}/media/{mediaId}/confirm")
+    public ListingMediaResponse confirmBusinessStoreItemMediaUpload(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @PathVariable String mediaId,
+            @Valid @RequestBody ListingMediaConfirmRequest request) {
+        return listingService.confirmBusinessStoreItemMediaUpload(businessId, listingId, mediaId, request);
     }
 
     @PutMapping(
@@ -300,6 +392,19 @@ public class ListingController {
             @RequestHeader(HttpHeaders.CONTENT_TYPE) String contentType,
             @RequestBody byte[] bytes) {
         listingService.uploadMediaContent(listingId, mediaId, contentType, bytes);
+    }
+
+    @PutMapping(
+            value = "/businesses/{businessId}/store/items/{listingId}/media/{mediaId}/content",
+            consumes = {"image/jpeg", "image/png", "image/webp"})
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void uploadBusinessStoreItemMediaContent(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @PathVariable String mediaId,
+            @RequestHeader(HttpHeaders.CONTENT_TYPE) String contentType,
+            @RequestBody byte[] bytes) {
+        listingService.uploadBusinessStoreItemMediaContent(businessId, listingId, mediaId, contentType, bytes);
     }
 
     @GetMapping("/listings/{listingId}/media/{mediaId}/content")
@@ -317,6 +422,14 @@ public class ListingController {
             @PathVariable String listingId,
             @Valid @RequestBody UpdateListingImagesRequest request) {
         return listingService.updateListingImages(listingId, request);
+    }
+
+    @PutMapping("/businesses/{businessId}/store/items/{listingId}/images")
+    public List<ListingImageResponse> updateBusinessStoreItemImages(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @Valid @RequestBody UpdateListingImagesRequest request) {
+        return listingService.updateBusinessStoreItemImages(businessId, listingId, request);
     }
 
     private long parseVersion(String ifMatch) {

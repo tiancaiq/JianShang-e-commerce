@@ -20,6 +20,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/public/user-avatars/*").permitAll()
                         .requestMatchers("/api/v1/public/seller-labels").permitAll()
                         .requestMatchers("/api/v1/users/public-labels").permitAll()
+                        .requestMatchers("/api/v1/stores/*").permitAll()
                         .requestMatchers("/api/v1/webhooks/business-verification").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))

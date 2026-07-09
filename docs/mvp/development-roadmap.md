@@ -50,8 +50,10 @@ The current repository contains implementation work for:
 - User profile roadmap: USER-00 complete as a planning slice
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
-- Listing foundation, drafts, media, submit, admin decision, and public detail:
-  LIST-00 through LIST-07
+- Business store item self-publishing: BUS-LIST-00 planned and BUS-LIST-01
+  through BUS-LIST-03 complete
+- Listing foundation, drafts, media, submit, admin decision, public detail, and
+  planned engagement metrics: LIST-00 through LIST-08
 - Public UI surface split: SITE-01
 - Search and storefront: SEARCH-00, SEARCH-01, SEARCH-01A, SEARCH-01B,
   SEARCH-03, and SEARCH-04
@@ -112,6 +114,9 @@ chat, and moderation paths are validated.
 
 Business inventory, cart, checkout, payment, orders, shipping, and
 notifications remain V2 even though the seller portal exists in MVP.
+Business store item publishing may be implemented for MVP public browsing, but
+it must not create payment transactions, carts, checkout sessions, inventory
+reservations, orders, shipping, fulfillment, or notifications.
 
 ## 3. Phase 0: Documentation Baseline
 
@@ -219,6 +224,7 @@ User profile and account experience:
 | USER-04 Marketplace profile card shell | Complete | `docs/mvp/iam/user-profile/user-04-marketplace-profile-card-shell.md` |
 | USER-05 Avatar image upload | Complete | `docs/mvp/iam/user-profile/user-05-avatar-image-upload.md` |
 | USER-STAB-01 Profile/avatar stabilization | Complete | `docs/mvp/iam/user-profile/user-stab-01-profile-avatar-stabilization.md` |
+| USER-06 Chat identity display support | Planned | `docs/mvp/iam/user-profile/user-06-chat-identity-display-support.md` |
 
 ### 5.2 Individual Seller Profile
 
@@ -240,8 +246,8 @@ Remaining MVP work:
 
 ### 5.3 Business Seller Profile And Basic Store
 
-Status: business application and approval path implemented; store profile is
-not complete.
+Status: business application, approval path, and basic store profile
+management are implemented.
 
 Completed slices:
 
@@ -250,12 +256,17 @@ Completed slices:
 | BUS-01 Business application draft | Complete | `docs/mvp/bus/bus-01-business-application-draft.md` |
 | BUS-02 Submit business application | Complete | `docs/mvp/bus/bus-02-submit-business-application.md` |
 | BUS-03/BUS-04 Verification callback and admin decision | Complete | `docs/mvp/bus/bus-03-04-business-verification-and-admin-decision.md` |
+| BUS-05 Basic store profile management | Complete | `docs/mvp/bus/bus-05-basic-store-profile-management.md` |
+| BUS-LIST-00 Store item self-publishing plan | Planned | `docs/mvp/bus/bus-list-00-store-item-self-publishing-plan.md` |
+| BUS-LIST-01 Current business/store context | Complete | `docs/mvp/bus/bus-list-01-current-business-store-context.md` |
+| BUS-LIST-02 Store item draft and edit | Complete | `docs/mvp/bus/bus-list-02-store-item-draft-edit.md` |
+| BUS-LIST-03 Store item media | Complete | `docs/mvp/bus/bus-list-03-store-item-media.md` |
 
 Remaining MVP work:
 
-- BUS-05 basic store profile management.
-- Business seller portal flow for viewing approved business/store state.
-- Basic business listing management after store profile exists.
+- Store item self-publishing to `/stores` and reactive admin removal after
+  store item draft/edit/media. Store items are business self-published to
+  `/stores` without item-level admin approval.
 - Stronger admin review queue UX beyond entering an application ID manually.
 - Inventory, orders, fulfillment, and payment management remain V2.
 
@@ -264,7 +275,8 @@ Remaining MVP work:
 Status: listing schema, categories, draft creation, media metadata request and
 confirm, ordered draft image attachment, draft editing, submission for review,
 admin listing moderation decisions, public approved listing detail, public
-browse, and object-storage-backed image delivery are implemented.
+browse, object-storage-backed image delivery, and account-scoped listing
+visits/likes are implemented.
 
 Completed slices:
 
@@ -280,6 +292,7 @@ Completed slices:
 | LIST-07 Public listing detail | Complete | `docs/mvp/list/list-07-public-listing-detail.md` |
 | MEDIA-01 Object storage image delivery | Complete | `docs/mvp/list/media-01-object-storage-image-delivery.md` |
 | LIST-FE Stabilize listing frontend behavior | Complete | `docs/mvp/list/list-frontend-stabilization.md` |
+| LIST-08 Listing engagement visits and likes | Complete | `docs/mvp/list/list-08-listing-engagement-visits-likes.md` |
 
 Do not implement platform checkout, inventory reservation, or business orders
 as part of listing work.
@@ -302,6 +315,9 @@ MVP goal:
 - Individual marketplace search and business storefront browse are separate
   public experiences. They may reuse listing tables and response primitives,
   but should not share checkout language, calls to action, or page layout.
+- Planned business store item publishing changes the business storefront path:
+  `/stores` should show active business self-published store items without
+  requiring item-level admin approval. Payment transactions remain V2.
 
 Recommended slices:
 
@@ -347,16 +363,55 @@ Recommended slices:
 
 ### 5.6 Basic Buyer/Seller Chat
 
-Status: not started.
+Status: CHAT-00 through CHAT-06 and CHAT-STAB-P0-01 complete.
 
 Recommended slices:
 
 1. CHAT-00 chat domain and authorization plan.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-00-chat-domain-plan.md`
 2. CHAT-01 start listing conversation.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-01-start-listing-conversation.md`
 3. CHAT-02 send/read text messages.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-02-send-read-text-messages.md`
 4. CHAT-03 conversation list and unread state.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-03-conversation-inbox-read-state.md`
+5. CHAT-04 floating marketplace chat launcher.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-04-floating-marketplace-chat-launcher.md`
+6. CHAT-05 conversation-gated trade completion.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-05-conversation-gated-trade-completion.md`
+   - Note: this is an explicit minimal scope expansion from the earlier V3
+     trade-completion boundary. It does not add payments, shipping, reviews,
+     structured offers, buyer contact sharing, or completed-sales reputation.
+7. CHAT-06 transaction done flow verification.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-06-transaction-done-flow-verification.md`
+   - Scope: end-to-end seller mark-done, buyer confirm, listing close/search
+     removal, seller history visibility, authorization checks, and sold
+     quantity on the completion proof.
+8. CHAT-STAB-P0-01 chat verification and contract audit.
+   - Status: complete.
+   - Reference: `docs/mvp/chat/chat-stab-p0-01-chat-verification-and-contract-audit.md`
+9. MVP-READINESS-01 public marketplace smoke pass.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/mvp-readiness-01-public-marketplace-smoke-pass.md`
+   - Scope: automated frontend/backend readiness pass for guest marketplace,
+     stores, listing detail, account routes, and chat entry points.
 
-Individual trade creation and completion remain V3.
+MVP chat uses a dedicated `chat-service` for reusable conversation mechanics,
+but only enables `LISTING_BUYER_SELLER` conversations. Customer service,
+business-admin support, admin direct messaging, AI agent sessions, reviews,
+reports, blocking, and realtime delivery are future slices.
+
+Structured individual trade creation, reputation increments, reviews, and
+advanced completion disputes remain V3. The MVP exception is the minimal
+conversation-gated listing close covered by CHAT-05 and CHAT-06.
 
 ### 5.7 Basic Admin Moderation
 
@@ -418,6 +473,13 @@ P0 cleanup slices:
    - Status: complete.
    - Reference: `docs/mvp/fix/stabilization/general/stab-p0-04-legacy-jwt-cleanup.md`
 5. STAB-P0-05 Fix documentation duplicates and slice naming drift.
+
+Completed backend cleanup:
+
+- STAB-P2-06 Active backend migration boundary.
+  - Status: complete.
+  - Reference:
+    `docs/mvp/fix/stabilization/general/stab-p2-06-active-backend-migration-boundary.md`
 
 ### FIX-03 Auth/Login Stabilization Sprint
 

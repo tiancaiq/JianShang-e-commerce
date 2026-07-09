@@ -110,6 +110,39 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldRouteCurrentBusinessStoreContextThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/businesses/me/store-context")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteBusinessStoreItemsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/businesses/01B00000000000000000000001/store/items")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteBusinessStoreItemMediaThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.post("/api/v1/businesses/01B00000000000000000000001/store/items/01L00000000000000000000001/media/upload-request")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldExposePublicListingMediaWithoutLogin() {
 		RestAssured.given()
 				.when()
@@ -135,6 +168,50 @@ class ApiGatewayApplicationTests {
 				.header("Authorization", "Bearer token")
 				.when()
 				.get("/api/v1/admin/moderation/listing-cases")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteCurrentUserLikedListingsThroughProductService() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/users/me/liked-listings")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteChatConversationCreationThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.post("/api/v1/listings/01L00000000000000000000001/conversations")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteChatConversationMessagesThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/conversations/01C00000000000000000000001/messages")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteChatConversationInboxThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/conversations")
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));

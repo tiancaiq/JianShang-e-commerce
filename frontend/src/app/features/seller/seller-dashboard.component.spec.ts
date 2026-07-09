@@ -18,13 +18,15 @@ describe('SellerDashboardComponent', () => {
     fixture = TestBed.createComponent(SellerDashboardComponent);
   });
 
-  it('links basic user account management to the marketplace account profile route', () => {
+  it('links account management to the business seller account route', () => {
     fixture.detectChanges();
 
     const accountLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
-      .find(link => link.textContent?.includes('Account'));
+      .find(link => link.textContent?.includes('Business Account'));
 
-    expect(accountLink?.getAttribute('href')).toBe('/account/profile');
+    expect(accountLink?.getAttribute('href')).toBe('/seller/account');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Merchant workspace');
+    expect((fixture.nativeElement as HTMLElement).innerHTML).not.toContain('/account/profile');
     expect((fixture.nativeElement as HTMLElement).innerHTML).not.toContain('/seller/profile');
   });
 });

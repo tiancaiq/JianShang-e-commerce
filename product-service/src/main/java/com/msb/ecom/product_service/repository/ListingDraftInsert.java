@@ -11,6 +11,7 @@ public record ListingDraftInsert(
         ListingSellerType sellerType,
         String individualSellerUserId,
         String businessId,
+        String storeId,
         String categoryId,
         String title,
         String description,

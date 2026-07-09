@@ -95,6 +95,7 @@ describe('listing draft form helpers', () => {
       sellerType: 'INDIVIDUAL',
       individualSellerUserId: '01U00000000000000000000001',
       businessId: null,
+      storeId: null,
       categoryId: baseState.categoryId,
       title: 'Used bicycle',
       description: 'A reliable city bike.',

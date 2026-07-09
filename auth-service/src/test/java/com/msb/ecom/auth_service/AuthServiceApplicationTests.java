@@ -78,7 +78,7 @@ class AuthServiceApplicationTests {
     @Test
     void cleanMysqlDatabaseMigratesSuccessfully() {
         assertThat(flyway.info().current().getScript())
-                .isEqualTo("V202606161800__create_businesses_and_verification_audit.sql");
+                .isEqualTo("V202607081000__enforce_one_active_business_application.sql");
         Integer tableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'users'",
                 Integer.class);
@@ -103,6 +103,18 @@ class AuthServiceApplicationTests {
                 "select count(*) from roles where id = 'PLATFORM_ADMIN'",
                 Integer.class);
         assertThat(platformAdminRoleCount).isEqualTo(1);
+        Integer storeTableCount = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables where table_schema = database() and table_name = 'stores'",
+                Integer.class);
+        assertThat(storeTableCount).isEqualTo(1);
+        Integer activeBusinessAccountIndexCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.statistics
+                where table_schema = database()
+                  and table_name = 'business_applications'
+                  and index_name = 'uk_business_applications_one_active_account'
+                """, Integer.class);
+        assertThat(activeBusinessAccountIndexCount).isEqualTo(1);
     }
 
     @Test
@@ -586,6 +598,17 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void applicantCanReadCurrentBusinessApplication() throws Exception {
+        String applicationId = createBusinessApplication("keycloak-sub-business-current", "Current LLC");
+
+        mockMvc.perform(get("/api/v1/business-applications/me")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-current"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(applicationId))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"));
+    }
+
+    @Test
     void businessApplicationCanBeReadOnlyByApplicant() throws Exception {
         String applicationId = createBusinessApplication("keycloak-sub-business-read", "Readable LLC");
 
@@ -821,6 +844,160 @@ class AuthServiceApplicationTests {
                 where business_id = ? and user_id = ? and role = 'OWNER' and status = 'ACTIVE'
                 """, Integer.class, businessId, ownerUserId);
         assertThat(membershipCount).isEqualTo(1);
+        Integer storeCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from stores
+                where business_id = ? and slug = ? and name = ? and status = 'ACTIVE'
+                """, Integer.class, businessId, "business-" + businessId.toLowerCase(), "Approve LLC");
+        assertThat(storeCount).isEqualTo(1);
+    }
+
+    @Test
+    void approvedBusinessOwnerCannotCreateSecondBusinessAccount() throws Exception {
+        approveBusinessApplication(
+                "keycloak-sub-business-one-account-owner",
+                "One Account LLC",
+                "keycloak-sub-business-one-account-admin");
+
+        mockMvc.perform(post("/api/v1/business-applications")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-one-account-owner")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessApplicationRequest("Second Account LLC")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("BUSINESS_APPLICATION_CONFLICT"));
+
+        mockMvc.perform(get("/api/v1/business-applications/me")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-one-account-owner"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("APPROVED"))
+                .andExpect(jsonPath("$.data.approvedBusinessId").exists());
+    }
+
+    @Test
+    void businessOwnerCanReadAndUpdateStoreProfile() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-store-owner",
+                "Store Owner LLC",
+                "keycloak-sub-store-admin");
+
+        mockMvc.perform(get("/api/v1/businesses/{businessId}/store", businessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-owner"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businessId").value(businessId))
+                .andExpect(jsonPath("$.data.slug").value("business-" + businessId.toLowerCase()))
+                .andExpect(jsonPath("$.data.name").value("Store Owner LLC"))
+                .andExpect(jsonPath("$.data.supportEmail").value("owner@example.com"))
+                .andExpect(jsonPath("$.data.version").value(0));
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store", businessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-owner")))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Store Owner Trading",
+                                  "slug": "store-owner-trading",
+                                  "description": "Curated business goods",
+                                  "logoUrl": "https://example.com/logo.png",
+                                  "bannerUrl": null,
+                                  "supportEmail": "Help@Example.com",
+                                  "supportPhone": "+19495550000"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("Store Owner Trading"))
+                .andExpect(jsonPath("$.data.slug").value("store-owner-trading"))
+                .andExpect(jsonPath("$.data.supportEmail").value("help@example.com"))
+                .andExpect(jsonPath("$.data.version").value(1));
+
+        mockMvc.perform(get("/api/v1/stores/store-owner-trading"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businessId").value(businessId))
+                .andExpect(jsonPath("$.data.name").value("Store Owner Trading"));
+    }
+
+    @Test
+    void approvedBusinessOwnerCanReadCurrentStoreContext() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-store-context-owner",
+                "Store Context LLC",
+                "keycloak-sub-store-context-admin");
+
+        mockMvc.perform(get("/api/v1/businesses/me/store-context")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-context-owner"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businessId").value(businessId))
+                .andExpect(jsonPath("$.data.businessLegalName").value("Store Context LLC"))
+                .andExpect(jsonPath("$.data.businessStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.membershipRole").value("OWNER"))
+                .andExpect(jsonPath("$.data.permissions[0]").value("LISTING_DRAFT_CREATE"))
+                .andExpect(jsonPath("$.data.store.businessId").value(businessId))
+                .andExpect(jsonPath("$.data.store.slug").value("business-" + businessId.toLowerCase()))
+                .andExpect(jsonPath("$.data.store.name").value("Store Context LLC"));
+    }
+
+    @Test
+    void currentStoreContextIsNullWithoutApprovedBusiness() throws Exception {
+        mockMvc.perform(get("/api/v1/businesses/me/store-context")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-context-none"))))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"data\":null}"));
+    }
+
+    @Test
+    void staleBusinessStoreUpdateReturns409() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-store-stale-owner",
+                "Store Stale LLC",
+                "keycloak-sub-store-stale-admin");
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store", businessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-stale-owner")))
+                        .header(HttpHeaders.IF_MATCH, 99)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeUpdateRequest("Store Stale", "store-stale")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("VERSION_CONFLICT"));
+    }
+
+    @Test
+    void crossBusinessStoreReadReturns403() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-store-real-owner",
+                "Store Real Owner LLC",
+                "keycloak-sub-store-real-admin");
+
+        mockMvc.perform(get("/api/v1/businesses/{businessId}/store", businessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-other-user"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void duplicateBusinessStoreSlugReturns409() throws Exception {
+        String firstBusinessId = approveBusinessApplication(
+                "keycloak-sub-store-first-owner",
+                "Store First LLC",
+                "keycloak-sub-store-first-admin");
+        String secondBusinessId = approveBusinessApplication(
+                "keycloak-sub-store-second-owner",
+                "Store Second LLC",
+                "keycloak-sub-store-second-admin");
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store", firstBusinessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-first-owner")))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeUpdateRequest("Shared Store", "shared-store")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store", secondBusinessId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-store-second-owner")))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(storeUpdateRequest("Shared Store Copy", "shared-store")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("BUSINESS_STORE_SLUG_CONFLICT"));
     }
 
     @Test
@@ -849,6 +1026,41 @@ class AuthServiceApplicationTests {
                 .andExpect(jsonPath("$.data.status").value("REJECTED"))
                 .andExpect(jsonPath("$.data.decisionReason").value("Unable to verify business information"))
                 .andExpect(jsonPath("$.data.decidedAt").exists());
+    }
+
+    @Test
+    void rejectedBusinessApplicantCanStartNewApplication() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-reapply-owner",
+                "Rejected First LLC");
+        grantPlatformAdmin("keycloak-sub-platform-admin-reapply");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-platform-admin-reapply")))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "REJECT",
+                                  "reason": "Unable to verify business information"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REJECTED"));
+
+        mockMvc.perform(get("/api/v1/business-applications/me")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-reapply-owner"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REJECTED"))
+                .andExpect(jsonPath("$.data.decisionReason").value("Unable to verify business information"));
+
+        mockMvc.perform(post("/api/v1/business-applications")
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-reapply-owner")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessApplicationRequest("Reapply LLC")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.legalName").value("Reapply LLC"));
     }
 
     @Test
@@ -1362,6 +1574,40 @@ class AuthServiceApplicationTests {
                         .header(HttpHeaders.IF_MATCH, 0))
                 .andExpect(status().isOk());
         return applicationId;
+    }
+
+    private String approveBusinessApplication(String ownerSubject, String legalName, String adminSubject) throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(ownerSubject, legalName);
+        grantPlatformAdmin(adminSubject);
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Business information verified"
+                                }
+                                """))
+                .andExpect(status().isOk());
+        return jdbcTemplate.queryForObject(
+                "select approved_business_id from business_applications where id = ?",
+                String.class,
+                applicationId);
+    }
+
+    private String storeUpdateRequest(String name, String slug) {
+        return """
+                {
+                  "name": "%s",
+                  "slug": "%s",
+                  "description": "Updated store profile",
+                  "logoUrl": null,
+                  "bannerUrl": null,
+                  "supportEmail": "support@example.com",
+                  "supportPhone": "+19495550000"
+                }
+                """.formatted(name, slug);
     }
 
     private void applyBusinessVerificationOutcome(String applicationId, String outcome) throws Exception {

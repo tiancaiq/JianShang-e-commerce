@@ -582,6 +582,7 @@ Authenticated users without an individual seller profile receive
 
 ```text
 POST  /business-applications                    BUS-01
+GET   /business-applications/me                 BUS-01
 GET   /business-applications/{id}
 PATCH /business-applications/{id}               BUS-01
 POST  /business-applications/{id}/submit        BUS-02
@@ -637,7 +638,12 @@ Rules:
 - Requires an authenticated user.
 - Client cannot supply applicant user, status, submitted time, approval state,
   reviewer, business ID, membership, or verification result fields.
-- Only one draft business application per applicant is allowed.
+- Only one non-rejected business application or approved business account per
+  applicant is allowed. A rejected applicant may start a new application.
+- `GET /business-applications/me` returns the applicant's current non-rejected
+  application/account when one exists. If only rejected applications exist, it
+  returns the latest rejected application with the decision reason. If the
+  applicant has never applied, `data` is `null`.
 - `GET /business-applications/{id}` returns only applications owned by the
   authenticated applicant; otherwise return `404 BUSINESS_APPLICATION_NOT_FOUND`.
 - `PATCH /business-applications/{id}` updates only owned `DRAFT`
@@ -844,12 +850,89 @@ Response `200`:
 ### Store APIs (`BUS-05`, `BUS-06`)
 
 ```text
+GET   /businesses/me/store-context
 GET   /businesses/{businessId}/store
 PATCH /businesses/{businessId}/store
 GET   /businesses/{businessId}/policies
 POST  /businesses/{businessId}/policies
 GET   /stores/{slug}
 ```
+
+`GET /businesses/me/store-context` (`BUS-LIST-01`) returns the authenticated
+user's active approved business/store context for seller portal bootstrapping,
+or `data: null` when the user has no active approved business store. It
+returns business ID/name/status, current membership role, permissions, and the
+active store profile. It does not expose application internals, staff member
+lists, private owner IDs, payment, inventory, order, shipping, or transaction
+fields.
+
+`GET /businesses/{businessId}/store` (`BUS-05`) returns the MVP store profile
+for an approved business. It requires an authenticated active business member.
+Missing businesses return `404 BUSINESS_STORE_NOT_FOUND`; non-members return
+`403 FORBIDDEN`.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "01JY...",
+    "businessId": "01JY...",
+    "slug": "acme-trading",
+    "name": "Acme Trading",
+    "description": "Local marketplace seller",
+    "logoUrl": "/api/v1/public/user-avatars/01JY...",
+    "bannerUrl": null,
+    "supportEmail": "help@example.com",
+    "supportPhone": "+19495551234",
+    "status": "ACTIVE",
+    "version": 1,
+    "createdAt": "2026-07-08T12:00:00Z",
+    "updatedAt": "2026-07-08T12:30:00Z"
+  }
+}
+```
+
+`PATCH /businesses/{businessId}/store` (`BUS-05`) updates mutable
+customer-facing store profile fields.
+
+Headers:
+
+```text
+If-Match: 1
+```
+
+Request:
+
+```json
+{
+  "name": "Acme Trading",
+  "slug": "acme-trading",
+  "description": "Local marketplace seller",
+  "logoUrl": "https://example.com/logo.png",
+  "bannerUrl": null,
+  "supportEmail": "help@example.com",
+  "supportPhone": "+19495551234"
+}
+```
+
+Rules:
+
+- Requires authenticated active business membership with role `OWNER` or
+  `MANAGER`.
+- `If-Match` is required and must match the current store `version`.
+- Stale versions return `409 VERSION_CONFLICT`.
+- Slugs are lowercase, URL-safe, and unique across stores.
+- Duplicate slugs return `409 BUSINESS_STORE_SLUG_CONFLICT`.
+- Clients cannot set business ID, status, version, timestamps, membership, or
+  approval state.
+- Logo and banner fields are URLs/API paths only in BUS-05; upload workflow is
+  not part of this slice.
+
+`GET /stores/{slug}` (`BUS-05`) returns the active public store profile for
+guest storefront reads. It returns only active stores for active businesses and
+does not expose business membership, staff, owner user IDs, internal review
+data, or suspended stores.
 
 ### Staff APIs (`BUS-07`)
 
@@ -924,6 +1007,49 @@ LIST-01 uses the unified draft endpoint above with `sellerType` set to
 `INDIVIDUAL` or `BUSINESS`. Business requests add `businessId`, SKU, and
 quantity; they omit negotiation and meeting fields. Publishing, image
 attachment, moderation submission, and public browsing remain separate slices.
+
+### Business store item self-publishing (`BUS-LIST-00`, `BUS-LIST-02`, `BUS-LIST-03`, `LST-05A`)
+
+Implemented seller portal draft/edit/media commands:
+
+```text
+GET    /businesses/{businessId}/store/items
+POST   /businesses/{businessId}/store/items
+GET    /businesses/{businessId}/store/items/{listingId}
+PATCH  /businesses/{businessId}/store/items/{listingId}
+POST   /businesses/{businessId}/store/items/{listingId}/media/upload-request
+PUT    /businesses/{businessId}/store/items/{listingId}/media/{mediaId}/content
+POST   /businesses/{businessId}/store/items/{listingId}/media/{mediaId}/confirm
+PUT    /businesses/{businessId}/store/items/{listingId}/images
+```
+
+Planned seller portal publication commands:
+
+```text
+POST   /businesses/{businessId}/store/items/{listingId}/publish
+POST   /businesses/{businessId}/store/items/{listingId}/pause
+POST   /businesses/{businessId}/store/items/{listingId}/relist
+```
+
+Rules:
+
+- Requires authenticated active membership in the approved business.
+- Business and store ownership are server-derived or server-validated.
+- Draft creation derives `sellerType=BUSINESS`, the path `businessId`, and
+  the current active `storeId` from `GET /businesses/me/store-context`.
+- Media routes reuse listing media validation and storage, but first verify
+  the item belongs to the active business store context.
+- Publish moves a complete business store item to public `/stores` visibility
+  without item-level admin approval.
+- Draft, paused, removed, and inactive-business items are not public.
+- Patch and state commands require `If-Match`.
+- Clients cannot set owner IDs, business membership, status, publication
+  source, moderation/admin fields, payment status, inventory, order, shipping,
+  or transaction fields.
+- Business item quantity is catalog/display quantity in MVP. It is not an
+  authoritative inventory balance and cannot reserve stock.
+- Payment transaction, cart, checkout, inventory reservation, order, shipping,
+  fulfillment, and notifications remain V2 APIs.
 
 ### Listing management (`LIST-04` and later)
 
@@ -1106,6 +1232,8 @@ Response:
   "publicRegion": "CA",
   "publishedAt": "2026-06-17T12:00:00Z",
   "transactionNotice": "Payment and delivery are arranged directly by participants. The platform does not verify or protect off-platform payment.",
+  "visitCount": 12,
+  "likeCount": 4,
   "images": [
     {
       "id": "01J...",
@@ -1120,6 +1248,56 @@ Response:
   ]
 }
 ```
+
+### Listing engagement (`LIST-08`)
+
+```text
+POST   /listings/{listingId}/visit
+POST   /listings/{listingId}/like
+DELETE /listings/{listingId}/like
+GET    /listings/{listingId}/engagement/me
+GET    /users/me/liked-listings
+```
+
+LIST-08 implements authenticated account-scoped engagement for public
+approved listings.
+
+Rules:
+
+- All engagement endpoints require login through the gateway BFF session.
+- The backend derives the account from the current actor and auth-service;
+  clients cannot submit user IDs, counts, listing state, or owner IDs.
+- Only public listings with `status=ACTIVE` and
+  `moderationStatus=APPROVED` accept engagement commands. Non-public listings
+  return `404 LISTING_NOT_FOUND`.
+- One account can record at most one visit per listing.
+- One account can have at most one active like per listing.
+- Like and visit commands are idempotent for the same account/listing pair.
+- Unlike is idempotent and never decrements below zero.
+- Seller self-engagement follows the same one-account-one-listing rule as any
+  other authenticated account.
+- Engagement does not change the listing aggregate `version`.
+- `GET /users/me/liked-listings` returns the current user's active liked
+  listings using the same safe public listing projection as public browse.
+  Listings that are unliked, closed, removed, pending review, rejected, or no
+  longer public are not returned.
+
+Response:
+
+```json
+{
+  "listingId": "01J...",
+  "visitCount": 12,
+  "likeCount": 4,
+  "visitedByMe": true,
+  "likedByMe": false
+}
+```
+
+Public listing detail and public search/browse responses include
+`visitCount` and `likeCount`. They do not expose per-user engagement state;
+`GET /listings/{listingId}/engagement/me` is the authenticated per-account
+read. `GET /users/me/liked-listings` returns a list of public listing objects.
 
 ### Safe public identity labels (`USER-02`)
 
@@ -1185,10 +1363,12 @@ server-side cap and no client filters yet.
 
 SEARCH-00 defines and implements the split public read contract:
 `GET /public/marketplace/listings/search` returns approved active
-`INDIVIDUAL` listings, and `GET /public/stores/listings/search` returns
-approved active `BUSINESS` listings. Both start from MySQL source tables and
-expose only safe public fields. Storefront scoping and OpenSearch are deferred
-until the split database-backed contracts are stable.
+`INDIVIDUAL` listings. `GET /public/stores/listings/search` currently returns
+approved active `BUSINESS` listings, and the planned `BUS-LIST-00` store item
+self-publishing slice changes that business path to return active published
+business store items without item-level admin approval. Both start from MySQL
+source tables and expose only safe public fields. Storefront scoping and
+OpenSearch are deferred until the split database-backed contracts are stable.
 
 SEARCH-01A / SEARCH-02A is the implemented individual marketplace search path:
 `GET /public/marketplace/listings/search` accepts `q`, `categoryId`,
@@ -1205,8 +1385,9 @@ Remaining search/storefront work is split by product experience:
   `condition`, `minPrice`, `maxPrice`, `city`, `county`, and
   optional `sort=newest|price_asc|price_desc`. When `sort` is absent, the
   service uses its default stable result order without treating sorting as an
-  active user filter. It returns approved active `BUSINESS` listings only and
-  does not introduce cart, inventory, checkout, payment, orders, or shipping.
+  active user filter. After `BUS-LIST-00`, it returns active published
+  `BUSINESS` store items without item-level admin approval and does not
+  introduce cart, inventory, checkout, payment, orders, or shipping.
 - SEARCH-03 is the implemented shared cursor pagination path. Both split
   public search endpoints accept `cursor` and `limit` and return
   `{"data":[],"page":{"nextCursor":null,"hasMore":false}}`. Cursors are
@@ -1242,27 +1423,188 @@ any applicable individual off-platform trade disclosure.
 
 ## 7. Chat
 
-### Conversation APIs (`CHT-01`, `CHT-02`)
+### Domain boundary (`CHAT-00`)
+
+MVP chat uses a dedicated `chat-service` for reusable conversation mechanics:
+conversations, participants, text messages, cursor-paginated history,
+per-participant read state, and participant-only authorization.
+
+The only enabled MVP conversation type is:
 
 ```text
-POST /listings/{listingId}/conversations
-GET  /conversations
-GET  /conversations/{conversationId}
-GET  /conversations/{conversationId}/messages?cursor=&limit=
-POST /conversations/{conversationId}/messages
-POST /conversations/{conversationId}/read
+LISTING_BUYER_SELLER
+```
+
+Future conversation types are reserved but disabled until their own approved
+domain slices define authorization, lifecycle, audit, and UI behavior:
+
+```text
+SUPPORT_CASE
+BUSINESS_ADMIN_SUPPORT
+AI_AGENT_SESSION
+```
+
+Customer service, business seller to admin chat, admin direct messaging, AI
+agent sessions, reports, blocking, reviews, trade creation, trade completion,
+and realtime delivery are not part of the initial chat API behavior.
+
+### Chat identity display (`USER-06`)
+
+Chat participant display must use safe identity labels from `USER-02` or a
+chat-owned display snapshot selected by `CHAT-00`. Chat APIs and UI surfaces
+may show display name, app-owned public avatar URL, neutral fallback text, and
+conversation-derived participant role such as buyer or seller.
+
+Chat participant display must not expose email, phone, Keycloak subject, role
+lists, account status internals, verification flags, private profile metadata,
+storage object keys, signed URLs, buckets, or raw object storage URLs.
+
+Future chat participant summaries should use the app-owned user ID, not the
+Keycloak subject. Missing, closed, suspended, or unavailable labels degrade to
+neutral text such as `Marketplace user` or `Marketplace seller` without an
+avatar. Message authorization remains chat-service-owned participant
+authorization, not a profile-label decision.
+
+### Conversation APIs (`CHAT-01`, `CHAT-02`, `CHAT-03`, `CHAT-04`)
+
+```text
+POST /api/v1/listings/{listingId}/conversations
+GET  /api/v1/conversations?cursor=&limit=
+GET  /api/v1/conversations/{conversationId}
+GET  /api/v1/conversations/{conversationId}/messages?cursor=&limit=
+POST /api/v1/conversations/{conversationId}/messages
+POST /api/v1/conversations/{conversationId}/read
 ```
 
 Message request:
 
 ```json
-{"type": "TEXT", "body": "Is this still available?"}
+{"messageType": "TEXT", "body": "Is this still available?"}
 ```
 
-Realtime endpoint may deliver message events, but HTTP remains the authoritative
-command and history interface.
+`POST /api/v1/listings/{listingId}/conversations` creates or returns a
+`LISTING_BUYER_SELLER` conversation for an active approved individual listing.
+The service derives the seller from the listing. It rejects self-chat, business
+listings, inactive listings, unapproved listings, and non-participant access.
+The same user may be buyer in one conversation and seller in another.
 
-### Safety (`CHT-03`)
+`CHAT-01` response:
+
+```json
+{
+  "id": "01J...",
+  "conversationType": "LISTING_BUYER_SELLER",
+  "status": "OPEN",
+  "listing": {
+    "id": "01J...",
+    "title": "Used bicycle",
+    "sellerType": "INDIVIDUAL",
+    "publicCity": "Irvine",
+    "publicRegion": "CA",
+    "thumbnailUrl": "/api/v1/public/listing-media/01J...",
+    "transactionNotice": "Payment and delivery are arranged directly by participants."
+  },
+  "participants": [
+    {
+      "participantId": "01J...",
+      "displayName": "You",
+      "avatarUrl": null,
+      "initials": "Y",
+      "roleInConversation": "BUYER",
+      "currentUser": true
+    },
+    {
+      "participantId": "01J...",
+      "displayName": "Alex Seller",
+      "avatarUrl": "/api/v1/public/user-avatars/01J...?v=4",
+      "initials": "AS",
+      "roleInConversation": "SELLER",
+      "currentUser": false
+    }
+  ],
+  "createdAt": "timestamp",
+  "updatedAt": "timestamp"
+}
+```
+
+New conversations return `201`; duplicate starts return `200` with the
+existing conversation. The response omits email, phone, Keycloak subject, role
+lists, account status internals, listing moderation internals, listing version,
+exact individual location, media bucket/key, signed storage URLs, and raw
+object-storage URLs.
+
+`GET /api/v1/conversations/{conversationId}` returns the same safe conversation
+summary shape for participants only.
+
+`GET /api/v1/conversations/{conversationId}/messages` returns cursor-paginated
+text history ordered by `(createdAt, id)`:
+
+```json
+{
+  "items": [
+    {
+      "id": "01J...",
+      "conversationId": "01J...",
+      "senderUserId": "01J...",
+      "messageType": "TEXT",
+      "body": "Is this still available?",
+      "moderationState": "VISIBLE",
+      "currentUser": true,
+      "createdAt": "timestamp"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+`POST /api/v1/conversations/{conversationId}/messages` creates a user-authored
+`TEXT` message. The sender is derived from the authenticated current user.
+Blank messages, unsupported message types, bodies longer than 2000 characters,
+and non-participant sends are rejected.
+
+`GET /api/v1/conversations` returns only conversations where the authenticated
+user is a participant. Items include safe listing context, the other
+participant summary, last message preview, and participant-specific unread
+state.
+
+`POST /api/v1/conversations/{conversationId}/read` updates only the current
+participant's `lastReadMessageId` and `lastReadAt`. It cannot update the other
+participant.
+
+`CHAT-04` adds the floating marketplace chat launcher UI. It introduces no new
+backend endpoints and uses only the participant-authorized conversation list,
+thread, message-send, and read-state APIs above.
+
+`CHAT-05` adds a minimal conversation-gated individual completion path:
+
+```text
+GET  /api/v1/conversations/{conversationId}/completion
+POST /api/v1/conversations/{conversationId}/completion/mark-done
+POST /api/v1/conversations/{conversationId}/completion/confirm
+```
+
+The seller mark-done request accepts only the sold quantity:
+
+```json
+{"quantitySold": 1}
+```
+
+`quantitySold` defaults to `1` when omitted and cannot exceed the listing
+quantity. The request accepts no buyer ID, email, phone, address, price, or
+payment fields. The seller, buyer, listing, and conversation are derived from
+the fixed `LISTING_BUYER_SELLER` conversation. Buyer confirmation is accepted
+only from the buyer participant in that same conversation. Repeated seller
+mark-done and buyer confirmation requests are idempotent.
+
+On buyer confirmation, chat-service asks product-service to close the active
+approved individual listing. The listing no longer appears in public
+marketplace/search results, but remains visible in the seller's own listing
+history. This does not increment public completed-sales reputation and does
+not add payment, shipping, order, review, or protection claims.
+
+Realtime delivery, attachments, reports, and blocking are future slices.
+
+### Safety (future)
 
 ```text
 POST   /users/{userId}/block

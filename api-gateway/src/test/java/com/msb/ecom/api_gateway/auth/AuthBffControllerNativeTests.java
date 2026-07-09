@@ -63,7 +63,9 @@ class AuthBffControllerNativeTests {
     }
 
     private MockMvc mockMvc(NativeAuthService nativeAuthService) {
-        return MockMvcBuilders.standaloneSetup(new AuthBffController(nativeAuthService))
+        return MockMvcBuilders.standaloneSetup(new AuthBffController(
+                        nativeAuthService,
+                        new OAuth2SessionTokenRefresher(null, null, RestClient.builder())))
                 .setCustomArgumentResolvers(new NullCsrfTokenResolver())
                 .build();
     }

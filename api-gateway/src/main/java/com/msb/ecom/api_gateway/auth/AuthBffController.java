@@ -32,9 +32,11 @@ public class AuthBffController {
     private static final Set<String> SUPPORTED_CLIENTS = Set.of("marketplace", "seller-portal", "admin-portal");
     private static final Set<String> SUPPORTED_EXTERNAL_PROVIDERS = Set.of("google");
     private final NativeAuthService nativeAuthService;
+    private final OAuth2SessionTokenRefresher tokenRefresher;
 
-    public AuthBffController(NativeAuthService nativeAuthService) {
+    public AuthBffController(NativeAuthService nativeAuthService, OAuth2SessionTokenRefresher tokenRefresher) {
         this.nativeAuthService = nativeAuthService;
+        this.tokenRefresher = tokenRefresher;
     }
 
     @GetMapping("/api/v1/auth/login")
@@ -121,6 +123,7 @@ public class AuthBffController {
 
     @GetMapping("/api/v1/auth/session")
     public ResponseEntity<SessionResponse> session(Authentication authentication, CsrfToken csrfToken) {
+        tokenRefresher.refreshIfNecessary(authentication);
         SessionResponse response = sessionResponse(authentication, csrfToken);
 
         return noStore(response);

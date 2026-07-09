@@ -21,10 +21,14 @@ Source of truth remains:
 - `product-service`: categories, listing drafts, listing media, seller listing
   lifecycle, public listing browse/detail, split marketplace/store search,
   OpenSearch-derived public listing projection, and listing moderation.
+- `chat-service`: active after CHAT-00 through CHAT-04; owns MVP listing
+  conversations, messages, and read state in its own `chat` schema.
 - `common-core`: shared IDs, money, time, validation, and other stable value
   helpers.
 - `common-web`: shared web error envelope, correlation, API validation, and
   current actor support.
+- `common-storage`: shared technical object-storage adapters for listing media
+  and avatars; business rules stay in the owning services.
 - `common-testing`: shared test support.
 
 ## Active MVP Angular Route Groups

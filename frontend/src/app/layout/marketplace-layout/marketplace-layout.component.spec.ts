@@ -1,8 +1,9 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { ChatService } from '../../core/services/chat.service';
 import { MarketplaceLayoutComponent } from './marketplace-layout.component';
 
 describe('MarketplaceLayoutComponent', () => {
@@ -16,9 +17,33 @@ describe('MarketplaceLayoutComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         {
+          provide: ChatService,
+          useValue: {
+            getConversations: jasmine.createSpy('getConversations').and.returnValue(of({ items: [], nextCursor: null })),
+            getConversation: jasmine.createSpy('getConversation'),
+            getMessages: jasmine.createSpy('getMessages'),
+            sendMessage: jasmine.createSpy('sendMessage'),
+            markRead: jasmine.createSpy('markRead'),
+          },
+        },
+        {
           provide: AuthService,
           useValue: {
             isAuthenticated: () => authenticated,
+            user: () => authenticated ? {
+              id: '01USER',
+              keycloakSub: 'keycloak-sub',
+              email: 'alex@example.com',
+              emailVerified: true,
+              displayName: 'Alex Buyer',
+              phone: null,
+              phoneVerified: false,
+              avatarUrl: '/api/v1/public/user-avatars/01USER?v=4',
+              status: 'ACTIVE',
+              version: 4,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            } : null,
             ensureSession: () => of({ authenticated: false, user: null }),
             login: jasmine.createSpy('login'),
             loginWithPopup: jasmine.createSpy('loginWithPopup').and.returnValue(of({ authenticated: false, user: null })),
@@ -53,7 +78,6 @@ describe('MarketplaceLayoutComponent', () => {
     expect(text).toContain('Stores');
     expect(links).toContain(jasmine.objectContaining({ text: 'Marketplace', href: '/marketplace' }));
     expect(links).toContain(jasmine.objectContaining({ text: 'Stores', href: '/stores' }));
-    expect(text).not.toContain('Sell');
     expect(text).not.toContain('Admin');
     expect(text).not.toContain('Business Review');
   });
@@ -72,12 +96,17 @@ describe('MarketplaceLayoutComponent', () => {
     expect(text).not.toContain('Notifications');
   });
 
-  it('does not expose direct listing creation in public navigation', () => {
+  it('gates direct listing creation behind authentication in the public navigation', () => {
     fixture.detectChanges();
 
-    const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
+    const host = fixture.nativeElement as HTMLElement;
+    const loggedOutLinks = Array.from(host.querySelectorAll('a'));
+    const tradesButton = Array.from(host.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Trades') as HTMLButtonElement | undefined;
 
-    expect(links.some(link => link.getAttribute('href') === '/account/listings/new')).toBeFalse();
+    expect(loggedOutLinks.some(link => link.getAttribute('href') === '/account/listings')).toBeFalse();
+    expect(loggedOutLinks.some(link => link.getAttribute('href') === '/account/listings/new')).toBeFalse();
+    expect(tradesButton).toBeTruthy();
   });
 
   it('links authenticated account navigation to the account dashboard shell', () => {
@@ -85,9 +114,40 @@ describe('MarketplaceLayoutComponent', () => {
     fixture.detectChanges();
 
     const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
-    const accountLink = links.find(link => link.textContent?.trim() === 'Account');
+    const accountLink = links.find(link => link.textContent?.includes('Alex Buyer'));
+    const tradesLink = links.find(link => link.textContent?.trim() === 'Trades');
+    const favoritesLink = links.find(link => link.textContent?.trim() === 'Favorites');
+    const inboxLink = links.find(link => link.textContent?.trim() === 'Inbox');
 
     expect(accountLink?.getAttribute('href')).toBe('/account');
+    expect(tradesLink?.getAttribute('href')).toBe('/account/listings');
+    expect(favoritesLink?.getAttribute('href')).toBe('/account/liked');
+    expect(inboxLink?.getAttribute('href')).toBe('/account/messages');
+  });
+
+  it('exposes logout from the authenticated account menu', () => {
+    const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
+    authenticated = true;
+    fixture.detectChanges();
+
+    const logoutButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Logout') as HTMLButtonElement | undefined;
+
+    expect(logoutButton).toBeTruthy();
+    logoutButton?.click();
+    expect(authService.logout).toHaveBeenCalled();
+  });
+
+  it('uses the global marketplace nav on the account dashboard route', () => {
+    const router = TestBed.inject(Router);
+    Object.defineProperty(router, 'url', { value: '/account' });
+    authenticated = true;
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+
+    expect(host.querySelector('app-marketplace-navbar')).not.toBeNull();
+    expect(host.querySelector('.marketplace-main')?.classList).toContain('account-dashboard-main');
   });
 
   it('opens a marketplace-themed auth dialog from the login button', () => {
@@ -102,7 +162,7 @@ describe('MarketplaceLayoutComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
     expect(text).toContain('MSB marketplace account');
-    expect(text).toContain('Sign in to keep shopping local.');
+    expect(text).toContain('Sign in to keep trading local.');
     expect(text).toContain('Create account');
   });
 

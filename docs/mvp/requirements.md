@@ -25,10 +25,12 @@ and moderation, but they must not share checkout state machines.
 - Authentication and user accounts
 - Individual seller profile
 - Business seller profile and basic store profile
+- Business store item publishing for public browsing
 - Listings and media
 - Guest browsing, search, listing detail, and public storefront
 - Basic text chat between buyer and individual seller
-- Basic admin approval/moderation for businesses and listings
+- Basic admin approval for businesses, individual listing moderation, and
+  reactive safety removal for public business store items
 
 ### V2
 
@@ -118,7 +120,7 @@ Responsibilities:
 
 - Complete business onboarding
 - Manage basic store profile
-- Manage basic business listings
+- Manage basic business store items for public browsing
 - Use dashboard-style pages for merchant work rather than shopping-style
   browsing pages
 - Exclude personal individual-seller listing tools; those belong in the
@@ -391,11 +393,28 @@ Depends on: `IND-01`, `LST-01`.
 Acceptance criteria:
 
 - Authorized business catalog staff can create a draft.
-- Listing includes business, SKU, price, quantity, condition, category,
-  shipping profile, and return policy.
+- Listing includes business, store, SKU, price, display quantity, condition,
+  category, and item description.
 - Currency is explicit.
+- Display quantity is catalog information in MVP. It is not an authoritative
+  inventory balance and cannot reserve stock.
 
 Depends on: `BUS-05`, `LST-01`.
+
+#### LST-05A Publish business store item
+
+Acceptance criteria:
+
+- Approved business owner or authorized catalog staff can publish a complete
+  business store item without item-level admin approval.
+- Published business store items appear on the public `/stores` surface.
+- Draft, paused, removed, and inactive-business items do not appear publicly.
+- Public store item pages and cards do not show cart, checkout, payment,
+  order, shipping, fulfillment, or transaction actions.
+- Platform admins can remove public store items for policy/safety reasons
+  without deleting item history.
+
+Depends on: `LST-05`, `LST-07`.
 
 #### LST-06 Edit listing draft
 
@@ -424,6 +443,8 @@ Acceptance criteria:
 - Complete draft moves to `PENDING_REVIEW`.
 - Seller cannot publish directly.
 - Moderation case is created.
+- This applies to individual listing moderation. Business store items follow
+  `LST-05A` self-publishing unless later policy scope changes.
 
 Depends on: `LST-07`, `ADM-02`.
 
@@ -479,11 +500,13 @@ Acceptance criteria:
   listings and supports text, category, condition, price, and approximate
   location filters.
 - Business storefront browse is scoped to one active approved business and
-  supports its active approved `BUSINESS` listings.
+  supports its active published `BUSINESS` store items.
 - Shared search/browse APIs may support seller type filtering, but UI entry
   points keep individual trade and business store experiences separate.
 - Results use cursor pagination.
-- Only active approved listings are returned.
+- Individual marketplace results return only active approved individual
+  listings. Business storefront results return active published business store
+  items.
 
 Depends on: `SRC-01`.
 

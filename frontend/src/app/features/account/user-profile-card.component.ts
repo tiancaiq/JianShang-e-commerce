@@ -1,7 +1,12 @@
 import { Component, Input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { CurrentUser } from '../../core/models/user.model';
 import { environment } from '../../../environments/environment';
+
+export interface ProfileCardUser {
+  displayName?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
+}
 
 @Component({
   selector: 'app-user-profile-card',
@@ -36,7 +41,9 @@ import { environment } from '../../../environments/environment';
         </div>
       </dl>
 
-      <a routerLink="/account/listings/new" class="sell-action">+ Sell an Item</a>
+      @if (showSellAction) {
+        <a routerLink="/account/listings/new" class="sell-action">+ Sell an Item</a>
+      }
     </aside>
   `,
   styles: [`
@@ -164,7 +171,8 @@ import { environment } from '../../../environments/environment';
   `],
 })
 export class UserProfileCardComponent {
-  @Input() user: CurrentUser | null = null;
+  @Input() user: ProfileCardUser | null = null;
+  @Input() showSellAction = true;
 
   displayName(): string {
     return this.user?.displayName?.trim()

@@ -28,6 +28,8 @@ public record PublicListingResponse(
         String publicRegion,
         Instant publishedAt,
         String transactionNotice,
+        long visitCount,
+        long likeCount,
         List<PublicListingImageResponse> images
 ) {
     public PublicListingResponse withSellerDisplayName(String displayName) {
@@ -52,6 +54,8 @@ public record PublicListingResponse(
                 publicRegion,
                 publishedAt,
                 transactionNotice,
+                visitCount,
+                likeCount,
                 images);
     }
 
@@ -77,6 +81,8 @@ public record PublicListingResponse(
                 publicRegion,
                 publishedAt,
                 transactionNotice,
+                visitCount,
+                likeCount,
                 images);
     }
 }

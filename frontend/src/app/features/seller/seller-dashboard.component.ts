@@ -16,9 +16,9 @@ import { RouterLink } from '@angular/router';
           <strong>Business Apply</strong>
           <span>Application</span>
         </a>
-        <a routerLink="/account/profile" class="action-row">
-          <strong>Account</strong>
-          <span>Account</span>
+        <a routerLink="/seller/account" class="action-row">
+          <strong>Business Account</strong>
+          <span>Merchant workspace</span>
         </a>
       </div>
     </section>

@@ -1,6 +1,7 @@
 package com.msb.ecom.product_service.repository;
 
 import com.msb.ecom.product_service.model.ListingSellerType;
+import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import lombok.RequiredArgsConstructor;
@@ -30,13 +31,14 @@ public class ListingDraftRepository {
                     price_amount, currency, negotiable, sku, quantity, public_city, public_region,
                     status, moderation_status, version, created_at, updated_at
                 )
-                values (?, ?, ?, ?, null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         'DRAFT', 'NOT_SUBMITTED', 0, ?, ?)
                 """,
                 draft.id(),
                 draft.sellerType().name(),
                 draft.individualSellerUserId(),
                 draft.businessId(),
+                draft.storeId(),
                 draft.categoryId(),
                 draft.title(),
                 draft.description(),
@@ -73,7 +75,7 @@ public class ListingDraftRepository {
 
     public Optional<ListingDraftResponse> findOptionalById(String listingId) {
         List<ListingDraftResponse> matches = jdbcTemplate.query("""
-                select id, seller_type, individual_seller_user_id, business_id, category_id,
+                select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
                        status, moderation_status, version, created_at, updated_at
@@ -87,7 +89,7 @@ public class ListingDraftRepository {
 
     public List<ListingDraftResponse> findByIndividualSellerUserId(String userId) {
         return jdbcTemplate.query("""
-                select id, seller_type, individual_seller_user_id, business_id, category_id,
+                select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
                        status, moderation_status, version, created_at, updated_at
@@ -102,7 +104,7 @@ public class ListingDraftRepository {
 
     public List<ListingDraftResponse> findByBusinessId(String businessId) {
         return jdbcTemplate.query("""
-                select id, seller_type, individual_seller_user_id, business_id, category_id,
+                select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
                        status, moderation_status, version, created_at, updated_at
@@ -117,7 +119,7 @@ public class ListingDraftRepository {
 
     public List<ListingDraftResponse> findPendingReview() {
         return jdbcTemplate.query("""
-                select id, seller_type, individual_seller_user_id, business_id, category_id,
+                select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
                        status, moderation_status, version, created_at, updated_at
@@ -135,14 +137,41 @@ public class ListingDraftRepository {
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.id = ?
                   and l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                 """,
                 (rs, rowNum) -> publicListingResponse(rs),
+                listingId);
+        return matches.stream().findFirst();
+    }
+
+    public Optional<ChatListingEligibilityResponse> findChatListingEligibility(String listingId) {
+        List<ChatListingEligibilityResponse> matches = jdbcTemplate.query("""
+                select l.id, l.seller_type, l.individual_seller_user_id, l.quantity,
+                       l.title, l.public_city, l.public_region
+                from listings l
+                where l.id = ?
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                """,
+                (rs, rowNum) -> new ChatListingEligibilityResponse(
+                        rs.getString("id"),
+                        "INDIVIDUAL".equals(rs.getString("seller_type")),
+                        rs.getString("seller_type"),
+                        rs.getString("individual_seller_user_id"),
+                        rs.getInt("quantity"),
+                        rs.getString("title"),
+                        rs.getString("public_city"),
+                        rs.getString("public_region"),
+                        null,
+                        null),
                 listingId);
         return matches.stream().findFirst();
     }
@@ -153,9 +182,12 @@ public class ListingDraftRepository {
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                 order by l.published_at desc, l.updated_at desc, l.id desc
@@ -171,9 +203,12 @@ public class ListingDraftRepository {
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                   and l.seller_type = ?
@@ -191,9 +226,12 @@ public class ListingDraftRepository {
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                   and l.seller_type = ?
@@ -261,9 +299,12 @@ public class ListingDraftRepository {
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                   and l.id in (%s)
@@ -280,15 +321,43 @@ public class ListingDraftRepository {
                 .toList();
     }
 
+    public List<PublicListingResponse> findPublicLikedListingsForUser(String userId, int limit) {
+        return jdbcTemplate.query("""
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
+                from listing_likes lk
+                join listings l on l.id = lk.listing_id
+                join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
+                where lk.user_id = ?
+                  and lk.active = true
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                order by lk.updated_at desc, coalesce(l.published_at, l.updated_at) desc, l.id desc
+                limit ?
+                """,
+                (rs, rowNum) -> publicListingResponse(rs),
+                userId,
+                limit);
+    }
+
     public List<PublicListingResponse> findAllPublicListingsForSearchIndex() {
         return jdbcTemplate.query("""
                 select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
                        l.individual_seller_user_id, l.business_id,
                        l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
                        l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
-                       coalesce(l.published_at, l.updated_at) as published_at
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count
                 from listings l
                 join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
                 where l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
                 order by coalesce(l.published_at, l.updated_at) desc, l.id desc
@@ -361,6 +430,24 @@ public class ListingDraftRepository {
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);
+    }
+
+    public int closeActiveIndividualListingFromChat(String listingId, String sellerUserId, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'CLOSED',
+                    published_at = null,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and seller_type = 'INDIVIDUAL'
+                  and individual_seller_user_id = ?
+                  and status = 'ACTIVE'
+                  and moderation_status = 'APPROVED'
+                """,
+                Timestamp.from(now),
+                listingId,
+                sellerUserId);
     }
 
     public int updateActiveListingByAdmin(String listingId, long expectedVersion, ListingDraftUpdate update, Instant now) {
@@ -486,6 +573,7 @@ public class ListingDraftRepository {
                 rs.getString("seller_type"),
                 rs.getString("individual_seller_user_id"),
                 rs.getString("business_id"),
+                rs.getString("store_id"),
                 null,
                 rs.getString("category_id"),
                 rs.getString("title"),
@@ -530,6 +618,8 @@ public class ListingDraftRepository {
                 rs.getString("public_region"),
                 rs.getTimestamp("published_at").toInstant(),
                 null,
+                rs.getLong("visit_count"),
+                rs.getLong("like_count"),
                 List.of());
     }
 

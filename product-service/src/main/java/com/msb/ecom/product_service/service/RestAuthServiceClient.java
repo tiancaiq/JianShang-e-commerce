@@ -48,6 +48,30 @@ public class RestAuthServiceClient implements AuthServiceClient {
     }
 
     @Override
+    public CurrentUser requireCurrentUser(String bearerToken) {
+        CurrentUserEnvelope response = restClient.get()
+                .uri("/api/v1/users/me")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied current user lookup status={}",
+                            clientResponse.getStatusCode().value());
+                    throw new ListingAuthorizationException("Authenticated user is required.");
+                })
+                .body(CurrentUserEnvelope.class);
+
+        if (response == null
+                || response.data() == null
+                || response.data().id() == null
+                || !"ACTIVE".equals(response.data().status())) {
+            log.warn("Auth-service returned inactive or missing current user data status={}",
+                    response == null || response.data() == null ? "missing" : response.data().status());
+            throw new ListingAuthorizationException("Authenticated user is required.");
+        }
+        return response.data();
+    }
+
+    @Override
     public BusinessMembershipAuthorization requireBusinessListingPermission(String bearerToken, String businessId) {
         BusinessMembershipEnvelope response = restClient.get()
                 .uri("/api/v1/businesses/{businessId}/membership/me", businessId)
@@ -118,6 +142,35 @@ public class RestAuthServiceClient implements AuthServiceClient {
     }
 
     @Override
+    public BusinessStoreContextAuthorization requireBusinessStoreContext(String bearerToken, String businessId) {
+        BusinessStoreContextEnvelope response = restClient.get()
+                .uri("/api/v1/businesses/me/store-context")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied business store context status={}",
+                            clientResponse.getStatusCode().value());
+                    throw new ListingAuthorizationException("Active business store context is required.");
+                })
+                .body(BusinessStoreContextEnvelope.class);
+
+        if (response == null
+                || response.data() == null
+                || response.data().store() == null
+                || !businessId.equals(response.data().businessId())
+                || !businessId.equals(response.data().store().businessId())
+                || !"ACTIVE".equals(response.data().businessStatus())
+                || !"ACTIVE".equals(response.data().store().status())
+                || response.data().permissions() == null
+                || !response.data().permissions().contains(LISTING_DRAFT_CREATE)) {
+            log.warn("Auth-service returned insufficient business store context requestedBusinessId={} returnedBusinessId={}",
+                    businessId, response == null || response.data() == null ? "missing" : response.data().businessId());
+            throw new ListingAuthorizationException("Active business store context is required.");
+        }
+        return response.data();
+    }
+
+    @Override
     public AdminIdentityLabels lookupPublicSellerLabels(Set<String> userIds, Set<String> businessIds) {
         AdminIdentityLabelsEnvelope response = restClient.get()
                 .uri(uriBuilder -> uriBuilder
@@ -144,7 +197,15 @@ public class RestAuthServiceClient implements AuthServiceClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    private record CurrentUserEnvelope(CurrentUser data) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record BusinessMembershipEnvelope(BusinessMembershipAuthorization data) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record BusinessStoreContextEnvelope(BusinessStoreContextAuthorization data) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

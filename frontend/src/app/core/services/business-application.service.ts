@@ -16,6 +16,12 @@ export class BusinessApplicationService {
 
   constructor(private http: HttpClient) {}
 
+  getCurrentApplication(): Observable<BusinessApplication | null> {
+    return this.http.get<ApiDataResponse<BusinessApplication | null>>(`${this.baseUrl}/me`, {
+      withCredentials: true,
+    }).pipe(map(unwrapData));
+  }
+
   createDraft(request: BusinessApplicationDraftRequest): Observable<BusinessApplication> {
     return this.http.post<ApiDataResponse<BusinessApplication>>(this.baseUrl, request, {
       withCredentials: true,

@@ -5,6 +5,10 @@ import com.msb.ecom.auth_service.service.BusinessApplicationForbiddenException;
 import com.msb.ecom.auth_service.service.BusinessApplicationNotFoundException;
 import com.msb.ecom.auth_service.service.BusinessApplicationVersionConflictException;
 import com.msb.ecom.auth_service.service.BusinessMembershipNotFoundException;
+import com.msb.ecom.auth_service.service.BusinessStoreForbiddenException;
+import com.msb.ecom.auth_service.service.BusinessStoreNotFoundException;
+import com.msb.ecom.auth_service.service.BusinessStoreSlugConflictException;
+import com.msb.ecom.auth_service.service.BusinessStoreVersionConflictException;
 import com.msb.ecom.auth_service.service.AvatarNotFoundException;
 import com.msb.ecom.auth_service.service.AvatarStorageException;
 import com.msb.ecom.auth_service.service.IndividualSellerAlreadyActiveException;
@@ -148,6 +152,57 @@ public class AuthServiceExceptionHandler {
                 .body(new ApiErrorEnvelope(new ApiError(
                         "BUSINESS_MEMBERSHIP_NOT_FOUND",
                         "Business membership was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BusinessStoreNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessStoreNotFound(
+            BusinessStoreNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "BUSINESS_STORE_NOT_FOUND",
+                        "Business store was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BusinessStoreForbiddenException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessStoreForbidden(
+            BusinessStoreForbiddenException exception,
+            HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Denied auth-service business store action path={} correlationId={} reason=forbidden",
+                request.getRequestURI(), correlationId);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "FORBIDDEN",
+                        "You are not allowed to perform this business store action.",
+                        List.of(),
+                        correlationId)));
+    }
+
+    @ExceptionHandler(BusinessStoreVersionConflictException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessStoreVersionConflict(
+            BusinessStoreVersionConflictException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "VERSION_CONFLICT",
+                        "The business store changed. Refresh and try again.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BusinessStoreSlugConflictException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessStoreSlugConflict(
+            BusinessStoreSlugConflictException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "BUSINESS_STORE_SLUG_CONFLICT",
+                        "Store slug is already in use.",
                         List.of(),
                         CorrelationIdFilter.current(request))));
     }

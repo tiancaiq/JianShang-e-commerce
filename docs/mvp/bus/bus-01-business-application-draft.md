@@ -10,6 +10,7 @@ The authenticated applicant becomes the proposed business owner.
 Implemented behavior:
 
 - `POST /api/v1/business-applications`
+- `GET /api/v1/business-applications/me`
 - `GET /api/v1/business-applications/{id}`
 - `PATCH /api/v1/business-applications/{id}`
 - creates `business_applications` rows with status `DRAFT`
@@ -18,6 +19,9 @@ Implemented behavior:
 - rejects client-supplied applicant, status, submitted time, approval, reviewer,
   business, membership, or verification fields
 - enforces applicant ownership on read/update
+- returns the current application/account state for the authenticated user
+- enforces one non-rejected business application or approved business account
+  per user; rejected users can start a new corrected application
 - requires `If-Match` for draft updates
 - adds Angular route `/business/apply`
 

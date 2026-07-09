@@ -74,6 +74,18 @@ describe('BusinessApplicationService', () => {
     request.flush({ data: application });
   });
 
+  it('loads the current business application through the gateway', () => {
+    service.getCurrentApplication().subscribe(response => {
+      expect(response).toEqual(application);
+    });
+
+    const request = httpMock.expectOne('/api/v1/business-applications/me');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush({ data: application });
+  });
+
   it('updates a draft with If-Match version', () => {
     service.updateDraft(application.id, {
       legalName: 'Acme Trading LLC',
