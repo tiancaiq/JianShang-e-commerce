@@ -1,7 +1,20 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Inject, Injectable } from '@angular/core';
+import {
+  Observable,
+  defer,
+  finalize,
+  map,
+  of,
+  shareReplay,
+  switchMap,
+  take,
+  throwError,
+} from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { AuthState } from '../../core/models/auth.model';
+import { AuthService } from '../../core/services/auth.service';
+import { AGENT_CUSTOMER_SERVICE_ENABLED } from './agent-customer-service.capability';
 import {
   AgentAnswerAction,
   AgentAnswerSource,
@@ -32,30 +45,71 @@ export class AgentContractError extends Error {
   }
 }
 
+export class AgentAuthenticationRequiredError extends Error {
+  constructor() {
+    super('An authenticated marketplace session is required.');
+    this.name = 'AgentAuthenticationRequiredError';
+  }
+}
+
+export class AgentFeatureDisabledError extends Error {
+  constructor() {
+    super('The marketplace AI assistant is disabled.');
+    this.name = 'AgentFeatureDisabledError';
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class AgentCustomerService {
   private readonly baseUrl = `${environment.apiGatewayUrl}/api/v1/agent`;
+  private sessionWarmup: Observable<void> | null = null;
+  private readonly sessionCreates = new Map<string, Observable<AgentSession>>();
+  private readonly messageSends = new Map<string, Observable<SendAgentMessageResponse>>();
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly authService: AuthService,
+    @Inject(AGENT_CUSTOMER_SERVICE_ENABLED) private readonly enabled: boolean,
+  ) {}
 
   /** Creates or resumes a listing-bound session without sending browser actor fields. */
   createOrResumeSession(listingId: string): Observable<AgentSession> {
+    if (!this.enabled) {
+      return this.featureDisabled();
+    }
+    const existing = this.sessionCreates.get(listingId);
+    if (existing) {
+      return existing;
+    }
     const body: CreateAgentSessionRequest = {
       sessionType: 'LISTING_CUSTOMER_SERVICE',
       subject: { type: 'LISTING', id: listingId },
     };
-    return this.http.post<unknown>(`${this.baseUrl}/sessions`, body, {
-      withCredentials: true,
-    }).pipe(map(parseSession));
+    const request = this.requireAuthenticatedSession().pipe(
+      switchMap(() => this.http.post<unknown>(`${this.baseUrl}/sessions`, body, {
+        withCredentials: true,
+      })),
+      map(parseSession),
+      finalize(() => this.sessionCreates.delete(listingId)),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+    this.sessionCreates.set(listingId, request);
+    return request;
   }
 
   getSession(sessionId: string): Observable<AgentSession> {
+    if (!this.enabled) {
+      return this.featureDisabled();
+    }
     return this.http.get<unknown>(`${this.baseUrl}/sessions/${sessionId}`, {
       withCredentials: true,
     }).pipe(map(parseSession));
   }
 
   getMessages(sessionId: string, cursor?: string | null, limit = 50): Observable<AgentMessagePage> {
+    if (!this.enabled) {
+      return this.featureDisabled();
+    }
     const params: Record<string, string> = { limit: String(limit) };
     if (cursor) {
       params['cursor'] = cursor;
@@ -72,11 +126,61 @@ export class AgentCustomerService {
     clientMessageId: string,
     body: string,
   ): Observable<SendAgentMessageResponse> {
-    return this.http.post<unknown>(
-      `${this.baseUrl}/sessions/${sessionId}/messages`,
-      { clientMessageId, body },
-      { withCredentials: true },
-    ).pipe(map(parseSendResponse));
+    if (!this.enabled) {
+      return this.featureDisabled();
+    }
+    const operationKey = `${sessionId}:${clientMessageId}`;
+    const existing = this.messageSends.get(operationKey);
+    if (existing) {
+      return existing;
+    }
+    const request = this.requireAuthenticatedSession().pipe(
+      switchMap(() => this.http.post<unknown>(
+        `${this.baseUrl}/sessions/${sessionId}/messages`,
+        { clientMessageId, body },
+        { withCredentials: true },
+      )),
+      map(parseSendResponse),
+      finalize(() => this.messageSends.delete(operationKey)),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+    this.messageSends.set(operationKey, request);
+    return request;
+  }
+
+  /** Waits for the BFF-owned authenticated session and CSRF state before Agent writes. */
+  private requireAuthenticatedSession(): Observable<void> {
+    if (this.authService.isAuthenticated() && this.authService.csrf()) {
+      return of(undefined);
+    }
+    if (!this.sessionWarmup) {
+      this.sessionWarmup = defer(() => this.authService.ensureSession()).pipe(
+        take(1),
+        switchMap(state => this.refreshMissingCsrf(state)),
+        map(state => {
+          if (!state.authenticated || !this.authService.csrf()) {
+            throw new AgentAuthenticationRequiredError();
+          }
+        }),
+        finalize(() => {
+          this.sessionWarmup = null;
+        }),
+        shareReplay({ bufferSize: 1, refCount: false }),
+      );
+    }
+    return this.sessionWarmup;
+  }
+
+  /** Refreshes only the inconsistent signed-in-without-CSRF state through AuthService. */
+  private refreshMissingCsrf(state: AuthState): Observable<AuthState> {
+    if (state.authenticated && !this.authService.csrf()) {
+      return this.authService.refreshSession().pipe(take(1));
+    }
+    return of(state);
+  }
+
+  private featureDisabled<T>(): Observable<T> {
+    return throwError(() => new AgentFeatureDisabledError());
   }
 }
 
@@ -219,4 +323,3 @@ function literalValue<const T extends readonly string[]>(value: unknown, allowed
   }
   return value as T[number];
 }
-

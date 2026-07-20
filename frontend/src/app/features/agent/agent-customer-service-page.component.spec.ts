@@ -2,6 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
+import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ListingService } from '../../core/services/listing.service';
 import { AGENT_CUSTOMER_SERVICE_ENABLED } from './agent-customer-service.capability';
@@ -44,6 +45,7 @@ describe('AgentCustomerServicePageComponent', () => {
       page: { nextCursor: null, hasMore: false },
     }));
     const chatService = jasmine.createSpyObj<ChatService>('ChatService', ['startListingConversation']);
+    const authService = jasmine.createSpyObj<AuthService>('AuthService', ['login']);
 
     await TestBed.configureTestingModule({
       imports: [AgentCustomerServicePageComponent],
@@ -52,6 +54,7 @@ describe('AgentCustomerServicePageComponent', () => {
         provideRouter([]),
         { provide: AGENT_CUSTOMER_SERVICE_ENABLED, useValue: true },
         { provide: AgentCustomerService, useValue: agentService },
+        { provide: AuthService, useValue: authService },
         { provide: ListingService, useValue: listingService },
         { provide: ChatService, useValue: chatService },
         {
