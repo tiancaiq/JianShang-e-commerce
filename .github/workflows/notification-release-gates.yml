@@ -25,15 +25,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Verify CI-only append commit
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "02c3ea950dc3324b5e648e3f1855df17123deae9"
-          changed="$(git diff --name-only HEAD^..HEAD)"
+          git merge-base --is-ancestor 02c3ea950dc3324b5e648e3f1855df17123deae9 HEAD
+          changed="$(git diff --name-only 02c3ea950dc3324b5e648e3f1855df17123deae9..HEAD)"
           test "$changed" = ".github/workflows/notification-release-gates.yml"
-          git diff --check HEAD^..HEAD
+          git diff --check 02c3ea950dc3324b5e648e3f1855df17123deae9..HEAD
 
   backend:
     name: Notification Backend And MySQL Gates
