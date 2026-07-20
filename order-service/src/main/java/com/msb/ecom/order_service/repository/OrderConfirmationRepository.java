@@ -218,6 +218,14 @@ public class OrderConfirmationRepository {
                 Timestamp.from(now));
     }
 
+    // Resolves notification recipient authority from the persisted immutable order header.
+    public Optional<String> buyerIdByOrder(String orderId) {
+        return jdbc.query(
+                "SELECT buyer_id FROM orders WHERE id = ?",
+                (rs, rowNum) -> rs.getString(1),
+                orderId).stream().findFirst();
+    }
+
     public void insertBusinessOrder(
             String id,
             String orderId,
@@ -341,6 +349,29 @@ public class OrderConfirmationRepository {
                             id, aggregate_type, aggregate_id, event_type, event_version,
                             payload_json, correlation_id, causation_id, created_at
                         ) VALUES (?, 'ORDER', ?, 'order.confirmed', 1,
+                                  CAST(? AS JSON), ?, ?, ?)
+                        """,
+                id,
+                orderId,
+                payloadJson,
+                correlationId,
+                causationId,
+                Timestamp.from(now));
+    }
+
+    // Adds the recipient-bearing v2 event without changing the published v1 outbox contract.
+    public void insertNotificationOutboxV2(
+            String id,
+            String orderId,
+            String payloadJson,
+            String correlationId,
+            String causationId,
+            Instant now) {
+        jdbc.update("""
+                        INSERT INTO order_outbox_events (
+                            id, aggregate_type, aggregate_id, event_type, event_version,
+                            payload_json, correlation_id, causation_id, created_at
+                        ) VALUES (?, 'ORDER', ?, 'order.confirmed', 2,
                                   CAST(? AS JSON), ?, ?, ?)
                         """,
                 id,
