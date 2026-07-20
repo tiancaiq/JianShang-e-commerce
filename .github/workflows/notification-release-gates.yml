@@ -1,0 +1,156 @@
+name: Notification Release Gates
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: notification-release-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: CI Commit Scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Verify CI-only append commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "02c3ea950dc3324b5e648e3f1855df17123deae9"
+          changed="$(git diff --name-only HEAD^..HEAD)"
+          test "$changed" = ".github/workflows/notification-release-gates.yml"
+          git diff --check HEAD^..HEAD
+
+  backend:
+    name: Notification Backend And MySQL Gates
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run exact Order and Notification reactor
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B -pl order-service,notification-service -am test
+
+      - name: Run focused producer and notification MySQL groups
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B -pl order-service,notification-service -am \
+            -Dtest=PaymentSucceededOrderConfirmationMySqlIntegrationTests,OrderConfirmedNotificationMySqlIntegrationTests,NotificationReadMySqlIntegrationTests \
+            test
+
+  gateway:
+    name: Notification Gateway Tests
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run gateway focused and full tests
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B -pl api-gateway -Dtest=NotificationDisabledRouteTests,NotificationRouteIntegrationTests test
+          ./mvnw -B -pl api-gateway -am test
+          ./mvnw -B -pl api-gateway -am package -DskipTests
+
+  frontend:
+    name: Notification Frontend Tests And Build
+    runs-on: ubuntu-latest
+    needs: scope
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused notification tests
+        run: >-
+          npx ng test
+          --watch=false
+          --browsers=ChromeHeadless
+          --include=src/app/core/services/notification.service.spec.ts
+          --include=src/app/features/account/notification-center.component.spec.ts
+
+      - name: Run full frontend tests
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+
+      - name: Build production frontend
+        run: npm run build -- --configuration production
+
+  safety:
+    name: Notification Safety Checks
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Run architecture and safety checks
+        run: |
+          set -euo pipefail
+          python tools/architecture_checks.py
+          python tools/architecture_checks.py --self-test
+          git diff --check 02c3ea950dc3324b5e648e3f1855df17123deae9..HEAD
+          test -z "$(git diff --name-only 02c3ea950dc3324b5e648e3f1855df17123deae9..HEAD -- 'order-service/src/main/resources/db/migration')"
+          test -z "$(find order-service/src/main/resources/db/migration -name 'V5__*' -o -name 'V6__*')"
+          test -f notification-service/src/main/resources/db/migration/notifications/V1__create_order_confirmed_notification_foundation.sql
+          grep -R "notifications: false" frontend/src/environments
+          grep -R "GATEWAY_FEATURE_NOTIFICATIONS:false" api-gateway/src/main/resources
+          pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{20,})'
+          if grep -RInE --exclude-dir=.git --exclude-dir=target --exclude-dir=node_modules --exclude=package-lock.json "$pattern" .; then
+            exit 1
+          fi
