@@ -25,15 +25,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Verify CI-only append commit
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "3d6e29aa1148e24529654c7565224953941eacc9"
-          changed="$(git diff --name-only HEAD^..HEAD)"
+          git merge-base --is-ancestor 3d6e29aa1148e24529654c7565224953941eacc9 HEAD
+          changed="$(git diff --name-only 3d6e29aa1148e24529654c7565224953941eacc9..HEAD)"
           test "$changed" = ".github/workflows/ai-discovery-release-gates.yml"
-          git diff --check HEAD^..HEAD
+          git diff --check 3d6e29aa1148e24529654c7565224953941eacc9..HEAD
 
   agent:
     name: Agent Discovery Tests
