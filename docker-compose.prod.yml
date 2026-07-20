@@ -174,6 +174,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:8082
       PAYMENT_SERVICE_URL: http://payment-service:8084
       AUTH_SERVICE_URL: http://auth-service:8085
+      GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
       KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}}
@@ -198,6 +199,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        FRONTEND_BUILD_CONFIGURATION: ${FRONTEND_BUILD_CONFIGURATION:-production}
     container_name: frontend
     ports:
       - "4200:4200"

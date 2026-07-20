@@ -353,6 +353,10 @@ class AgentApiSettings:
     """Holds the disabled-by-default authenticated customer-service API boundary."""
 
     enabled: bool = False
+    kill_switch_enabled: bool = False
+    orchestration_enabled: bool = False
+    retrieval_enabled: bool = False
+    provider_enabled: bool = False
     auth_service_url: str | None = None
     product_service_url: str | None = None
     product_service_token: str | None = field(default=None, repr=False)
@@ -382,6 +386,15 @@ class AgentApiSettings:
             100,
         )
         if not self.enabled:
+            if (
+                self.orchestration_enabled
+                or self.retrieval_enabled
+                or self.provider_enabled
+            ):
+                raise ValueError(
+                    "AGENT_CUSTOMER_SERVICE_API_ENABLED must be true when "
+                    "customer-service generation gates are enabled"
+                )
             return
         if not persistence_enabled:
             raise ValueError(
@@ -398,6 +411,18 @@ class AgentApiSettings:
                 "AGENT_PRODUCT_SERVICE_TOKEN is required when the customer-service "
                 "API is enabled"
             )
+
+    @property
+    def generation_enabled(self) -> bool:
+        """Require every application-owned generation gate and a clear kill switch."""
+
+        return (
+            self.enabled
+            and not self.kill_switch_enabled
+            and self.orchestration_enabled
+            and self.retrieval_enabled
+            and self.provider_enabled
+        )
 
 
 @dataclass(frozen=True)
@@ -785,6 +810,22 @@ class Settings:
         agent_persistence.validate()
         agent_api = AgentApiSettings(
             enabled=_boolean("AGENT_CUSTOMER_SERVICE_API_ENABLED", False),
+            kill_switch_enabled=_boolean(
+                "AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED",
+                False,
+            ),
+            orchestration_enabled=_boolean(
+                "AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED",
+                False,
+            ),
+            retrieval_enabled=_boolean(
+                "AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED",
+                False,
+            ),
+            provider_enabled=_boolean(
+                "AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED",
+                False,
+            ),
             auth_service_url=_optional_text("AUTH_SERVICE_URL"),
             product_service_url=_optional_text("AGENT_PRODUCT_SERVICE_URL"),
             product_service_token=_optional_text("AGENT_PRODUCT_SERVICE_TOKEN"),

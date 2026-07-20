@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -29,6 +30,9 @@ from msb_agent_service.customer_service_api import (
     AnswerDraft,
     AnswererMetadata,
     ListingContext,
+)
+from msb_agent_service.customer_service_langchain import (
+    LangChainQuestionAnswerer,
 )
 
 ACTOR = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -63,8 +67,10 @@ class FakeIdentityClient:
 class FakeListingClient:
     def __init__(self, eligible=True):
         self.eligible = eligible
+        self.calls = 0
 
     async def get(self, listing_id, correlation_id):
+        self.calls += 1
         if not self.eligible:
             return None
         return ListingContext(
@@ -235,7 +241,7 @@ class FakeRepository:
         return None
 
 
-def enabled_settings():
+def enabled_settings(*, generation_enabled=True):
     return Settings(
         openai_api_key="configured-for-test",
         agent_persistence=AgentPersistenceSettings(
@@ -244,6 +250,9 @@ def enabled_settings():
         ),
         agent_api=AgentApiSettings(
             enabled=True,
+            orchestration_enabled=generation_enabled,
+            retrieval_enabled=generation_enabled,
+            provider_enabled=generation_enabled,
             auth_service_url="http://auth-service:8085",
             product_service_url="http://product-service:8091",
             product_service_token="internal-secret",
@@ -252,12 +261,20 @@ def enabled_settings():
 
 
 class CustomerServiceApiTest(unittest.IsolatedAsyncioTestCase):
-    async def client(self, repository, *, listing=None, answerer=None):
+    async def client(
+        self,
+        repository,
+        *,
+        listing=None,
+        answerer=None,
+        settings=None,
+    ):
         async def factory(settings, metrics):
             return repository
 
         app = create_app(
-            enabled_settings(),
+            settings
+            or enabled_settings(generation_enabled=answerer is not None),
             persistence_repository_factory=factory,
             identity_client=FakeIdentityClient(),
             listing_client=listing or FakeListingClient(),
@@ -383,6 +400,42 @@ class CustomerServiceApiTest(unittest.IsolatedAsyncioTestCase):
             repository.begin_kwargs["policy_version"],
         )
 
+    async def test_langchain_adapter_preserves_create_send_and_history_contract(
+        self,
+    ):
+        repository = FakeRepository()
+        answerer = LangChainQuestionAnswerer(FakeAnswerer())
+        async with await self.client(repository, answerer=answerer) as client:
+            created = await client.post(
+                "/api/v1/agent/sessions",
+                headers={"Authorization": "Bearer actor-token"},
+                json={
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "LISTING", "id": LISTING},
+                },
+            )
+            sent = await client.post(
+                f"/api/v1/agent/sessions/{SESSION}/messages",
+                headers={"Authorization": "Bearer actor-token"},
+                json={
+                    "clientMessageId": CLIENT_MESSAGE,
+                    "body": "Can this be held?",
+                },
+            )
+            history = await client.get(
+                f"/api/v1/agent/sessions/{SESSION}/messages",
+                headers={"Authorization": "Bearer actor-token"},
+            )
+
+        self.assertEqual(200, created.status_code)
+        self.assertEqual(200, sent.status_code)
+        self.assertEqual(200, history.status_code)
+        self.assertEqual("USER", history.json()["data"][0]["role"])
+        self.assertEqual(
+            "CONTACT_SELLER",
+            sent.json()["assistantMessage"]["resolutionType"],
+        )
+
     async def test_ineligible_listing_locks_session_before_message_persistence(self):
         repository = FakeRepository()
         async with await self.client(
@@ -402,9 +455,10 @@ class CustomerServiceApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("AGENT_SESSION_READ_ONLY", response.json()["error"]["code"])
         self.assertEqual(AgentSessionStatus.READ_ONLY, repository.session.status)
 
-    async def test_production_answerer_fails_closed_and_records_failure(self):
+    async def test_disabled_generation_fails_before_product_or_persistence(self):
         repository = FakeRepository()
-        async with await self.client(repository) as client:
+        listing_client = FakeListingClient()
+        async with await self.client(repository, listing=listing_client) as client:
             response = await client.post(
                 f"/api/v1/agent/sessions/{SESSION}/messages",
                 headers={"Authorization": "Bearer actor-token"},
@@ -418,7 +472,43 @@ class CustomerServiceApiTest(unittest.IsolatedAsyncioTestCase):
             "AGENT_ORCHESTRATION_UNAVAILABLE",
             response.json()["error"]["code"],
         )
-        self.assertTrue(repository.failed)
+        self.assertFalse(repository.failed)
+        self.assertIsNone(repository.begin_kwargs)
+        self.assertEqual(0, listing_client.calls)
+
+    async def test_kill_switch_precedes_product_and_persistence(self):
+        repository = FakeRepository()
+        listing_client = FakeListingClient()
+        base = enabled_settings()
+        settings = replace(
+            base,
+            agent_api=replace(
+                base.agent_api,
+                kill_switch_enabled=True,
+            ),
+        )
+        async with await self.client(
+            repository,
+            listing=listing_client,
+            answerer=LangChainQuestionAnswerer(FakeAnswerer()),
+            settings=settings,
+        ) as client:
+            response = await client.post(
+                f"/api/v1/agent/sessions/{SESSION}/messages",
+                headers={"Authorization": "Bearer actor-token"},
+                json={
+                    "clientMessageId": CLIENT_MESSAGE,
+                    "body": "Can this be held?",
+                },
+            )
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual(
+            "AGENT_ORCHESTRATION_UNAVAILABLE",
+            response.json()["error"]["code"],
+        )
+        self.assertEqual(0, listing_client.calls)
+        self.assertIsNone(repository.begin_kwargs)
 
     async def test_cancelled_answerer_marks_invocation_failed_before_propagating(
         self,

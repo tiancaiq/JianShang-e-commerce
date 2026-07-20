@@ -11,7 +11,8 @@ from typing import Awaitable, Callable
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from prometheus_client import make_asgi_app
+from opensearchpy import AsyncOpenSearch
+from prometheus_client import CollectorRegistry, make_asgi_app
 
 from .agent_persistence import (
     AgentPersistenceError,
@@ -31,6 +32,10 @@ from .customer_service_api import (
     map_persistence_error,
 )
 from .customer_service_metrics import CustomerServiceApiMetrics
+from .customer_service_runtime import (
+    CustomerServiceRuntime,
+    build_customer_service_runtime,
+)
 from .knowledge_ingestion_runtime import (
     KnowledgeIngestionRuntime,
     KnowledgeIngestionStatus,
@@ -81,6 +86,15 @@ ListingProposalRepositoryFactory = Callable[
     [AgentPersistenceRepository, ListingProposalMetrics],
     Awaitable[ListingProposalRepositoryProtocol],
 ]
+CustomerServiceRuntimeFactory = Callable[
+    [
+        Settings,
+        AgentPersistenceRepository,
+        AsyncOpenSearch,
+        CollectorRegistry,
+    ],
+    CustomerServiceRuntime,
+]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -92,6 +106,7 @@ def create_app(
     identity_client: ActorIdentityClient | None = None,
     listing_client: ListingEligibilityClient | None = None,
     question_answerer: QuestionAnswerer | None = None,
+    customer_service_runtime_factory: CustomerServiceRuntimeFactory | None = None,
     listing_proposal_repository_factory: (
         ListingProposalRepositoryFactory | None
     ) = None,
@@ -100,6 +115,9 @@ def create_app(
     """Create the service app without performing provider calls at startup."""
 
     runtime_settings = settings or Settings.from_env()
+    runtime_settings.agent_api.validate(
+        persistence_enabled=runtime_settings.agent_persistence.enabled
+    )
     runtime_settings.listing_proposal_api.validate(
         persistence_enabled=runtime_settings.agent_persistence.enabled
     )
@@ -128,13 +146,17 @@ def create_app(
     listing_proposal_repository: ListingProposalRepositoryProtocol | None = None
     listing_proposal_service: ListingProposalReviewService | None = None
     listing_proposal_retention_task: asyncio.Task[None] | None = None
+    customer_service_runtime: CustomerServiceRuntime | None = None
     create_listing_proposal_repository = (
         listing_proposal_repository_factory
         or ListingProposalRepository.from_agent_repository
     )
     runtime_identity_client = identity_client
     runtime_listing_client = listing_client
-    orchestration_available = question_answerer is not None
+    orchestration_available = False
+    create_customer_service_runtime = (
+        customer_service_runtime_factory or build_customer_service_runtime
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -147,6 +169,8 @@ def create_app(
             nonlocal listing_proposal_repository
             nonlocal listing_proposal_service
             nonlocal listing_proposal_retention_task
+            nonlocal customer_service_runtime
+            nonlocal orchestration_available
             if runtime_settings.knowledge_ingestion.enabled:
                 ingestion_runtime = await create_ingestion_runtime(
                     runtime_settings,
@@ -172,10 +196,28 @@ def create_app(
                     runtime_listing_client
                     or ListingEligibilityClient(runtime_settings.agent_api)
                 )
+                selected_answerer: QuestionAnswerer = DeferredQuestionAnswerer()
+                if runtime_settings.agent_api.generation_enabled:
+                    if question_answerer is not None:
+                        selected_answerer = question_answerer
+                    else:
+                        if knowledge_client is None:
+                            raise RuntimeError(
+                                "Enabled customer-service generation requires "
+                                "an initialized knowledge client"
+                            )
+                        customer_service_runtime = create_customer_service_runtime(
+                            runtime_settings,
+                            persistence_repository,
+                            knowledge_client,
+                            metrics.registry,
+                        )
+                        selected_answerer = customer_service_runtime.answerer
+                    orchestration_available = True
                 customer_service = AgentCustomerService(
                     persistence_repository,
                     runtime_listing_client,
-                    question_answerer or DeferredQuestionAnswerer(),
+                    selected_answerer,
                 )
             if runtime_settings.listing_proposal_api.enabled:
                 if persistence_repository is None:
@@ -226,6 +268,8 @@ def create_app(
                 await ingestion_runtime.stop()
             if knowledge_client is not None:
                 await close_open_search_client(knowledge_client)
+            if customer_service_runtime is not None:
+                await customer_service_runtime.close()
 
     app = FastAPI(title="MSB Agent Service", version="0.9.0", lifespan=lifespan)
     app.mount("/metrics", make_asgi_app(registry=metrics.registry))
@@ -473,6 +517,25 @@ def create_app(
             request.state.correlation_id,
         )
 
+    def require_answer_generation() -> None:
+        """Block write-side Agent work before actor, Product, or persistence calls."""
+
+        if not runtime_settings.agent_api.enabled:
+            raise AgentApiError(
+                AgentApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Agent customer service is not available.",
+            )
+        if (
+            not runtime_settings.agent_api.generation_enabled
+            or not orchestration_available
+        ):
+            raise AgentApiError(
+                AgentApiErrorCode.ORCHESTRATION_UNAVAILABLE,
+                503,
+                "The customer-service answer engine is not available.",
+            )
+
     async def proposal_actor(
         request: Request,
         authorization: str | None,
@@ -529,6 +592,7 @@ def create_app(
         started = time.perf_counter()
         route = "create_session"
         try:
+            require_answer_generation()
             actor_user_id = await actor(request, authorization)
             assert customer_service is not None
             response = await customer_service.create_session(
@@ -628,6 +692,7 @@ def create_app(
 
         started = time.perf_counter()
         try:
+            require_answer_generation()
             actor_user_id = await actor(request, authorization)
             assert customer_service is not None
             response = await customer_service.send_message(

@@ -62,6 +62,7 @@ class OpenAIProvider:
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self._settings = settings
         self._client = client
+        self._owns_client = client is None
 
     @property
     def provider_name(self) -> str:
@@ -70,6 +71,16 @@ class OpenAIProvider:
     @property
     def model_name(self) -> str:
         return self._settings.openai_model
+
+    async def close(self) -> None:
+        """Close only the lazily-created provider client owned by this adapter."""
+
+        if self._client is None or not self._owns_client:
+            return
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            await close()
+        self._client = None
 
     async def customer_service_answer(
         self,

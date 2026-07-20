@@ -13,6 +13,7 @@ dependencies = [
   "cryptography>=44,<47",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
+  "langchain-core==1.4.9",
   "openai>=2.30,<3",
   "opensearch-py[async]>=2.8,<3",
   "prometheus-client>=0.21,<1",
