@@ -46,6 +46,8 @@ describe('ListingService gateway and listing API regression', () => {
     publicRegion: 'CA',
     status: 'DRAFT',
     moderationStatus: 'NOT_SUBMITTED',
+    publicationSource: null,
+    publishedAt: null,
     version: 0,
     createdAt: '2026-06-16T12:00:00Z',
     updatedAt: '2026-06-16T12:00:00Z',
@@ -499,6 +501,35 @@ describe('ListingService gateway and listing API regression', () => {
     request.flush([storeDraft]);
   });
 
+  it('searches the business item management catalog with seller filters and cursor pagination', () => {
+    const businessId = '01B00000000000000000000001';
+    const response = {
+      data: [draft],
+      page: { nextCursor: 'catalog-cursor-2', hasMore: true },
+      summary: { total: 8, draft: 3, active: 4, paused: 1, removed: 0 },
+    };
+
+    service.searchBusinessStoreItems(businessId, {
+      q: ' keyboard ',
+      status: 'PAUSED',
+      cursor: 'catalog-cursor-1',
+      limit: 24,
+    }).subscribe(result => {
+      expect(result).toEqual(response);
+    });
+
+    const request = httpMock.expectOne(
+      req => req.url === `/api/v1/businesses/${businessId}/store/items/search`,
+    );
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.params.get('q')).toBe('keyboard');
+    expect(request.request.params.get('status')).toBe('PAUSED');
+    expect(request.request.params.get('cursor')).toBe('catalog-cursor-1');
+    expect(request.request.params.get('limit')).toBe('24');
+    request.flush(response);
+  });
+
   it('creates, reads, and updates business store items through business-scoped routes', () => {
     const businessId = '01B00000000000000000000001';
     const storeDraft = {
@@ -554,6 +585,52 @@ describe('ListingService gateway and listing API regression', () => {
     expect(updateRequest.request.withCredentials).toBeTrue();
     expect(updateRequest.request.body).toEqual(payload);
     updateRequest.flush({ ...storeDraft, version: 1 });
+  });
+
+  it('publishes, pauses, and relists business store items with If-Match versions', () => {
+    const businessId = '01B00000000000000000000001';
+    const storeDraft = {
+      ...draft,
+      sellerType: 'BUSINESS' as const,
+      individualSellerUserId: null,
+      businessId,
+      storeId: '01S00000000000000000000001',
+      sku: 'SKU-STORE-1',
+      negotiable: false,
+      publicCity: null,
+      publicRegion: null,
+    };
+
+    service.publishBusinessStoreItem(businessId, storeDraft.id, 0).subscribe(response => {
+      expect(response.status).toBe('ACTIVE');
+    });
+    const publishRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${storeDraft.id}/publish`);
+    expect(publishRequest.request.method).toBe('POST');
+    expect(publishRequest.request.headers.get('If-Match')).toBe('0');
+    expect(publishRequest.request.withCredentials).toBeTrue();
+    publishRequest.flush({
+      ...storeDraft,
+      status: 'ACTIVE',
+      publicationSource: 'BUSINESS_SELF_PUBLISHED',
+      publishedAt: '2026-07-16T12:00:00Z',
+      version: 1,
+    });
+
+    service.pauseBusinessStoreItem(businessId, storeDraft.id, 1).subscribe(response => {
+      expect(response.status).toBe('PAUSED');
+    });
+    const pauseRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${storeDraft.id}/pause`);
+    expect(pauseRequest.request.method).toBe('POST');
+    expect(pauseRequest.request.headers.get('If-Match')).toBe('1');
+    pauseRequest.flush({ ...storeDraft, status: 'PAUSED', publicationSource: 'BUSINESS_SELF_PUBLISHED', version: 2 });
+
+    service.relistBusinessStoreItem(businessId, storeDraft.id, 2).subscribe(response => {
+      expect(response.status).toBe('ACTIVE');
+    });
+    const relistRequest = httpMock.expectOne(`/api/v1/businesses/${businessId}/store/items/${storeDraft.id}/relist`);
+    expect(relistRequest.request.method).toBe('POST');
+    expect(relistRequest.request.headers.get('If-Match')).toBe('2');
+    relistRequest.flush({ ...storeDraft, status: 'ACTIVE', publicationSource: 'BUSINESS_SELF_PUBLISHED', version: 3 });
   });
 
   it('loads admin listing moderation queue through the gateway without browser tokens', () => {

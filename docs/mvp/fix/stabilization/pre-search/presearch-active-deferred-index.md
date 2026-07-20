@@ -1,5 +1,15 @@
 # Pre-Search Active And Deferred Code Index
 
+Status: Historical pre-search snapshot.
+
+The current post-search/profile cleanup index is:
+
+- `docs/mvp/fix/stabilization/post-search/postsearch-stab-p2-03-historical-demo-deferred-module-cleanup.md`
+
+Use that document for the current route and module audit. This file remains as
+the boundary that applied before the later chat, V2 commerce, and AI work was
+added to the worktree.
+
 This index helps reviewers distinguish active MVP surfaces from older tutorial
 or deferred V2 code after profile, avatar, search, and OpenSearch work.
 

@@ -4,6 +4,7 @@ export interface CurrentUser {
   email: string | null;
   emailVerified: boolean;
   displayName: string | null;
+  publicHandle?: string | null;
   phone: string | null;
   phoneVerified: boolean;
   avatarUrl: string | null;

@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { AuthService } from '../../core/services/auth.service';
 
 @Component({
   selector: 'app-admin-access-denied',
@@ -15,6 +16,7 @@ import { RouterLink } from '@angular/router';
         </p>
         <div class="actions">
           <a routerLink="/" class="secondary">Marketplace</a>
+          <button type="button" class="secondary" (click)="logout()">Logout</button>
           <a routerLink="/login" [queryParams]="{ client: 'admin-portal', returnUrl: '/admin/dashboard' }" class="primary">
             Sign in as admin
           </a>
@@ -67,15 +69,19 @@ import { RouterLink } from '@angular/router';
       flex-wrap: wrap;
     }
 
-    a {
+    a,
+    button {
       min-height: 40px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       padding: 0.6rem 0.9rem;
       border-radius: var(--radius-md);
+      background: transparent;
       font-weight: 750;
+      font: inherit;
       text-decoration: none;
+      cursor: pointer;
     }
 
     .primary {
@@ -89,4 +95,10 @@ import { RouterLink } from '@angular/router';
     }
   `],
 })
-export class AdminAccessDeniedComponent {}
+export class AdminAccessDeniedComponent {
+  private authService = inject(AuthService);
+
+  logout(): void {
+    this.authService.logout('admin-portal');
+  }
+}

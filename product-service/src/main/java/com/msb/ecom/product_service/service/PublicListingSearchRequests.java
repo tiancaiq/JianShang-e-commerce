@@ -42,6 +42,8 @@ final class PublicListingSearchRequests {
                 city,
                 county,
                 sort,
+                java.util.List.of(),
+                java.util.List.of(),
                 cursor == null ? null : cursor.priceAmount(),
                 cursor == null ? null : cursor.publishedAt(),
                 cursor == null ? null : cursor.listingId());

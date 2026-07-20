@@ -27,6 +27,8 @@ describe('BusinessAccountComponent', () => {
       bannerUrl: null,
       supportEmail: 'help@example.com',
       supportPhone: '+19495550000',
+      publicCity: 'Irvine',
+      publicRegion: 'CA',
       status: 'ACTIVE',
       version: 1,
       createdAt: '2026-07-08T12:00:00Z',

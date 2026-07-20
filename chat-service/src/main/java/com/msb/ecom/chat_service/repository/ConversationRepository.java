@@ -154,6 +154,20 @@ public class ConversationRepository {
         return findCompletionById(completionId).orElseThrow();
     }
 
+    // Locks a completed trade conversation so neither participant can add messages after confirmation.
+    public void lockConversation(String conversationId, Instant now) {
+        jdbcTemplate.update("""
+                update conversations
+                set status = 'LOCKED',
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and status <> 'LOCKED'
+                """,
+                Timestamp.from(now),
+                conversationId);
+    }
+
     public List<ConversationListRecord> findParticipantConversations(
             String userId,
             Instant beforeUpdatedAt,

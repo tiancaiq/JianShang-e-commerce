@@ -1,6 +1,7 @@
 package com.msb.ecom.api_gateway.config;
 
 import com.msb.ecom.api_gateway.auth.LoginReturnUrl;
+import com.msb.ecom.api_gateway.auth.SerializedOAuth2AuthorizedClientManager;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -12,7 +13,10 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -40,9 +44,12 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Configuration
 public class SecurityConfig {
+
+    private static final Set<String> SUPPORTED_LOGOUT_CLIENTS = Set.of("marketplace", "seller-portal", "admin-portal");
 
     private final List<String> allowedOrigins;
     private final String logoutRedirectUri;
@@ -79,6 +86,8 @@ public class SecurityConfig {
                                 new AntPathRequestMatcher("/api/v1/webhooks/business-verification")))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(new AntPathRequestMatcher("/api/v1/public/**"))
+                        .permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/api/v1/stores/*"))
                         .permitAll()
                         .requestMatchers(
                                 "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**",
@@ -119,6 +128,16 @@ public class SecurityConfig {
     @Bean
     public SecurityContextRepository securityContextRepository() {
         return new HttpSessionSecurityContextRepository();
+    }
+
+    @Bean
+    public OAuth2AuthorizedClientManager oauth2AuthorizedClientManager(
+            ClientRegistrationRepository clientRegistrationRepository,
+            OAuth2AuthorizedClientRepository authorizedClientRepository) {
+        DefaultOAuth2AuthorizedClientManager delegate = new DefaultOAuth2AuthorizedClientManager(
+                clientRegistrationRepository,
+                authorizedClientRepository);
+        return new SerializedOAuth2AuthorizedClientManager(delegate);
     }
 
     @Bean
@@ -270,23 +289,56 @@ public class SecurityConfig {
     private LogoutSuccessHandler oidcLogoutSuccessHandler(
             OAuth2AuthorizedClientService authorizedClientService) {
         return (request, response, authentication) -> {
-            String targetUrl = oidcLogoutRedirectUri(authentication);
+            String targetUrl = oidcLogoutRedirectUri(
+                    authentication,
+                    logoutRedirectUri(request.getParameter("client"), authentication));
             removeAuthorizedClient(authorizedClientService, authentication);
             response.sendRedirect(targetUrl);
         };
     }
 
-    private String oidcLogoutRedirectUri(Authentication authentication) {
+    private String oidcLogoutRedirectUri(Authentication authentication, String postLogoutRedirectUri) {
         if (authentication != null && authentication.getPrincipal() instanceof OidcUser oidcUser
                 && oidcUser.getIdToken() != null) {
             return UriComponentsBuilder.fromUriString(oidcLogoutUri)
                     .queryParam("id_token_hint", oidcUser.getIdToken().getTokenValue())
-                    .queryParam("post_logout_redirect_uri", logoutRedirectUri)
+                    .queryParam("post_logout_redirect_uri", postLogoutRedirectUri)
                     .build()
                     .encode()
                     .toUriString();
         }
-        return logoutRedirectUri;
+        return postLogoutRedirectUri;
+    }
+
+    private String logoutRedirectUri(String requestedClient, Authentication authentication) {
+        String client = requestedClient != null && SUPPORTED_LOGOUT_CLIENTS.contains(requestedClient)
+                ? requestedClient
+                : logoutClientFromAuthentication(authentication);
+        return switch (client) {
+            case "seller-portal" -> LoginReturnUrl.joinWithBaseUri(
+                    loginSuccessBaseUri,
+                    "/login?client=seller-portal&signedOut=1");
+            case "admin-portal" -> LoginReturnUrl.joinWithBaseUri(
+                    loginSuccessBaseUri,
+                    "/login?client=admin-portal&signedOut=1");
+            default -> marketplaceLogoutRedirectUri();
+        };
+    }
+
+    private String logoutClientFromAuthentication(Authentication authentication) {
+        OAuth2AuthenticationToken oauth2Authentication = oauth2Authentication(authentication);
+        if (oauth2Authentication == null) {
+            return "marketplace";
+        }
+        String registrationId = oauth2Authentication.getAuthorizedClientRegistrationId();
+        return SUPPORTED_LOGOUT_CLIENTS.contains(registrationId) ? registrationId : "marketplace";
+    }
+
+    private String marketplaceLogoutRedirectUri() {
+        return UriComponentsBuilder.fromUriString(logoutRedirectUri)
+                .replaceQueryParam("signedOut", "1")
+                .build()
+                .toUriString();
     }
 
     // Removes server-side OAuth tokens so a logged-out browser must start a fresh login flow.

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 @RequiredArgsConstructor
@@ -78,7 +79,7 @@ public class ListingDraftRepository {
                 select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
-                       status, moderation_status, version, created_at, updated_at
+                       status, moderation_status, publication_source, published_at, version, created_at, updated_at
                 from listings
                 where id = ?
                 """,
@@ -92,7 +93,7 @@ public class ListingDraftRepository {
                 select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
-                       status, moderation_status, version, created_at, updated_at
+                       status, moderation_status, publication_source, published_at, version, created_at, updated_at
                 from listings
                 where seller_type = 'INDIVIDUAL'
                   and individual_seller_user_id = ?
@@ -107,7 +108,7 @@ public class ListingDraftRepository {
                 select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
-                       status, moderation_status, version, created_at, updated_at
+                       status, moderation_status, publication_source, published_at, version, created_at, updated_at
                 from listings
                 where seller_type = 'BUSINESS'
                   and business_id = ?
@@ -117,12 +118,84 @@ public class ListingDraftRepository {
                 businessId);
     }
 
+    // Searches one business catalog with a deterministic cursor for the seller management screen.
+    public List<ListingDraftResponse> searchBusinessStoreItems(
+            String businessId,
+            BusinessStoreItemSearchCriteria criteria,
+            int limit) {
+        StringBuilder sql = new StringBuilder("""
+                select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
+                       title, description, condition_code, condition_notes, price_amount,
+                       currency, negotiable, sku, quantity, public_city, public_region,
+                       status, moderation_status, publication_source, published_at, version, created_at, updated_at
+                from listings
+                where seller_type = 'BUSINESS'
+                  and business_id = ?
+                """);
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(businessId);
+
+        if (hasText(criteria.keyword())) {
+            String keyword = "%" + escapedLike(criteria.keyword().toLowerCase(Locale.ROOT)) + "%";
+            sql.append("""
+                    and (
+                         lower(title) like ? escape '!'
+                      or lower(sku) like ? escape '!'
+                    )
+                    """);
+            parameters.add(keyword);
+            parameters.add(keyword);
+        }
+        if (hasText(criteria.status())) {
+            sql.append(" and status = ?\n");
+            parameters.add(criteria.status());
+        }
+        if (criteria.cursorUpdatedAt() != null && hasText(criteria.cursorListingId())) {
+            Timestamp cursorUpdatedAt = Timestamp.from(criteria.cursorUpdatedAt());
+            sql.append("""
+                    and (
+                         updated_at < ?
+                      or (updated_at = ? and id < ?)
+                    )
+                    """);
+            parameters.add(cursorUpdatedAt);
+            parameters.add(cursorUpdatedAt);
+            parameters.add(criteria.cursorListingId());
+        }
+
+        sql.append(" order by updated_at desc, id desc\n");
+        sql.append(" limit ?");
+        parameters.add(limit);
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> listingDraftResponse(rs), parameters.toArray());
+    }
+
+    // Counts lifecycle states across the full business catalog independently of the selected list filter.
+    public BusinessStoreItemStatusCounts countBusinessStoreItemStatuses(String businessId) {
+        return jdbcTemplate.queryForObject("""
+                select count(*) as total_count,
+                       sum(case when status = 'DRAFT' then 1 else 0 end) as draft_count,
+                       sum(case when status = 'ACTIVE' then 1 else 0 end) as active_count,
+                       sum(case when status = 'PAUSED' then 1 else 0 end) as paused_count,
+                       sum(case when status = 'REMOVED_BY_ADMIN' then 1 else 0 end) as removed_count
+                from listings
+                where seller_type = 'BUSINESS'
+                  and business_id = ?
+                """,
+                (rs, rowNum) -> new BusinessStoreItemStatusCounts(
+                        rs.getLong("total_count"),
+                        rs.getLong("draft_count"),
+                        rs.getLong("active_count"),
+                        rs.getLong("paused_count"),
+                        rs.getLong("removed_count")),
+                businessId);
+    }
+
     public List<ListingDraftResponse> findPendingReview() {
         return jdbcTemplate.query("""
                 select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
                        title, description, condition_code, condition_notes, price_amount,
                        currency, negotiable, sku, quantity, public_city, public_region,
-                       status, moderation_status, version, created_at, updated_at
+                       status, moderation_status, publication_source, published_at, version, created_at, updated_at
                 from listings
                 where status = 'PENDING_REVIEW'
                   and moderation_status = 'PENDING'
@@ -144,8 +217,10 @@ public class ListingDraftRepository {
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
                 where l.id = ?
-                  and l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                  and (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 """,
                 (rs, rowNum) -> publicListingResponse(rs),
                 listingId);
@@ -188,8 +263,10 @@ public class ListingDraftRepository {
                 from listings l
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
-                where l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                where (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
                 """,
@@ -209,13 +286,17 @@ public class ListingDraftRepository {
                 from listings l
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
-                where l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
-                  and l.seller_type = ?
+                where l.seller_type = ?
+                  and (
+                    (? = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (? = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
                 """,
                 (rs, rowNum) -> publicListingResponse(rs),
+                sellerType,
+                sellerType,
                 sellerType,
                 limit);
     }
@@ -232,12 +313,26 @@ public class ListingDraftRepository {
                 from listings l
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
-                where l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
-                  and l.seller_type = ?
+                where l.seller_type = ?
+                  and (
+                    (? = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (? = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 """);
         List<Object> parameters = new ArrayList<>();
         parameters.add(sellerType);
+        parameters.add(sellerType);
+        parameters.add(sellerType);
+
+        if ("BUSINESS".equals(sellerType)) {
+            if (criteria.visibleBusinessIds() == null || criteria.visibleBusinessIds().isEmpty()) {
+                sql.append(" and 1 = 0\n");
+            } else {
+                sql.append(" and l.business_id in (%s)\n"
+                        .formatted(placeholders(criteria.visibleBusinessIds().size())));
+                parameters.addAll(criteria.visibleBusinessIds());
+            }
+        }
 
         if (hasText(criteria.keyword())) {
             String keyword = "%" + escapedLike(criteria.keyword().toLowerCase(Locale.ROOT)) + "%";
@@ -250,11 +345,23 @@ public class ListingDraftRepository {
                       or lower(l.condition_code) like ? escape '!'
                       or lower(l.public_city) like ? escape '!'
                       or lower(l.public_region) like ? escape '!'
-                    )
+                      or (? = 'BUSINESS' and lower(l.sku) like ? escape '!')
                     """);
             for (int index = 0; index < 7; index++) {
                 parameters.add(keyword);
             }
+            parameters.add(sellerType);
+            parameters.add(keyword);
+            if ("BUSINESS".equals(sellerType) && criteria.businessIds() != null && !criteria.businessIds().isEmpty()) {
+                sql.append("""
+                      or (? = 'BUSINESS' and l.business_id in (%s))
+                """.formatted(placeholders(criteria.businessIds().size())));
+                parameters.add(sellerType);
+                parameters.addAll(criteria.businessIds());
+            }
+            sql.append("""
+                    )
+                    """);
         }
         if (hasText(criteria.categoryId())) {
             sql.append(" and l.category_id = ?\n");
@@ -289,6 +396,20 @@ public class ListingDraftRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> publicListingResponse(rs), parameters.toArray());
     }
 
+    // Supplies bounded business candidates so auth-service can enforce active business/store visibility before paging.
+    public Set<String> findSelfPublishedBusinessIds(int limit) {
+        return new java.util.LinkedHashSet<>(jdbcTemplate.queryForList("""
+                select distinct business_id
+                from listings
+                where seller_type = 'BUSINESS'
+                  and status = 'ACTIVE'
+                  and publication_source = 'BUSINESS_SELF_PUBLISHED'
+                  and business_id is not null
+                order by business_id
+                limit ?
+                """, String.class, limit));
+    }
+
     public List<PublicListingResponse> findPublicListingsByIds(List<String> listingIds) {
         if (listingIds.isEmpty()) {
             return List.of();
@@ -305,8 +426,10 @@ public class ListingDraftRepository {
                 from listings l
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
-                where l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                where (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                   and l.id in (%s)
                 """.formatted(placeholders),
                 (rs, rowNum) -> publicListingResponse(rs),
@@ -336,8 +459,10 @@ public class ListingDraftRepository {
                 left join listing_engagement_stats es on es.listing_id = l.id
                 where lk.user_id = ?
                   and lk.active = true
-                  and l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                  and (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 order by lk.updated_at desc, coalesce(l.published_at, l.updated_at) desc, l.id desc
                 limit ?
                 """,
@@ -358,11 +483,38 @@ public class ListingDraftRepository {
                 from listings l
                 join categories c on c.id = l.category_id
                 left join listing_engagement_stats es on es.listing_id = l.id
-                where l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                where (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                 order by coalesce(l.published_at, l.updated_at) desc, l.id desc
                 """,
                 (rs, rowNum) -> publicListingResponse(rs));
+    }
+
+    // Finds authoritative active individual listings whose current version still needs an immutable source snapshot.
+    public List<ListingDraftResponse> findActiveIndividualsMissingKnowledgeVersion(int limit) {
+        return jdbcTemplate.query("""
+                select l.id, l.seller_type, l.individual_seller_user_id, l.business_id, l.store_id,
+                       l.category_id, l.title, l.description, l.condition_code, l.condition_notes,
+                       l.price_amount, l.currency, l.negotiable, l.sku, l.quantity,
+                       l.public_city, l.public_region, l.status, l.moderation_status,
+                       l.publication_source, l.published_at, l.version, l.created_at, l.updated_at
+                from listings l
+                where l.seller_type = 'INDIVIDUAL'
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and not exists (
+                    select 1
+                    from listing_knowledge_versions kv
+                    where kv.listing_id = l.id
+                      and kv.source_version = l.version
+                  )
+                order by l.id asc
+                limit ?
+                """,
+                (rs, rowNum) -> listingDraftResponse(rs),
+                limit);
     }
 
     public long countPendingReview() {
@@ -392,11 +544,12 @@ public class ListingDraftRepository {
                     public_region = ?,
                     status = 'DRAFT',
                     moderation_status = 'NOT_SUBMITTED',
+                    publication_source = null,
                     published_at = null,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
-                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE', 'CLOSED')
+                  and status in ('DRAFT', 'PENDING_REVIEW', 'ACTIVE', 'CLOSED', 'CHANGES_REQUESTED')
                   and version = ?
                 """,
                 update.categoryId(),
@@ -420,6 +573,7 @@ public class ListingDraftRepository {
         return jdbcTemplate.update("""
                 update listings
                 set status = 'CLOSED',
+                    publication_source = null,
                     published_at = null,
                     version = version + 1,
                     updated_at = ?
@@ -436,6 +590,7 @@ public class ListingDraftRepository {
         return jdbcTemplate.update("""
                 update listings
                 set status = 'CLOSED',
+                    publication_source = null,
                     published_at = null,
                     version = version + 1,
                     updated_at = ?
@@ -497,7 +652,10 @@ public class ListingDraftRepository {
                     updated_at = ?
                 where id = ?
                   and status = 'ACTIVE'
-                  and moderation_status = 'APPROVED'
+                  and (
+                    (seller_type = 'INDIVIDUAL' and moderation_status = 'APPROVED')
+                    or (seller_type = 'BUSINESS' and publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                   and version = ?
                 """,
                 Timestamp.from(now),
@@ -510,11 +668,12 @@ public class ListingDraftRepository {
                 update listings
                 set status = 'DRAFT',
                     moderation_status = 'NOT_SUBMITTED',
+                    publication_source = null,
                     published_at = null,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
-                  and status in ('PENDING_REVIEW', 'ACTIVE', 'CLOSED')
+                  and status in ('PENDING_REVIEW', 'ACTIVE', 'CLOSED', 'CHANGES_REQUESTED')
                 """,
                 Timestamp.from(now),
                 listingId);
@@ -525,6 +684,7 @@ public class ListingDraftRepository {
                 update listings
                 set status = 'PENDING_REVIEW',
                     moderation_status = 'PENDING',
+                    publication_source = null,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
@@ -541,12 +701,14 @@ public class ListingDraftRepository {
             long expectedVersion,
             String status,
             String moderationStatus,
+            String publicationSource,
             Instant publishedAt,
             Instant now) {
         return jdbcTemplate.update("""
                 update listings
                 set status = ?,
                     moderation_status = ?,
+                    publication_source = ?,
                     published_at = ?,
                     version = version + 1,
                     updated_at = ?
@@ -557,7 +719,110 @@ public class ListingDraftRepository {
                 """,
                 status,
                 moderationStatus,
+                publicationSource,
                 publishedAt == null ? null : Timestamp.from(publishedAt),
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    // Updates a paused business item while keeping it private until the seller explicitly relists it.
+    public int updatePausedBusinessStoreItem(
+            String listingId,
+            long expectedVersion,
+            ListingDraftUpdate update,
+            Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set category_id = ?,
+                    title = ?,
+                    description = ?,
+                    condition_code = ?,
+                    condition_notes = ?,
+                    price_amount = ?,
+                    currency = ?,
+                    negotiable = ?,
+                    sku = ?,
+                    quantity = ?,
+                    public_city = ?,
+                    public_region = ?,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and seller_type = 'BUSINESS'
+                  and status = 'PAUSED'
+                  and publication_source = 'BUSINESS_SELF_PUBLISHED'
+                  and version = ?
+                """,
+                update.categoryId(),
+                update.title(),
+                update.description(),
+                update.condition().name(),
+                update.conditionNotes(),
+                update.priceAmount(),
+                update.currency(),
+                update.negotiable(),
+                update.sku(),
+                update.quantity(),
+                update.publicCity(),
+                update.publicRegion(),
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int publishBusinessStoreItem(String listingId, long expectedVersion, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'ACTIVE',
+                    moderation_status = 'NOT_SUBMITTED',
+                    publication_source = 'BUSINESS_SELF_PUBLISHED',
+                    published_at = ?,
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and seller_type = 'BUSINESS'
+                  and status = 'DRAFT'
+                  and version = ?
+                """,
+                Timestamp.from(now),
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int pauseBusinessStoreItem(String listingId, long expectedVersion, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'PAUSED',
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and seller_type = 'BUSINESS'
+                  and status = 'ACTIVE'
+                  and publication_source = 'BUSINESS_SELF_PUBLISHED'
+                  and version = ?
+                """,
+                Timestamp.from(now),
+                listingId,
+                expectedVersion);
+    }
+
+    public int relistBusinessStoreItem(String listingId, long expectedVersion, Instant now) {
+        return jdbcTemplate.update("""
+                update listings
+                set status = 'ACTIVE',
+                    publication_source = 'BUSINESS_SELF_PUBLISHED',
+                    published_at = coalesce(published_at, ?),
+                    version = version + 1,
+                    updated_at = ?
+                where id = ?
+                  and seller_type = 'BUSINESS'
+                  and status = 'PAUSED'
+                  and publication_source = 'BUSINESS_SELF_PUBLISHED'
+                  and version = ?
+                """,
+                Timestamp.from(now),
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);
@@ -589,9 +854,14 @@ public class ListingDraftRepository {
                 rs.getString("public_region"),
                 rs.getString("status"),
                 rs.getString("moderation_status"),
+                rs.getString("publication_source"),
+                nullableInstant(rs, "published_at"),
                 rs.getLong("version"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
+                null,
+                null,
+                null,
                 List.of());
     }
 
@@ -603,6 +873,10 @@ public class ListingDraftRepository {
                 sellerId(rs),
                 null,
                 null,
+                null,
+                null,
+                null,
+                false,
                 rs.getString("category_id"),
                 rs.getString("category_slug"),
                 rs.getString("category_name"),
@@ -632,6 +906,10 @@ public class ListingDraftRepository {
                 .replace("!", "!!")
                 .replace("%", "!%")
                 .replace("_", "!_");
+    }
+
+    private String placeholders(int count) {
+        return String.join(", ", java.util.Collections.nCopies(count, "?"));
     }
 
     private String searchOrderBy(String sort) {
@@ -682,6 +960,11 @@ public class ListingDraftRepository {
         return "BUSINESS".equals(rs.getString("seller_type"))
                 ? rs.getString("business_id")
                 : rs.getString("individual_seller_user_id");
+    }
+
+    private Instant nullableInstant(java.sql.ResultSet rs, String columnName) throws java.sql.SQLException {
+        Timestamp timestamp = rs.getTimestamp(columnName);
+        return timestamp == null ? null : timestamp.toInstant();
     }
 
     public record ListingOwnerSnapshot(

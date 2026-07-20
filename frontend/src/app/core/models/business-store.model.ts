@@ -8,6 +8,8 @@ export interface BusinessStore {
   bannerUrl: string | null;
   supportEmail: string | null;
   supportPhone: string | null;
+  publicCity: string;
+  publicRegion: string;
   status: string;
   version: number;
   createdAt: string;

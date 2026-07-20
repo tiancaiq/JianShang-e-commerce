@@ -235,11 +235,9 @@ export class AuthService {
     return params;
   }
 
-  logout(): void {
-    this.clearUser();
-
+  logout(client: LoginClient = 'marketplace'): boolean {
     if (!isPlatformBrowser(this.platformId)) {
-      return;
+      return false;
     }
 
     this.clearLegacyBrowserAuthStorage();
@@ -258,8 +256,21 @@ export class AuthService {
       form.appendChild(csrfInput);
     }
 
-    this.document.body.appendChild(form);
-    form.submit();
+    const clientInput = this.document.createElement('input');
+    clientInput.type = 'hidden';
+    clientInput.name = 'client';
+    clientInput.value = this.safeLogoutClient(client);
+    form.appendChild(clientInput);
+
+    try {
+      this.document.body.appendChild(form);
+      form.submit();
+      this.clearUser();
+      return true;
+    } catch {
+      form.remove();
+      return false;
+    }
   }
 
   clearUser(): void {
@@ -324,7 +335,7 @@ export class AuthService {
           headers: this.csrfHeader(),
         }
       )),
-      switchMap(session => this.applySession(session))
+      switchMap(() => this.refreshSession())
     );
   }
 
@@ -383,6 +394,7 @@ export class AuthService {
       email: user.email,
       emailVerified: false,
       displayName: user.displayName,
+      publicHandle: `member-${user.subject.toLowerCase()}`,
       phone: null,
       phoneVerified: false,
       avatarUrl: null,
@@ -411,6 +423,10 @@ export class AuthService {
       return null;
     }
     return returnUrl;
+  }
+
+  private safeLogoutClient(client: LoginClient): LoginClient {
+    return client === 'seller-portal' || client === 'admin-portal' ? client : 'marketplace';
   }
 
   private authMessageOrigin(win: Window): string {

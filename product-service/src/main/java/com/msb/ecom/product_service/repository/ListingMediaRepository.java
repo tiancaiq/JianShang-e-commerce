@@ -127,9 +127,17 @@ public class ListingMediaRepository {
                                mo.object_bucket, mo.object_key
                         from listing_images li
                         join listing_media_objects mo on mo.id = li.media_object_id
+                        join listings l on l.id = li.listing_id
                         where li.listing_id = ?
-                          and li.moderation_status = 'APPROVED'
-                          and mo.moderation_status = 'APPROVED'
+                          and l.status = 'ACTIVE'
+                          and (
+                            (l.seller_type = 'INDIVIDUAL'
+                              and l.moderation_status = 'APPROVED'
+                              and li.moderation_status = 'APPROVED'
+                              and mo.moderation_status = 'APPROVED')
+                            or (l.seller_type = 'BUSINESS'
+                              and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                          )
                           and mo.upload_status = 'UPLOADED'
                         order by li.display_order
                         """,
@@ -155,9 +163,14 @@ public class ListingMediaRepository {
                         join listings l on l.id = li.listing_id
                         where li.id = ?
                           and l.status = 'ACTIVE'
-                          and l.moderation_status = 'APPROVED'
-                          and li.moderation_status = 'APPROVED'
-                          and mo.moderation_status = 'APPROVED'
+                          and (
+                            (l.seller_type = 'INDIVIDUAL'
+                              and l.moderation_status = 'APPROVED'
+                              and li.moderation_status = 'APPROVED'
+                              and mo.moderation_status = 'APPROVED')
+                            or (l.seller_type = 'BUSINESS'
+                              and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                          )
                           and mo.upload_status = 'UPLOADED'
                         """,
                 (rs, rowNum) -> mediaResponse(rs),

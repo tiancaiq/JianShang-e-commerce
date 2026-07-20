@@ -252,6 +252,8 @@ Initial responsibilities:
 - Listing images
 - Listing moderation submission
 - Search event publication
+- Immutable approved public listing-knowledge versions, exact/export reads,
+  and transactional listing-knowledge outbox publication
 
 The marketplace service must expose public read paths for approved listings
 and storefronts. These reads are safe for guests and must not expose draft,
@@ -302,24 +304,26 @@ Trade APIs derive the buyer from a conversation created by chat-service. They
 must not accept replacement buyer IDs, email, phone, address, or payment
 status from the seller.
 
-### 4.6 Commerce service (V2)
+### 4.6 Commerce services (V2)
 
 Evolution path: reintroduce inventory/order modules from the archived V2
-tutorial stubs only after an approved V2 slice defines the real contracts.
+tutorial stubs only through the approved slices in
+`docs/v2/commerce/v2-com-00-commerce-domain-plan.md`.
 
-Responsibilities:
+Initial deployment ownership:
 
-- Redis-backed cart
-- Business inventory
-- Inventory reservations
-- Checkout sessions
-- Business order state
-- Fulfillment groups
-- Shipment records
+- `inventory-service`: business inventory, movement ledger, and inventory
+  reservation state.
+- `order-service`: Redis-backed cart, checkout orchestration, buyer order
+  state, business fulfillment groups, and shipment records.
+- `payment-service`: provider payment, refund, and reconciliation state as
+  described below.
 
-Inventory and order state ownership will be decided in the V2 architecture
-slice. Cross-service flow must use explicit orchestration and idempotent
-commands; no service writes another service's tables.
+These services form the V2 commerce boundary. They keep separate schemas and
+use explicit orchestration, idempotent internal commands, transactional
+outboxes, and deduplicated events. No service writes another service's tables.
+Do not add a second catch-all commerce deployment or restore archived tutorial
+contracts unchanged.
 
 These capabilities are intentionally outside the MVP business seller portal.
 MVP merchants manage business profile and basic listings only.
@@ -367,19 +371,96 @@ Responsibilities:
 
 ### 4.10 Agent service (V3)
 
-New isolated service added after underlying APIs are stable.
+Isolated Python 3.12 and FastAPI service. `AI-LLM-01` establishes its provider
+boundary before product agents are enabled.
 
 Responsibilities:
 
 - Agent sessions
+- Agent-owned MySQL persistence and retention
 - Tool registry
 - Tool authorization
 - Prompt and output policy
+- Hybrid-RAG orchestration
+- Knowledge ingestion, embedding, retrieval, and invalidation
 - Cost/rate limits
 - AI audit records
 
 The agent service calls public/internal application APIs. It receives no direct
-database credentials.
+credentials for another service. OpenAI access is wrapped by a provider adapter using the
+official Python SDK and Responses API. Product-agent orchestration may use the
+OpenAI Agents SDK after authenticated sessions and application tools are
+implemented. The service can stay live while provider credentials are absent,
+but it must report itself not ready for AI work and core marketplace traffic
+must not depend on that readiness.
+
+For listing customer service, the agent service owns a rebuildable OpenSearch
+knowledge projection and exposes two orchestration boundaries:
+
+- `getListing` calls Product Service for current authoritative listing facts
+  and eligibility;
+- `retrieveKnowledge` applies mandatory subject-listing, public visibility,
+  source-type, language, effective-date, version, and invalidation filters to
+  approved vector content.
+
+Product Service owns listing facts, public listing text, and category guidance.
+The moderation/support module owns versioned marketplace policy, safety
+guidance, and public FAQs. Source owners expose versioned reads or events; the
+agent service never reads their schemas directly. OpenAI receives only bounded
+runtime instructions, the user question, and approved tool context. It receives
+no application credentials and cannot call application services directly.
+
+`AI-KNOW-01` defines the Product Service category-guidance owner as one
+immutable source stream per category and language. Platform-admin commands
+insert active versions or newer invalidation tombstones using optimistic
+version checks. The source version and reference-only outbox event commit
+together. Exact-version and watermark-stable export reads reuse the dedicated
+Agent Service token; category deactivation invalidates all active guidance
+languages, and reactivation never republishes old text automatically.
+
+`AI-RAG-02A` implements the first Product Service source path for active
+approved individual listings. Immutable source bodies contain only title,
+approved description, public city/region, and decimal price/currency.
+Exact-version and watermark-stable export reads require a distinct agent
+service token. Reference-only listing events are written through the same
+transaction as the listing version and source snapshot, then delivered by a
+retryable outbox publisher.
+
+`AI-RAG-02B` implements the matching Agent Service intake. A Python asyncio
+Kafka consumer validates the reference-only event, atomically deduplicates and
+enqueues it in the agent-owned MySQL schema, and commits the Kafka offset only
+after that transaction succeeds. FastAPI startup validates but never migrates
+the schema; an explicit Flyway deployment job owns forward migration.
+Source/provider/OpenSearch calls do not run in the Kafka poll loop. Accepted
+jobs remain pending until `AI-RAG-02C` supplies deterministic content
+processing and indexing.
+
+`AI-RAG-02D` makes that projection rebuildable without interrupting live
+updates. An operator command moves the write alias to a compatible empty
+generation, records a durable run, and pages the watermark-stable Product
+Service export through the same sanitizer, chunker, and embedding builder.
+While read and write aliases differ, every live upsert, invalidation, and
+exact deletion targets both physical generations. The loader writes only the
+new generation and rechecks monotonic source state after each write so a
+concurrent update or tombstone cannot resurrect an older exported version.
+
+Promotion is a separate run-bound operator action. It is blocked until the
+export is complete, mappings and embedding identity match, source/document
+counts reconcile, ingestion and deletion queues are drained, and Kafka
+consumer-group lag is zero. Tombstones invalidate retrieval synchronously and
+schedule exact physical cleanup in a leased retry queue. Rollback moves reads
+only to the run's recorded prior generation; alias divergence keeps live
+mirroring active.
+
+`AI-RAG-03` implements the internal retriever against the promoted read alias
+for `LISTING` sources only. Trusted runtime context supplies actor, subject
+listing, current Product Service version, effective time, language, and
+limits. OpenSearch receives mandatory public, exact-listing, exact-version,
+language/fallback, effective-date, and non-invalidated filters; every hit is
+validated against the same trusted context again before it can become model
+context. Query, passage, top-k, candidates, and total context are bounded.
+Policy, safety, FAQ, and category retrieval remains disabled until their
+source-owner contracts exist.
 
 ## 5. Core Workflow Architecture
 
@@ -450,6 +531,40 @@ Recovery rule: provider state is authoritative for whether money moved.
 Reconciliation must repair payment success without an order. Browser redirects
 are never authoritative.
 
+### 5.3 Listing customer-service answer (V3)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Marketplace chat UI
+    participant BFF as Gateway / BFF
+    participant Agent as Agent Service
+    participant AgentDB as Agent MySQL
+    participant Product as Product Service
+    participant Vector as OpenSearch
+    participant OpenAI as OpenAI
+
+    User->>UI: Ask about one listing
+    UI->>BFF: sessionId, clientMessageId, body
+    BFF->>Agent: Trusted actor and correlation context
+    Agent->>AgentDB: Store USER message and PENDING invocation
+    Agent->>Product: getListing for current facts and eligibility
+    Product-->>Agent: Safe authoritative listing projection
+    Agent->>Vector: retrieveKnowledge with mandatory filters
+    Vector-->>Agent: Bounded passages and source metadata
+    Agent->>OpenAI: Question, instructions, facts, and passages
+    OpenAI-->>Agent: Structured answer, citations, and proposed actions
+    Agent->>Agent: Validate precedence, citations, privacy, and action allowlist
+    Agent->>AgentDB: Store ASSISTANT message and SUCCEEDED invocation
+    Agent-->>UI: Validated answer, sources, and UI actions
+```
+
+Product Service is authoritative when structured facts conflict with vector
+content. Effective marketplace policy and safety guidance override FAQ or
+category guidance. Same-precedence conflicts produce uncertainty. A failed
+dependency marks the invocation failed without creating a duplicate assistant
+message, and `clientMessageId` deduplicates retries.
+
 ## 6. Data and Storage
 
 ### MySQL
@@ -501,6 +616,20 @@ Use the transactional outbox pattern. Consumers must deduplicate by event ID.
 
 Contains denormalized active-listing projections. Rebuild must be possible from
 MySQL and events. Search results are revalidated on listing detail and checkout.
+
+V3 adds a logically separate, versioned agent knowledge index and alias. It
+contains only approved public chunks from eligible listing descriptions and
+attributes, marketplace policy, safety guidance, FAQs, and category guidance.
+Every chunk includes source identity and version, content hash, visibility,
+language, effective dates, indexing time, invalidation state, and subject
+listing ID when applicable.
+
+The knowledge index is owned by the agent service, is rebuildable from
+authoritative source services and durable events, and never stores conversation
+history, private contact data, exact locations, moderation evidence, internal
+notes, credentials, storage internals, or media bytes. Listing eligibility is
+rechecked through Product Service before an answer. Stale listing-version
+chunks are discarded even if asynchronous deletion has not completed.
 
 ### S3 and CloudFront
 
@@ -571,9 +700,9 @@ Do not add database sharding before load tests show it is required.
 
 | Dependency failure | Required behavior |
 |---|---|
-| OpenSearch unavailable | Detail pages remain available; search reports temporary failure |
+| OpenSearch unavailable | Detail pages remain available; search reports temporary failure; listing customer service degrades to fully grounded current facts or reports temporary AI unavailability |
 | Redis cart unavailable | Existing orders unaffected; cart reports temporary failure |
-| Kafka unavailable | Transaction commits with outbox; publisher retries |
+| Kafka unavailable | Transaction commits with outbox; publisher retries; excessive knowledge-index lag disables affected vector-backed answers |
 | Email provider unavailable | In-app notification persists; email retries |
 | OpenAI unavailable | Core flows continue without AI |
 | Payment provider timeout | Payment stays pending; reconciliation resolves it |

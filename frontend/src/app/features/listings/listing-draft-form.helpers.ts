@@ -148,12 +148,13 @@ export function appendConfirmedMediaToImages(currentImages: ListingImage[], medi
   ];
 }
 
+// Keeps requested-changes listings in the seller recovery flow while review-pending listings stay locked.
 export function isEditableListingStatus(status: string): boolean {
-  return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE', 'CLOSED'].includes(status);
+  return ['DRAFT', 'ACTIVE', 'CLOSED', 'CHANGES_REQUESTED'].includes(status);
 }
 
 export function isClosableListingStatus(status: string): boolean {
-  return ['DRAFT', 'PENDING_REVIEW', 'ACTIVE'].includes(status);
+  return ['DRAFT', 'ACTIVE'].includes(status);
 }
 
 export function canSubmitListingForReview(input: ListingSubmitEligibilityInput): boolean {

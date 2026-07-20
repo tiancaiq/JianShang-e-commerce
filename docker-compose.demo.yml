@@ -75,6 +75,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
       SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       BUSINESS_VERIFICATION_WEBHOOK_SECRET: ${BUSINESS_VERIFICATION_WEBHOOK_SECRET:-demo-change-me-business-webhook}
       USER_AVATAR_STORAGE: ${USER_AVATAR_STORAGE:-${LISTING_MEDIA_STORAGE:-local-demo}}
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
@@ -106,7 +107,13 @@ services:
       CATALOG_DB_USERNAME: ${CATALOG_DB_USERNAME:-root}
       CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
       SPRING_FLYWAY_OUT_OF_ORDER: ${SPRING_FLYWAY_OUT_OF_ORDER:-false}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-broker:29092}
+      LISTING_KNOWLEDGE_PUBLISHER_ENABLED: ${LISTING_KNOWLEDGE_PUBLISHER_ENABLED:-true}
+      LISTING_KNOWLEDGE_EVENT_TOPIC: ${LISTING_KNOWLEDGE_EVENT_TOPIC:-listing-knowledge-v1}
+      CATEGORY_GUIDANCE_EVENT_TOPIC: ${CATEGORY_GUIDANCE_EVENT_TOPIC:-category-guidance-v1}
+      AGENT_INTERNAL_SERVICE_TOKEN: ${AGENT_INTERNAL_SERVICE_TOKEN:-local-agent-service-token}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       AUTH_SERVICE_URL: http://auth-service:8085
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
       LISTING_MEDIA_MAX_IMAGE_SIZE_BYTES: ${LISTING_MEDIA_MAX_IMAGE_SIZE_BYTES:-10485760}
@@ -124,6 +131,122 @@ services:
       - auth-service
     restart: unless-stopped
 
+  agent-migrations:
+    image: redgate/flyway:12.11.0
+    profiles:
+      - ai
+    environment:
+      FLYWAY_URL: jdbc:mysql://mysql:3306/${AGENT_MYSQL_DATABASE:-agent}?createDatabaseIfNotExist=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
+      FLYWAY_USER: ${AGENT_MYSQL_USERNAME:-root}
+      FLYWAY_PASSWORD: ${AGENT_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
+      FLYWAY_CONNECT_RETRIES: "60"
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - ./agent-service/db/migration:/flyway/sql:ro
+    depends_on:
+      - mysql
+    restart: "no"
+
+  agent-opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: msb-demo-agent-opensearch
+    profiles:
+      - ai
+    ports:
+      - "127.0.0.1:${AGENT_OPENSEARCH_PORT:-9201}:9200"
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: ${AGENT_OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent
+          http://localhost:9200/_cluster/health?wait_for_status=yellow
+          > /dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    volumes:
+      - demo_agent_opensearch_data:/usr/share/opensearch/data
+    restart: unless-stopped
+
+  agent-index-bootstrap:
+    build:
+      context: ./agent-service
+      dockerfile: Dockerfile
+    profiles:
+      - ai
+    entrypoint:
+      - msb-knowledge-index
+    command:
+      - bootstrap
+    environment:
+      AGENT_KNOWLEDGE_ENABLED: "true"
+      AGENT_OPENSEARCH_URL: http://agent-opensearch:9200
+      AGENT_OPENSEARCH_VERIFY_CERTS: "false"
+      AGENT_KNOWLEDGE_EMBEDDING_PROVIDER: openai
+      AGENT_KNOWLEDGE_EMBEDDING_MODEL: text-embedding-3-small
+      AGENT_KNOWLEDGE_EMBEDDING_DIMENSIONS: 1536
+    depends_on:
+      agent-opensearch:
+        condition: service_healthy
+    restart: "no"
+
+  agent-service:
+    build:
+      context: ./agent-service
+      dockerfile: Dockerfile
+    container_name: msb-demo-agent-service
+    profiles:
+      - ai
+    ports:
+      - "127.0.0.1:${AGENT_SERVICE_PORT:-8086}:8086"
+    environment:
+      PORT: 8086
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AGENT_KNOWLEDGE_ENABLED: ${AGENT_KNOWLEDGE_ENABLED:-true}
+      AGENT_OPENSEARCH_URL: http://agent-opensearch:9200
+      AGENT_OPENSEARCH_VERIFY_CERTS: "false"
+      AGENT_KNOWLEDGE_EMBEDDING_PROVIDER: openai
+      AGENT_KNOWLEDGE_EMBEDDING_MODEL: text-embedding-3-small
+      AGENT_KNOWLEDGE_EMBEDDING_DIMENSIONS: 1536
+      AGENT_KNOWLEDGE_INGESTION_ENABLED: ${AGENT_KNOWLEDGE_INGESTION_ENABLED:-true}
+      AGENT_KNOWLEDGE_PROCESSOR_ENABLED: ${AGENT_KNOWLEDGE_PROCESSOR_ENABLED:-false}
+      AGENT_MYSQL_HOST: mysql
+      AGENT_MYSQL_PORT: 3306
+      AGENT_MYSQL_DATABASE: ${AGENT_MYSQL_DATABASE:-agent}
+      AGENT_MYSQL_USERNAME: ${AGENT_MYSQL_USERNAME:-root}
+      AGENT_MYSQL_PASSWORD: ${AGENT_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
+      AGENT_PERSISTENCE_ENABLED: ${AGENT_PERSISTENCE_ENABLED:-false}
+      AGENT_CUSTOMER_SERVICE_API_ENABLED: ${AGENT_CUSTOMER_SERVICE_API_ENABLED:-false}
+      AUTH_SERVICE_URL: http://auth-service:8085
+      AGENT_MESSAGE_RETENTION_DAYS: ${AGENT_MESSAGE_RETENTION_DAYS:-90}
+      AGENT_AUDIT_RETENTION_DAYS: ${AGENT_AUDIT_RETENTION_DAYS:-365}
+      AGENT_KAFKA_BOOTSTRAP_SERVERS: ${AGENT_KAFKA_BOOTSTRAP_SERVERS:-broker:29092}
+      AGENT_KAFKA_TOPIC: ${AGENT_KAFKA_TOPIC:-listing-knowledge-v1}
+      AGENT_KAFKA_GROUP_ID: ${AGENT_KAFKA_GROUP_ID:-msb-agent-listing-knowledge-v1}
+      AGENT_KAFKA_CLIENT_ID: ${AGENT_KAFKA_CLIENT_ID:-msb-agent-service}
+      AGENT_CATEGORY_GUIDANCE_INTAKE_ENABLED: ${AGENT_CATEGORY_GUIDANCE_INTAKE_ENABLED:-false}
+      AGENT_CATEGORY_GUIDANCE_KAFKA_TOPIC: ${AGENT_CATEGORY_GUIDANCE_KAFKA_TOPIC:-category-guidance-v1}
+      AGENT_CATEGORY_GUIDANCE_KAFKA_GROUP_ID: ${AGENT_CATEGORY_GUIDANCE_KAFKA_GROUP_ID:-msb-agent-category-guidance-v1}
+      AGENT_CATEGORY_GUIDANCE_PROCESSING_ENABLED: ${AGENT_CATEGORY_GUIDANCE_PROCESSING_ENABLED:-false}
+      AGENT_CATEGORY_GUIDANCE_RETRIEVAL_ENABLED: ${AGENT_CATEGORY_GUIDANCE_RETRIEVAL_ENABLED:-false}
+      AGENT_PRODUCT_SERVICE_URL: http://product-service:8091
+      AGENT_PRODUCT_SERVICE_TOKEN: ${AGENT_INTERNAL_SERVICE_TOKEN:-local-agent-service-token}
+    depends_on:
+      mysql:
+        condition: service_started
+      product-service:
+        condition: service_healthy
+      agent-index-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   chat-service:
     build:
       context: ./chat-service
@@ -138,6 +261,7 @@ services:
       CHAT_DB_USERNAME: ${CHAT_DB_USERNAME:-root}
       CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       AUTH_SERVICE_URL: http://auth-service:8085
       PRODUCT_SERVICE_URL: http://product-service:8091
     depends_on:
@@ -159,12 +283,13 @@ services:
       PRODUCT_SERVICE_URL: http://product-service:8091
       CHAT_SERVICE_URL: http://chat-service:8092
       AUTH_SERVICE_URL: http://auth-service:8085
+      AGENT_SERVICE_URL: http://agent-service:8086
       ORDER_SERVICE_URL: http://order-service-disabled:8081
       INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
       PAYMENT_SERVICE_URL: http://payment-service-disabled:8084
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
-      KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}}
+      KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
       KEYCLOAK_MARKETPLACE_CLIENT_ID: ${KEYCLOAK_MARKETPLACE_CLIENT_ID:-msb-marketplace}
       KEYCLOAK_MARKETPLACE_CLIENT_SECRET: ${KEYCLOAK_MARKETPLACE_CLIENT_SECRET:-local-dev-only-change-me-marketplace}
       KEYCLOAK_SELLER_PORTAL_CLIENT_ID: ${KEYCLOAK_SELLER_PORTAL_CLIENT_ID:-msb-seller-portal}
@@ -200,3 +325,4 @@ volumes:
   demo_mongo_data:
   demo_mysql_data:
   demo_postgres_keycloak_data:
+  demo_agent_opensearch_data:

@@ -47,6 +47,8 @@ describe('AccountListingsEntryComponent', () => {
     publicRegion: 'CA',
     status: 'DRAFT',
     moderationStatus: 'NOT_SUBMITTED',
+    publicationSource: null,
+    publishedAt: null,
     version: 0,
     createdAt: '2026-06-16T12:00:00Z',
     updatedAt: '2026-06-16T12:00:00Z',

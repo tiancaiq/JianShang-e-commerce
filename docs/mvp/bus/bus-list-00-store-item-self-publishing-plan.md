@@ -1,6 +1,6 @@
 # BUS-LIST-00 Store Item Self-Publishing Plan
 
-Status: planned.
+Status: complete.
 
 ## Goal
 
@@ -175,23 +175,37 @@ state machines around them. Do not add those state machines in this MVP plan.
    - Status: complete. See
      `docs/mvp/bus/bus-list-02-store-item-draft-edit.md`.
 
-3.
+3. `BUS-LIST-03` Store item media.
    - Reuse the listing media upload/confirm/attach flow for business store
      items.
-     - Keep media ownership and safe public delivery checks.
-     - Status: complete. See
-       `docs/mvp/bus/bus-list-03-store-item-media.md`.
+   - Keep media ownership and safe public delivery checks.
+   - Status: complete. See
+     `docs/mvp/bus/bus-list-03-store-item-media.md`.
 
 4. `BUS-LIST-04` Self-publish to `/stores`.
    - Add publish, pause, and relist commands.
    - Update public store search to return active self-published store items.
    - Add frontend coverage that a published business item appears on
      `/stores` without admin approval.
+   - Status: complete. See
+     `docs/mvp/bus/bus-list-04-self-publish-to-stores.md`.
 
 5. `BUS-LIST-05` Reactive admin removal.
    - Preserve or add admin ability to remove active public store items with a
      reason.
    - Removal hides the item without deleting history.
+   - Status: complete. See
+     `docs/mvp/bus/bus-list-05-reactive-admin-removal.md`.
+
+6. `BUS-LIST-06` Business item management list.
+   - Add seller-side title/SKU search, lifecycle status filters, status
+     summary counts, and cursor pagination.
+   - Show item images and state-aware edit, publish, pause, relist, and public
+     preview actions.
+   - Require active items to be paused before seller edits; allow paused items
+     to be edited before relisting.
+   - Status: complete. See
+     `docs/mvp/bus/bus-list-06-business-item-management-list.md`.
 
 ## Acceptance Criteria
 

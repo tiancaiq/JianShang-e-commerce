@@ -8,13 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       force_failure_job:
-        description: "Optional controlled failure target: backend, architecture, frontend, migrations, dependencies, or secrets"
+        description: "Optional controlled failure target: backend, agent, architecture, frontend, migrations, dependencies, or secrets"
         required: false
         default: "none"
         type: choice
         options:
           - none
           - backend
+          - agent
           - architecture
           - frontend
           - migrations
@@ -53,6 +54,85 @@ jobs:
         run: |
           chmod +x ./mvnw
           ./mvnw -B test
+
+  agent:
+    name: Agent Service Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-service/pyproject.toml
+
+      - name: Controlled failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure_job == 'agent'
+        run: exit 1
+
+      - name: Install agent service
+        run: python -m pip install -e "./agent-service[dev]"
+
+      - name: Run agent service tests
+        run: python -m unittest discover -s agent-service/tests -v
+
+  agent-opensearch:
+    name: Agent OpenSearch Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-service/pyproject.toml
+
+      - name: Install agent service
+        run: python -m pip install -e "./agent-service[dev]"
+
+      - name: Run real OpenSearch integration tests
+        env:
+          RUN_OPENSEARCH_INTEGRATION: "1"
+        run: >-
+          python -m unittest discover
+          -s agent-service/tests
+          -p "test_knowledge_index_integration.py"
+          -v
+
+  agent-mysql:
+    name: Agent MySQL Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-service/pyproject.toml
+
+      - name: Install agent service
+        run: python -m pip install -e "./agent-service[dev]"
+
+      - name: Run real MySQL integration tests
+        env:
+          RUN_MYSQL_INTEGRATION: "1"
+        run: >-
+          python -m unittest discover
+          -s agent-service/tests
+          -p "test_knowledge_jobs_integration.py"
+          -v
 
   architecture:
     name: Architecture Guardrails

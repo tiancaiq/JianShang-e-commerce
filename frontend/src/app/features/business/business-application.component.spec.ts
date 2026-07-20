@@ -127,6 +127,12 @@ describe('BusinessApplicationComponent', () => {
     const host = fixture.nativeElement as HTMLElement;
     expect(host.textContent).toContain('Application pending');
     expect(host.textContent).toContain('New applications are disabled while review is active');
+    expect(host.textContent).toContain('Draft');
+    expect(host.textContent).toContain('Submitted');
+    expect(host.textContent).toContain('Verification');
+    expect(host.textContent).toContain('Admin review');
+    expect(host.textContent).toContain('Approved');
+    expect(host.querySelector('[aria-current="step"]')?.textContent).toContain('Verification');
     expect(host.querySelector('form')).toBeNull();
     expect(host.textContent).not.toContain('Start new application');
   });
@@ -145,6 +151,8 @@ describe('BusinessApplicationComponent', () => {
     const host = fixture.nativeElement as HTMLElement;
     expect(host.textContent).toContain('Application rejected');
     expect(host.textContent).toContain('Unable to verify business information');
+    expect(host.textContent).toContain('Rejected');
+    expect(host.querySelector('.timeline-rejected')?.textContent).toContain('Rejected');
     expect(host.querySelector('form')).toBeNull();
 
     const startButton = Array.from(host.querySelectorAll('button'))

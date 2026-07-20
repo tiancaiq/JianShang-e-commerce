@@ -37,6 +37,7 @@ Keep roadmap slice documents in feature folders:
 - Listings/media: `docs/mvp/list/`
 - Search/storefront: `docs/mvp/search/`
 - Chat/messaging: `docs/mvp/chat/`
+- AI agents and automated operations: `docs/mvp/ai/`
 - Site/route surface separation: `docs/mvp/site/`
 - UI/product design direction: `docs/mvp/ui/`
 - Verification/demo fixes: `docs/mvp/fix/`

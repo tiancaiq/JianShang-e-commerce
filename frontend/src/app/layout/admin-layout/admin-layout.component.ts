@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-admin-layout',
@@ -15,6 +16,9 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
           <a routerLink="/admin/dashboard" routerLinkActive="active">Dashboard</a>
           <a routerLink="/admin/business-applications" routerLinkActive="active">Business Review</a>
           <a routerLink="/admin/listings/moderation" routerLinkActive="active">Listing Review</a>
+          @if (categoryGuidanceEnabled) {
+            <a routerLink="/admin/category-guidance" routerLinkActive="active">Category Guidance</a>
+          }
         </nav>
         <a routerLink="/" class="back-link">Marketplace</a>
       </aside>
@@ -22,7 +26,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
       <section class="admin-main">
         <header class="admin-header">
           <h1>Admin</h1>
-          <button type="button" (click)="authService.logout()">Logout</button>
+          <button type="button" (click)="authService.logout('admin-portal')">Logout</button>
         </header>
         <main class="admin-content">
           <div class="admin-content-inner">
@@ -166,4 +170,5 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 })
 export class AdminLayoutComponent {
   authService = inject(AuthService);
+  readonly categoryGuidanceEnabled = environment.features.categoryGuidance;
 }

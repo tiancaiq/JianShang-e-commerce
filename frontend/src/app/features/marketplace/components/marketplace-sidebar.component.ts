@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { Category } from '../../../core/models/listing.model';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-marketplace-sidebar',
@@ -20,12 +21,14 @@ import { Category } from '../../../core/models/listing.model';
           <strong>{{ category.name }}</strong>
         </button>
       }
-      <div class="help-card" aria-label="Marketplace support">
-        <img src="/marketplace/help-mascot.png" alt="MSB marketplace support mascot" />
-        <strong>Need help?</strong>
-        <span>Support chat is coming soon.</span>
-        <button type="button" disabled>Coming soon</button>
-      </div>
+      @if (aiAssistantEnabled) {
+        <div class="help-card" aria-label="Marketplace support">
+          <img src="/marketplace/help-mascot.png" alt="MSB marketplace support mascot" />
+          <strong>Need help?</strong>
+          <span>Support chat is coming soon.</span>
+          <button type="button" disabled>Coming soon</button>
+        </div>
+      }
     </aside>
   `,
   styles: [`
@@ -236,6 +239,7 @@ export class MarketplaceSidebarComponent {
   @Input() categories: Category[] = [];
   @Input() selectedCategoryId = 'ALL';
   @Output() categorySelected = new EventEmitter<string>();
+  readonly aiAssistantEnabled = environment.features.aiAssistant;
 
   categoryShortLabel(name: string): string {
     const words = name.trim().split(/\s+/).filter(Boolean);

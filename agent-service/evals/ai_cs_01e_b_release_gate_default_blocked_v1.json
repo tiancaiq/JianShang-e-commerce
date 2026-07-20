@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "ai-cs-release-gate-input-v1",
+  "decisionAt": "2026-07-20T00:00:00Z",
+  "targetStage": "INTERNAL",
+  "reportGeneratedAt": "2026-07-20T00:00:00Z",
+  "reportEvidenceSha256": null,
+  "switches": {
+    "customerServiceCapability": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "providerExecution": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "retrievalActivation": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "gatewayExposure": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "frontendEntryPoint": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    }
+  },
+  "approvals": {
+    "productionQuality": {
+      "approved": false
+    },
+    "productionLatency": {
+      "approved": false
+    },
+    "productionCost": {
+      "approved": false
+    },
+    "internalRollout": {
+      "approved": false
+    },
+    "smallCohortRollout": {
+      "approved": false
+    },
+    "widerRollout": {
+      "approved": false
+    }
+  }
+}

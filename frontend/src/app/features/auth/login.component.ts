@@ -10,15 +10,20 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
   standalone: true,
   imports: [BrandMascotComponent, ToastContainerComponent],
   template: `
-    <div class="login-page bg-noise">
+    <div class="login-page bg-noise" [class.seller-login]="client() === 'seller-portal'" [class.admin-login]="client() === 'admin-portal'">
       <section class="login-shell">
         <app-brand-mascot variant="login" alt="MSB marketplace mascot on the login page" />
         <div class="login-panel">
           <div class="login-brand">
             <span class="brand-mark" aria-hidden="true">M</span>
-            <h1 class="brand-title">MSB<span class="accent">Commerce</span></h1>
-            <p class="brand-subtitle">Sign in or create your MSB account</p>
+            <p class="portal-label">{{ portalLabel() }}</p>
+            <h1 class="brand-title">{{ portalTitle() }}</h1>
+            <p class="brand-subtitle">{{ portalSubtitle() }}</p>
           </div>
+
+          @if (signedOut()) {
+            <p class="signed-out">Signed out successfully</p>
+          }
 
           <button type="button" class="submit-btn" (click)="handleLogin()">
             Continue to sign in
@@ -71,6 +76,20 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
       background: rgba(255, 255, 255, 0.94);
     }
 
+    .seller-login .login-page,
+    .seller-login {
+      background:
+        radial-gradient(circle at 10% 8%, rgba(56, 189, 248, 0.22) 0 18%, transparent 19%),
+        linear-gradient(180deg, #101722 0%, #111827 100%);
+    }
+
+    .admin-login .login-page,
+    .admin-login {
+      background:
+        radial-gradient(circle at 10% 8%, rgba(248, 113, 113, 0.16) 0 18%, transparent 19%),
+        linear-gradient(180deg, #0f1014 0%, #171923 100%);
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(16px); }
       to { opacity: 1; transform: translateY(0); }
@@ -79,6 +98,15 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
     .login-brand {
       text-align: center;
       margin-bottom: 2rem;
+    }
+
+    .portal-label {
+      margin: 0 0 0.35rem;
+      color: #7e6d96;
+      font-size: 0.75rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
 
     .brand-mark {
@@ -107,6 +135,35 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
     .brand-subtitle {
       font-size: 0.875rem;
       color: #7e6d96;
+    }
+
+    .signed-out {
+      margin: -0.75rem 0 1rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(56, 168, 149, 0.26);
+      border-radius: 8px;
+      background: #effbf8;
+      color: #246558;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .seller-login .brand-mark {
+      background: linear-gradient(135deg, #38bdf8, #22c55e);
+    }
+
+    .admin-login .brand-mark {
+      background: linear-gradient(135deg, #f97316, #ef4444);
+    }
+
+    .seller-login .accent,
+    .seller-login .portal-label {
+      color: #0284c7;
+    }
+
+    .admin-login .accent,
+    .admin-login .portal-label {
+      color: #c2410c;
     }
 
     .submit-btn {
@@ -212,11 +269,39 @@ export class LoginComponent {
     return this.isMarketplaceClient();
   }
 
+  signedOut(): boolean {
+    return this.route.snapshot.queryParamMap.get('signedOut') === '1';
+  }
+
+  portalLabel(): string {
+    return this.client() === 'admin-portal'
+      ? 'Admin Portal'
+      : this.client() === 'seller-portal'
+        ? 'Business Seller Portal'
+        : 'Marketplace Account';
+  }
+
+  portalTitle(): string {
+    return this.client() === 'admin-portal'
+      ? 'MSB Admin'
+      : this.client() === 'seller-portal'
+        ? 'MSB Seller'
+        : 'MSBCommerce';
+  }
+
+  portalSubtitle(): string {
+    return this.client() === 'admin-portal'
+      ? 'Secure staff sign-in for moderation and platform operations'
+      : this.client() === 'seller-portal'
+        ? 'Secure business sign-in for store and listing management'
+        : 'Sign in or create your MSB account';
+  }
+
   private isMarketplaceClient(): boolean {
     return this.client() === 'marketplace';
   }
 
-  private client(): LoginClient {
+  client(): LoginClient {
     const candidate = this.route.snapshot.queryParamMap.get('client');
     if (candidate === 'seller-portal' || candidate === 'admin-portal') {
       return candidate;

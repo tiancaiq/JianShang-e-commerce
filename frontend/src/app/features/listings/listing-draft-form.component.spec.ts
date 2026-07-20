@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { BusinessStoreContext } from '../../core/models/business-store.model';
-import { Category, ListingMedia } from '../../core/models/listing.model';
+import { Category, ListingDraft, ListingMedia } from '../../core/models/listing.model';
 import { BusinessStoreService } from '../../core/services/business-store.service';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
@@ -78,6 +78,8 @@ describe('ListingDraftFormComponent', () => {
       bannerUrl: null,
       supportEmail: null,
       supportPhone: null,
+      publicCity: 'Irvine',
+      publicRegion: 'CA',
       status: 'ACTIVE',
       version: 0,
       createdAt: '2026-07-08T12:00:00Z',
@@ -111,6 +113,9 @@ describe('ListingDraftFormComponent', () => {
       'getBusinessStoreItem',
       'createBusinessStoreItem',
       'updateBusinessStoreItem',
+      'publishBusinessStoreItem',
+      'pauseBusinessStoreItem',
+      'relistBusinessStoreItem',
       'mediaUrl',
     ]);
     businessStoreService = jasmine.createSpyObj<BusinessStoreService>('BusinessStoreService', ['getCurrentStoreContext']);
@@ -122,6 +127,45 @@ describe('ListingDraftFormComponent', () => {
     listingService.createDraft.and.returnValue(of(draft));
     listingService.getListing.and.returnValue(of({ ...draft, images: [image] }));
     listingService.updateDraft.and.returnValue(of({ ...draft, title: 'Updated bicycle', version: 1 }));
+    listingService.publishBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      sku: 'SKU-STORE-1',
+      status: 'ACTIVE',
+      publicationSource: 'BUSINESS_SELF_PUBLISHED',
+      publishedAt: '2026-07-16T12:00:00Z',
+      images: [image],
+      version: 2,
+    }));
+    listingService.pauseBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      sku: 'SKU-STORE-1',
+      status: 'PAUSED',
+      publicationSource: 'BUSINESS_SELF_PUBLISHED',
+      publishedAt: '2026-07-16T12:00:00Z',
+      images: [image],
+      version: 3,
+    }));
+    listingService.relistBusinessStoreItem.and.returnValue(of({
+      ...draft,
+      sellerType: 'BUSINESS',
+      individualSellerUserId: null,
+      businessId: storeContext.businessId,
+      storeId: storeContext.store.id,
+      sku: 'SKU-STORE-1',
+      status: 'ACTIVE',
+      publicationSource: 'BUSINESS_SELF_PUBLISHED',
+      publishedAt: '2026-07-16T12:00:00Z',
+      images: [image],
+      version: 4,
+    }));
     listingService.submitForReview.and.returnValue(of({
       ...draft,
       status: 'PENDING_REVIEW',
@@ -249,7 +293,10 @@ describe('ListingDraftFormComponent', () => {
 
     component.saveDraft();
 
-    expect(router.navigate).toHaveBeenCalledWith(['/account/listings', draft.id, 'edit']);
+    expect(router.navigate).toHaveBeenCalledWith(
+      ['/account/listings', draft.id, 'edit'],
+      { queryParamsHandling: 'preserve' },
+    );
   });
 
   it('saves the selected image immediately after creating the draft', () => {
@@ -392,7 +439,8 @@ describe('ListingDraftFormComponent', () => {
 
     expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, draft.version);
     expect(component.listingStatus()).toBe('PENDING_REVIEW');
-    expect(component.canEditDraft()).toBeTrue();
+    expect(component.canEditDraft()).toBeFalse();
+    expect(component.pageTitle()).toBe('Pending review');
     expect(toastService.success).toHaveBeenCalledWith('Listing submitted for review.');
   });
 
@@ -448,6 +496,11 @@ describe('ListingDraftFormComponent', () => {
     const submitButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
       .find(button => button.textContent?.includes('Submit for review'));
 
+    expect(component.pageTitle()).toBe('Edit Active Listing');
+    expect(component.pageDescription()).toBe(
+      'This listing is approved and public. Save changes and submit them for review to update the public listing.',
+    );
+    expect(component.saveButtonLabel()).toBe('Update active listing');
     expect(submitButton).toBeTruthy();
     expect(submitButton?.disabled).toBeFalse();
 
@@ -484,7 +537,68 @@ describe('ListingDraftFormComponent', () => {
       }),
     );
     expect(listingService.createDraft).not.toHaveBeenCalled();
-    expect(router.navigate).toHaveBeenCalledWith(['/seller/store/items', draft.id, 'edit']);
+    expect(router.navigate).toHaveBeenCalledWith(
+      ['/seller/store/items', draft.id, 'edit'],
+      { queryParamsHandling: 'preserve' },
+    );
+  });
+
+  it('explains duplicate business SKUs instead of reporting a stale draft', () => {
+    (router as unknown as { url: string }).url = '/seller/store/items/new';
+    listingService.createBusinessStoreItem.and.returnValue(throwError(() => ({
+      status: 409,
+      error: {
+        error: {
+          code: 'BUSINESS_SKU_CONFLICT',
+          message: 'This store already has an item with that SKU. Edit the existing item or use a different SKU.',
+        },
+      },
+    })));
+    fixture.detectChanges();
+    fillCommonFields();
+    component.sku = '2';
+    component.quantity = 1;
+
+    component.saveDraft();
+
+    expect(component.errorMsg()).toBe(
+      'This store already has an item with that SKU. Edit the existing item or use a different SKU.',
+    );
+    expect(component.savedId()).toBe('');
+  });
+
+  it('allows paused business items to be edited but keeps active business items read-only', () => {
+    (router as unknown as { url: string }).url = `/seller/store/items/${draft.id}/edit`;
+    fixture.detectChanges();
+    component.isEditMode.set(true);
+
+    component.listingStatus.set('ACTIVE');
+    fixture.detectChanges();
+
+    expect(component.canEditDraft()).toBeFalse();
+    expect((fixture.nativeElement as HTMLElement).textContent)
+      .toContain('Pause it before changing item details or images.');
+
+    component.listingStatus.set('PAUSED');
+    fixture.detectChanges();
+
+    expect(component.canEditDraft()).toBeTrue();
+    const updateButton = Array.from(
+      fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>,
+    ).find(button => button.textContent?.includes('Update item'));
+    expect(updateButton).toBeTruthy();
+  });
+
+  it('preserves catalog filters when returning from the business item form', () => {
+    (router as unknown as { url: string }).url = `/seller/store/items/${draft.id}/edit`;
+    fixture.detectChanges();
+
+    component.cancelDraft();
+
+    expect(router.navigate).toHaveBeenCalledWith(
+      ['/seller/store/items'],
+      { queryParamsHandling: 'preserve' },
+    );
   });
 
   it('uploads selected images through business store item media routes after creating a store item', () => {
@@ -513,29 +627,36 @@ describe('ListingDraftFormComponent', () => {
     expect(toastService.success).toHaveBeenCalledWith('Listing draft and images saved.');
   });
 
-  it('saves pending review listing edits before resubmitting for review', () => {
-    listingService.updateDraft.and.returnValue(of({ ...draft, status: 'DRAFT', version: 5, images: [image] }));
+  it('shows pending review listings as read-only with clear image moderation status', () => {
     fixture.detectChanges();
     fillCommonFields();
     (component as unknown as { editListingId: string }).editListingId = draft.id;
-    (component as unknown as { currentVersion: number }).currentVersion = 4;
     component.isEditMode.set(true);
     component.listingStatus.set('PENDING_REVIEW');
-    component.mediaItems.set([image]);
+    component.mediaItems.set([{
+      ...image,
+      moderationStatus: 'PENDING',
+      uploadStatus: 'UPLOADED',
+    }]);
     (component as unknown as { rememberCurrentFormSnapshot: () => void }).rememberCurrentFormSnapshot();
-    component.description = 'Updated while review is pending.';
+    fixture.detectChanges();
 
-    component.submitForReview();
+    const text = fixture.nativeElement.textContent as string;
+    const submitButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.includes('Submit for review'));
+    const removeButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.includes('Remove'));
 
-    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(draft.id, 4, jasmine.objectContaining({
-      sellerType: 'INDIVIDUAL',
-      description: 'Updated while review is pending.',
-    }));
-    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 5);
-    expect(component.errorMsg()).toBe('');
+    expect(component.pageTitle()).toBe('Pending review');
+    expect(component.canEditDraft()).toBeFalse();
+    expect(text).toContain('Your listing and uploaded images are locked while an admin reviews them.');
+    expect(text).toContain('Upload: Uploaded');
+    expect(text).toContain('Review: Pending');
+    expect(submitButton).toBeUndefined();
+    expect(removeButton?.disabled).toBeTrue();
   });
 
-  it('disables resubmit for pending or active listings until the seller changes something', () => {
+  it('keeps pending review listings locked instead of allowing resubmission edits', () => {
     fixture.detectChanges();
     fillCommonFields();
     (component as unknown as { editListingId: string }).editListingId = draft.id;
@@ -549,11 +670,67 @@ describe('ListingDraftFormComponent', () => {
       .find(button => button.textContent?.includes('Submit for review'));
 
     expect(component.canSubmitForReview()).toBeFalse();
-    expect(submitButton?.disabled).toBeTrue();
+    expect(component.canEditDraft()).toBeFalse();
+    expect(submitButton).toBeUndefined();
 
     component.description = 'Updated description.';
 
+    expect(component.canSubmitForReview()).toBeFalse();
+    expect(component.canEditDraft()).toBeFalse();
+  });
+
+  it('shows the exact moderation reason and allows requested changes to be edited and resubmitted', () => {
+    const moderationReason = 'MOD-E2E request changes 1784458645266';
+    const changesRequestedListing: ListingDraft = {
+      ...draft,
+      status: 'CHANGES_REQUESTED',
+      moderationStatus: 'CHANGES_REQUESTED',
+      moderationAction: 'REQUEST_CHANGES',
+      moderationReason,
+      version: 2,
+      images: [{ ...image, moderationStatus: 'CHANGES_REQUESTED' }],
+    };
+    listingService.updateDraft.and.returnValue(of({
+      ...draft,
+      status: 'DRAFT',
+      moderationStatus: 'NOT_SUBMITTED',
+      moderationAction: 'REQUEST_CHANGES',
+      moderationReason,
+      version: 3,
+      images: [image],
+    }));
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    component.isEditMode.set(true);
+    (component as unknown as { populateFromDraft: (listing: ListingDraft) => void })
+      .populateFromDraft(changesRequestedListing);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    const titleInput = fixture.nativeElement.querySelector('input[name="title"]') as HTMLInputElement;
+    const fileInput = fixture.nativeElement.querySelector('input[type="file"]') as HTMLInputElement;
+    const removeButton = Array.from(
+      fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>,
+    ).find(button => button.textContent?.includes('Remove'));
+
+    expect(component.pageTitle()).toBe('Update requested changes');
+    expect(component.pageDescription()).toContain('Review the admin feedback');
+    expect(component.canEditDraft()).toBeTrue();
+    expect(text).toContain(moderationReason);
+    expect(text).toContain('Update the listing details or images, then submit it for review again.');
+    expect(titleInput.disabled).toBeFalse();
+    expect(fileInput.disabled).toBeFalse();
+    expect(removeButton?.disabled).toBeFalse();
+
+    component.title = 'Updated after moderation';
     expect(component.canSubmitForReview()).toBeTrue();
+
+    component.submitForReview();
+
+    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(draft.id, 2, jasmine.objectContaining({
+      title: 'Updated after moderation',
+    }));
+    expect(listingService.submitForReview).toHaveBeenCalledOnceWith(draft.id, 3);
   });
 
   it('allows closed listings to be edited and resubmitted without showing another close action', () => {

@@ -27,6 +27,16 @@ services:
       - mysql_data:/var/lib/mysql
       - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
 
+  # Temporary V2 cart state
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
   # Identity Provider
   # Using Postgres for Keycloak persistence
   postgres-keycloak:
@@ -189,3 +199,4 @@ volumes:
   postgres_keycloak_data:
   elasticsearch_data:
   opensearch_data:
+  redis_data:

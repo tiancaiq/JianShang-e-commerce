@@ -8,9 +8,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -122,11 +124,27 @@ public class AuthBffController {
     }
 
     @GetMapping("/api/v1/auth/session")
-    public ResponseEntity<SessionResponse> session(Authentication authentication, CsrfToken csrfToken) {
-        tokenRefresher.refreshIfNecessary(authentication);
+    public ResponseEntity<SessionResponse> session(
+            Authentication authentication,
+            CsrfToken csrfToken,
+            HttpServletRequest request) {
+        if (tokenRefresher.refreshIfNecessary(authentication)
+                == OAuth2SessionTokenRefresher.RefreshResult.SESSION_UNAVAILABLE) {
+            clearSessionAuthentication(request);
+            authentication = null;
+        }
         SessionResponse response = sessionResponse(authentication, csrfToken);
 
         return noStore(response);
+    }
+
+    // Clears phantom authentication while preserving the session's CSRF state for a clean re-login.
+    private void clearSessionAuthentication(HttpServletRequest request) {
+        SecurityContextHolder.clearContext();
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.removeAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+        }
     }
 
     @ExceptionHandler(NativeAuthException.class)

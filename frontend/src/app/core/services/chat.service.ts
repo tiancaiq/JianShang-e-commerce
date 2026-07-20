@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, Subject } from 'rxjs';
+import { map, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import {
   ChatMessage,
@@ -18,6 +18,9 @@ import {
 @Injectable({ providedIn: 'root' })
 export class ChatService {
   private readonly baseUrl = `${environment.apiGatewayUrl}/api/v1`;
+  private readonly conversationReadSubject = new Subject<string>();
+
+  readonly conversationRead$ = this.conversationReadSubject.asObservable();
 
   constructor(private http: HttpClient) {}
 
@@ -71,7 +74,11 @@ export class ChatService {
       `${this.baseUrl}/conversations/${conversationId}/read`,
       null,
       { withCredentials: true },
-    );
+    ).pipe(tap(() => this.notifyConversationRead(conversationId)));
+  }
+
+  notifyConversationRead(conversationId: string): void {
+    this.conversationReadSubject.next(conversationId);
   }
 
   markDone(conversationId: string, quantitySold = 1): Observable<ConversationCompletion> {

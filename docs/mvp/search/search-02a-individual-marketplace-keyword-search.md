@@ -42,6 +42,9 @@ active individual listings.
   status, moderation details, media bucket/key, or exact locations.
 - Frontend marketplace search and filters call the backend search path instead
   of relying on browser-side filtering.
+- Frontend query, category, condition, price, city, county, and sort state are
+  represented in URL query parameters so refresh, back navigation, and shared
+  links preserve the active search.
 
 ## Verification
 

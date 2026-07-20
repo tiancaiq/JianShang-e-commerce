@@ -1,4 +1,14 @@
-import { routes } from './app.routes';
+import {
+  agentMessageRoutes,
+  buyerAddressesRoute,
+  businessOrderRoutes,
+  cartRoute,
+  categoryGuidanceRoute,
+  checkoutDetailRoute,
+  checkoutReviewRoute,
+  routes,
+  sellerInventoryRoute,
+} from './app.routes';
 import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 import { MarketplaceHomeComponent } from './features/marketplace/marketplace-home.component';
@@ -6,15 +16,12 @@ import { PublicListingDetailComponent } from './features/marketplace/public-list
 import { NotFoundComponent } from './features/not-found/not-found.component';
 import { BusinessAccountComponent } from './features/business/business-account.component';
 import { BusinessStoresComponent } from './features/stores/business-stores.component';
+import { PublicStoreProfileComponent } from './features/stores/public-store-profile.component';
 
 describe('app routes', () => {
   const v2DemoSegments = new Set([
     'products',
-    'orders',
     'payments',
-    'inventory',
-    'cart',
-    'checkout',
     'wallet',
     'notifications',
   ]);
@@ -29,6 +36,9 @@ describe('app routes', () => {
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'stores',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'stores/:storeSlug',
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'listings/:listingId',
@@ -48,6 +58,7 @@ describe('app routes', () => {
     await expectAsync(Promise.resolve(load(''))).toBeResolvedTo(MarketplaceHomeComponent);
     await expectAsync(Promise.resolve(load('marketplace'))).toBeResolvedTo(MarketplaceHomeComponent);
     await expectAsync(Promise.resolve(load('stores'))).toBeResolvedTo(BusinessStoresComponent);
+    await expectAsync(Promise.resolve(load('stores/:storeSlug'))).toBeResolvedTo(PublicStoreProfileComponent);
     await expectAsync(Promise.resolve(load('listings/:listingId'))).toBeResolvedTo(PublicListingDetailComponent);
   });
 
@@ -67,6 +78,10 @@ describe('app routes', () => {
       path: 'listings/moderation/:caseId',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'category-guidance',
+      redirectTo: 'dashboard',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: '',
       redirectTo: 'dashboard',
     }));
@@ -75,6 +90,10 @@ describe('app routes', () => {
   it('protects marketplace account listing routes', () => {
     const marketplaceRoute = routes.find(route => route.path === '');
 
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'cart',
+      redirectTo: '/marketplace',
+    }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'sell',
       redirectTo: 'account/listings',
@@ -88,6 +107,10 @@ describe('app routes', () => {
       canActivate: [authGuard],
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/addresses',
+      redirectTo: '/account',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/liked',
       canActivate: [authGuard],
     }));
@@ -98,6 +121,14 @@ describe('app routes', () => {
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/messages',
       canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/messages/agent',
+      redirectTo: '/account/messages',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/messages/agent/:sessionId',
+      redirectTo: '/account/messages',
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/messages/:conversationId',
@@ -169,6 +200,74 @@ describe('app routes', () => {
     await expectAsync(Promise.resolve(accountRoute?.loadComponent?.())).toBeResolvedTo(BusinessAccountComponent);
   });
 
+  it('redirects the deferred seller inventory route while the V2 flag is disabled', () => {
+    const sellerRoute = routes.find(route => route.path === 'seller');
+    const inventoryRoute = sellerRoute?.children?.find(route => route.path === 'inventory');
+
+    expect(inventoryRoute?.redirectTo).toBe('store/items');
+    expect(inventoryRoute?.pathMatch).toBe('full');
+    expect(inventoryRoute?.loadComponent).toBeUndefined();
+  });
+
+  it('redirects both business order routes while the V2 flag is disabled', () => {
+    const sellerRoute = routes.find(route => route.path === 'seller');
+    const orderRoutes = sellerRoute?.children?.filter(route => route.path?.startsWith('orders')) || [];
+
+    expect(orderRoutes).toEqual([
+      jasmine.objectContaining({ path: 'orders/:businessOrderId', redirectTo: 'dashboard', pathMatch: 'full' }),
+      jasmine.objectContaining({ path: 'orders', redirectTo: 'dashboard', pathMatch: 'full' }),
+    ]);
+    expect(orderRoutes.every(route => route.loadComponent === undefined)).toBeTrue();
+  });
+
+  it('redirects checkout routes to the marketplace while the production feature flag is disabled', () => {
+    const marketplaceRoute = routes.find(route => route.path === '');
+    const review = marketplaceRoute?.children?.find(route => route.path === 'checkout');
+    const detail = marketplaceRoute?.children?.find(route => route.path === 'checkout/:checkoutId');
+
+    expect(review?.redirectTo).toBe('/marketplace');
+    expect(detail?.redirectTo).toBe('/marketplace');
+    expect(review?.loadComponent).toBeUndefined();
+    expect(detail?.loadComponent).toBeUndefined();
+  });
+
+  it('keeps deferred components available only through explicit opt-in route construction', () => {
+    const enabledRoutes = [
+      sellerInventoryRoute(true),
+      ...businessOrderRoutes(true),
+      checkoutReviewRoute(true),
+      checkoutDetailRoute(true),
+      cartRoute(true),
+      buyerAddressesRoute(true),
+      categoryGuidanceRoute(true),
+      ...agentMessageRoutes(true),
+    ];
+
+    for (const route of enabledRoutes) {
+      expect(route.redirectTo).toBeUndefined();
+      expect(route.loadComponent).toBeTruthy();
+    }
+    expect(cartRoute(true).canActivate).toContain(authGuard);
+    expect(buyerAddressesRoute(true).canActivate).toContain(authGuard);
+    expect(checkoutReviewRoute(true).canActivate).toContain(authGuard);
+    expect(checkoutDetailRoute(true).canActivate).toContain(authGuard);
+    expect(agentMessageRoutes(true).every(route => route.canActivate?.includes(authGuard))).toBeTrue();
+    expect(businessOrderRoutes(true).every(route => route.loadComponent)).toBeTrue();
+  });
+
+  it('reserves explicit agent routes before buyer-seller conversation parameters', () => {
+    const marketplaceRoute = routes.find(route => route.path === '');
+    const children = marketplaceRoute?.children || [];
+    const agentIndex = children.findIndex(route => route.path === 'account/messages/agent');
+    const agentSessionIndex = children.findIndex(route => route.path === 'account/messages/agent/:sessionId');
+    const conversationIndex = children.findIndex(route => route.path === 'account/messages/:conversationId');
+
+    expect(agentIndex).toBeGreaterThanOrEqual(0);
+    expect(agentSessionIndex).toBeGreaterThanOrEqual(0);
+    expect(agentIndex).toBeLessThan(conversationIndex);
+    expect(agentSessionIndex).toBeLessThan(conversationIndex);
+  });
+
   it('keeps compatibility redirects for old console paths', () => {
     expect(routes).toContain(jasmine.objectContaining({
       path: 'dashboard',
@@ -208,6 +307,10 @@ describe('app routes', () => {
       path: 'profile',
       redirectTo: '/seller/account',
     }));
+    expect(consoleRoute?.children).toContain(jasmine.objectContaining({
+      path: 'admin/category-guidance',
+      redirectTo: '/admin/dashboard',
+    }));
   });
 
   it('does not combine redirects with route guards', () => {
@@ -236,7 +339,7 @@ describe('app routes', () => {
     await expectAsync(Promise.resolve(wildcardRoute?.loadComponent?.())).toBeResolvedTo(NotFoundComponent);
   });
 
-  it('does not expose V2 demo commerce routes in the active MVP route tree', () => {
+  it('does not expose unimplemented V2 commerce routes in the active route tree', () => {
     const firstSegment = (path: string | undefined): string => {
       return (path || '').replace(/^\//, '').split('/')[0];
     };

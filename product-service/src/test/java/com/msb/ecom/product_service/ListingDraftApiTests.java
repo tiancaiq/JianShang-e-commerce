@@ -3,6 +3,7 @@ package com.msb.ecom.product_service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.service.AuthServiceClient;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
 import com.msb.ecom.product_service.storage.StorageObjectAccessDeniedException;
@@ -47,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = "commerce.internal-service-token=test-commerce-token")
 @AutoConfigureMockMvc
 class ListingDraftApiTests {
 
@@ -75,6 +76,9 @@ class ListingDraftApiTests {
     @Autowired
     JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    ListingDraftRepository listingDraftRepository;
+
     @MockBean
     AuthServiceClient authServiceClient;
 
@@ -91,6 +95,27 @@ class ListingDraftApiTests {
                         "https://storage.example.test/" + invocation.getArgument(0, String.class)));
         when(listingMediaStorage.readObject(anyString()))
                 .thenReturn(new byte[]{1, 2, 3});
+        when(authServiceClient.searchPublicBusinessStores(
+                org.mockito.ArgumentMatchers.nullable(String.class),
+                anySet(),
+                anySet()))
+                .thenReturn(List.of(new AuthServiceClient.PublicBusinessStoreSearchResult(
+                        BUSINESS_ID,
+                        STORE_ID,
+                        "Acme Trading Store",
+                        "Acme Trading LLC")));
+        when(authServiceClient.lookupPublicSellerLabels(anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(
+                        List.of(),
+                        List.of(new AuthServiceClient.BusinessIdentityLabel(
+                                BUSINESS_ID,
+                                "Acme Trading LLC",
+                                STORE_ID,
+                                "acme-trading-store",
+                                "Acme Trading Store",
+                                "Irvine",
+                                "Orange County",
+                                true))));
     }
 
     @Test
@@ -226,6 +251,52 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void internalCommerceContextReturnsBoundedCatalogFactsWithServiceAuthentication() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+
+        String createResponse = mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest("SKU-COMMERCE-1")))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String listingId = objectMapper.readTree(createResponse).get("id").asText();
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/store/items/{listingId}/commerce-context",
+                        BUSINESS_ID,
+                        listingId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.listingId", equalTo(listingId)))
+                .andExpect(jsonPath("$.businessId", equalTo(BUSINESS_ID)))
+                .andExpect(jsonPath("$.sellerType", equalTo("BUSINESS")))
+                .andExpect(jsonPath("$.sku", equalTo("SKU-COMMERCE-1")))
+                .andExpect(jsonPath("$.priceAmount", equalTo(59.99)))
+                .andExpect(jsonPath("$.currency", equalTo("USD")))
+                .andExpect(jsonPath("$.quantity", equalTo(3)))
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")));
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/store/items/{listingId}/commerce-context",
+                        listingId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.listingId", equalTo(listingId)))
+                .andExpect(jsonPath("$.businessId", equalTo(BUSINESS_ID)))
+                .andExpect(jsonPath("$.sellerType", equalTo("BUSINESS")));
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/store/items/{listingId}/commerce-context",
+                        BUSINESS_ID,
+                        listingId)
+                        .header("X-Internal-Service-Token", "wrong-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void businessStoreItemCreateRequiresMatchingCurrentStoreContext() throws Exception {
         when(authServiceClient.requireBusinessStoreContext(anyString(), eq(BUSINESS_ID)))
                 .thenThrow(new ListingAuthorizationException("Active business store context is required."));
@@ -236,6 +307,58 @@ class ListingDraftApiTests {
                         .content(businessRequest()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
+    void duplicateBusinessStoreItemSkuReturnsConflictWithoutCreatingAnotherDraft() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        String sku = "SKU-CONFLICT-CREATE";
+
+        createBusinessStoreItemDraft(sku);
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest(sku)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code", equalTo("BUSINESS_SKU_CONFLICT")))
+                .andExpect(jsonPath("$.error.message", equalTo(
+                        "This store already has an item with that SKU. Edit the existing item or use a different SKU.")));
+
+        Integer matches = jdbcTemplate.queryForObject(
+                "select count(*) from listings where business_id = ? and sku = ?",
+                Integer.class,
+                BUSINESS_ID,
+                sku);
+        org.assertj.core.api.Assertions.assertThat(matches).isEqualTo(1);
+    }
+
+    @Test
+    void businessStoreItemEditCannotTakeAnotherItemsSku() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        when(authServiceClient.requireBusinessListingPermission(anyString(), eq(BUSINESS_ID)))
+                .thenReturn(new AuthServiceClient.BusinessMembershipAuthorization(
+                        BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
+        String firstSku = "SKU-CONFLICT-EDIT-A";
+        String secondSku = "SKU-CONFLICT-EDIT-B";
+        createBusinessStoreItemDraft(firstSku);
+        String secondListingId = createBusinessStoreItemDraft(secondSku);
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store/items/{listingId}",
+                                BUSINESS_ID,
+                                secondListingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest(firstSku)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code", equalTo("BUSINESS_SKU_CONFLICT")));
+
+        String persistedSku = jdbcTemplate.queryForObject(
+                "select sku from listings where id = ?",
+                String.class,
+                secondListingId);
+        org.assertj.core.api.Assertions.assertThat(persistedSku).isEqualTo(secondSku);
     }
 
     @Test
@@ -325,6 +448,264 @@ class ListingDraftApiTests {
                 eq("listings/" + listingId + "/" + mediaId + "/keyboard.png"),
                 eq("image/png"),
                 argThat(bytes -> bytes.length == 1024));
+    }
+
+    @Test
+    void businessStoreItemCanBeSelfPublishedPausedAndRelistedToStores() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        when(authServiceClient.requireBusinessListingPermission(anyString(), eq(BUSINESS_ID)))
+                .thenReturn(new AuthServiceClient.BusinessMembershipAuthorization(
+                        BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
+
+        String listingId = createBusinessStoreItemDraft("SKU-PUBLISH-1");
+        String mediaId = createConfirmedBusinessStoreItemMedia(listingId, "keyboard.png");
+        attachBusinessStoreItemImage(listingId, mediaId);
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/publish", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("ACTIVE")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.publicationSource", equalTo("BUSINESS_SELF_PUBLISHED")))
+                .andExpect(jsonPath("$.publishedAt", notNullValue()))
+                .andExpect(jsonPath("$.version", equalTo(1)));
+
+        mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                        .queryParam("q", "keyboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id", equalTo(listingId)))
+                .andExpect(jsonPath("$.data[0].sellerType", equalTo("BUSINESS")))
+                .andExpect(jsonPath("$.data[0].transactionNotice").doesNotExist())
+                .andExpect(jsonPath("$.data[0].images[0].url", equalTo("/api/v1/public/listing-media/" + imageIdForMedia(mediaId))));
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/pause", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("PAUSED")))
+                .andExpect(jsonPath("$.version", equalTo(2)));
+
+        mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                        .queryParam("q", "keyboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/relist", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("ACTIVE")))
+                .andExpect(jsonPath("$.publicationSource", equalTo("BUSINESS_SELF_PUBLISHED")))
+                .andExpect(jsonPath("$.version", equalTo(3)));
+
+        mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                        .queryParam("q", "keyboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id", equalTo(listingId)));
+    }
+
+    @Test
+    void businessStoreItemPublishRequiresAttachedImage() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        when(authServiceClient.requireBusinessListingPermission(anyString(), eq(BUSINESS_ID)))
+                .thenReturn(new AuthServiceClient.BusinessMembershipAuthorization(
+                        BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
+        String listingId = createBusinessStoreItemDraft("SKU-NO-IMAGE");
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/publish", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")))
+                .andExpect(jsonPath("$.error.message", equalTo("At least one attached image is required before publishing.")));
+    }
+
+    @Test
+    void businessStoreItemManagementSearchFiltersPagesAndReturnsCatalogSummary() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        String firstId = createBusinessStoreItemDraft("BUS06-NEEDLE-A");
+        String secondId = createBusinessStoreItemDraft("BUS06-NEEDLE-B");
+        String thirdId = createBusinessStoreItemDraft("BUS06-OTHER-C");
+        try {
+            jdbcTemplate.update(
+                    "update listings set title = ?, updated_at = ? where id = ?",
+                    "BUS06 Needle keyboard",
+                    Timestamp.from(Instant.parse("2026-07-17T10:03:00Z")),
+                    firstId);
+            jdbcTemplate.update(
+                    "update listings set status = 'ACTIVE', publication_source = 'BUSINESS_SELF_PUBLISHED', "
+                            + "published_at = ?, updated_at = ? where id = ?",
+                    Timestamp.from(Instant.parse("2026-07-17T10:02:00Z")),
+                    Timestamp.from(Instant.parse("2026-07-17T10:02:00Z")),
+                    secondId);
+            jdbcTemplate.update(
+                    "update listings set status = 'PAUSED', publication_source = 'BUSINESS_SELF_PUBLISHED', "
+                            + "published_at = ?, updated_at = ? where id = ?",
+                    Timestamp.from(Instant.parse("2026-07-17T10:01:00Z")),
+                    Timestamp.from(Instant.parse("2026-07-17T10:01:00Z")),
+                    thirdId);
+
+            String firstPage = mockMvc.perform(get("/api/v1/businesses/{businessId}/store/items/search", BUSINESS_ID)
+                            .queryParam("q", "bus06-needle")
+                            .queryParam("limit", "1")
+                            .with(jwt().jwt(jwt -> jwt.tokenValue("business-token"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(firstId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(true)))
+                    .andExpect(jsonPath("$.page.nextCursor", notNullValue()))
+                    .andExpect(jsonPath("$.summary.total", equalTo(countBusinessItems(BUSINESS_ID))))
+                    .andExpect(jsonPath("$.summary.draft", equalTo(countBusinessItemsByStatus(BUSINESS_ID, "DRAFT"))))
+                    .andExpect(jsonPath("$.summary.active", equalTo(countBusinessItemsByStatus(BUSINESS_ID, "ACTIVE"))))
+                    .andExpect(jsonPath("$.summary.paused", equalTo(countBusinessItemsByStatus(BUSINESS_ID, "PAUSED"))))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+
+            String cursor = objectMapper.readTree(firstPage).path("page").path("nextCursor").asText();
+            mockMvc.perform(get("/api/v1/businesses/{businessId}/store/items/search", BUSINESS_ID)
+                            .queryParam("q", "bus06-needle")
+                            .queryParam("cursor", cursor)
+                            .queryParam("limit", "1")
+                            .with(jwt().jwt(jwt -> jwt.tokenValue("business-token"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(secondId)))
+                    .andExpect(jsonPath("$.page.hasMore", equalTo(false)));
+
+            mockMvc.perform(get("/api/v1/businesses/{businessId}/store/items/search", BUSINESS_ID)
+                            .queryParam("status", "PAUSED")
+                            .queryParam("q", "BUS06-OTHER-C")
+                            .with(jwt().jwt(jwt -> jwt.tokenValue("business-token"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data", hasSize(1)))
+                    .andExpect(jsonPath("$.data[0].id", equalTo(thirdId)))
+                    .andExpect(jsonPath("$.data[0].status", equalTo("PAUSED")));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?, ?)", firstId, secondId, thirdId);
+        }
+    }
+
+    @Test
+    void businessStoreItemManagementSearchRejectsCrossBusinessAccess() throws Exception {
+        when(authServiceClient.requireBusinessStoreContext(anyString(), eq(BUSINESS_ID)))
+                .thenThrow(new ListingAuthorizationException("Active business store context is required."));
+
+        mockMvc.perform(get("/api/v1/businesses/{businessId}/store/items/search", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-business-token"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
+    void pausedBusinessStoreItemCanBeEditedBeforeRelistWhileActiveEditsAreRejected() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        when(authServiceClient.requireBusinessListingPermission(anyString(), eq(BUSINESS_ID)))
+                .thenReturn(new AuthServiceClient.BusinessMembershipAuthorization(
+                        BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
+        String listingId = createBusinessStoreItemDraft("BUS06-EDIT-PAUSED");
+        String mediaId = createConfirmedBusinessStoreItemMedia(listingId, "paused-keyboard.png");
+        attachBusinessStoreItemImage(listingId, mediaId);
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/publish", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/pause", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "1"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store/items/{listingId}", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sellerType": "BUSINESS",
+                                  "businessId": "%s",
+                                  "categoryId": "%s",
+                                  "title": "Paused keyboard updated",
+                                  "description": "Updated while private.",
+                                  "condition": "OPEN_BOX",
+                                  "price": {"amount": 44.99, "currency": "USD"},
+                                  "sku": "BUS06-EDIT-PAUSED",
+                                  "quantity": 6
+                                }
+                                """.formatted(BUSINESS_ID, CATEGORY_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title", equalTo("Paused keyboard updated")))
+                .andExpect(jsonPath("$.status", equalTo("PAUSED")))
+                .andExpect(jsonPath("$.version", equalTo(3)));
+
+        mockMvc.perform(post(
+                                "/api/v1/businesses/{businessId}/store/items/{listingId}/media/upload-request",
+                                BUSINESS_ID,
+                                listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/png",
+                                  "fileName": "paused-extra.png",
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items/{listingId}/relist", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("ACTIVE")))
+                .andExpect(jsonPath("$.version", equalTo(4)));
+
+        mockMvc.perform(patch("/api/v1/businesses/{businessId}/store/items/{listingId}", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "4")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest("BUS06-EDIT-PAUSED")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", equalTo("Pause an active store item before editing it.")));
+
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .header("If-Match", "4")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest("BUS06-EDIT-PAUSED")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", equalTo(
+                        "Use the business store item route to edit paused items; active items must be paused first.")));
+
+        mockMvc.perform(post(
+                                "/api/v1/businesses/{businessId}/store/items/{listingId}/media/upload-request",
+                                BUSINESS_ID,
+                                listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/png",
+                                  "fileName": "active-extra.png",
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", equalTo("Pause an active store item before changing its images.")));
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/media/upload-request", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/png",
+                                  "fileName": "active-generic-extra.png",
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", equalTo("Pause an active store item before changing its images.")));
     }
 
     @Test
@@ -1598,6 +1979,44 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void platformAdminCanRemoveSelfPublishedBusinessItemAndSellerSeesReason() throws Exception {
+        String listingId = "01L0000000000000000000A406";
+        insertApprovedPublicListing(listingId, Instant.parse("2026-06-17T12:00:00Z"), "BUSINESS");
+        when(authServiceClient.requireBusinessListingPermission(anyString(), eq(BUSINESS_ID)))
+                .thenReturn(new AuthServiceClient.BusinessMembershipAuthorization(
+                        BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        "01A00000000000000000000001", "PLATFORM_ADMIN"));
+
+        mockMvc.perform(post("/api/v1/admin/listings/{listingId}/remove", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "Business item violates marketplace policy"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("REMOVED_BY_ADMIN")))
+                .andExpect(jsonPath("$.moderationAction", equalTo("ADMIN_REMOVE")))
+                .andExpect(jsonPath("$.moderationReason", equalTo("Business item violates marketplace policy")));
+
+        mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/v1/businesses/{businessId}/store/items/{listingId}", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("REMOVED_BY_ADMIN")))
+                .andExpect(jsonPath("$.moderationAction", equalTo("ADMIN_REMOVE")))
+                .andExpect(jsonPath("$.moderationReason", equalTo("Business item violates marketplace policy")));
+
+        org.assertj.core.api.Assertions.assertThat(decisionCount(listingId, "ADMIN_REMOVE")).isEqualTo(1);
+    }
+
+    @Test
     void pendingListingCannotBeRemovedByAdminActiveAction() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -1847,26 +2266,30 @@ class ListingDraftApiTests {
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", equalTo("CHANGES_REQUESTED")))
-                .andExpect(jsonPath("$.moderationStatus", equalTo("CHANGES_REQUESTED")));
+                .andExpect(jsonPath("$.moderationStatus", equalTo("CHANGES_REQUESTED")))
+                .andExpect(jsonPath("$.moderationAction", equalTo("REQUEST_CHANGES")))
+                .andExpect(jsonPath("$.moderationReason", equalTo("Add clearer photos")))
+                .andExpect(jsonPath("$.moderationActionAt").isNotEmpty());
     }
 
     @Test
-    void draftCanSubmitAfterNonApprovedReviewWithClaimedCase() throws Exception {
+    void changesRequestedResubmissionReopensSameResolvedCaseAndPreservesDecisionHistory() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
                         USER_ID, "Irvine", "CA", "ACTIVE"));
         String listingId = createSubmittedIndividualListing();
         String caseId = caseIdForListing(listingId);
+        String adminUserId = "01A00000000000000000000002";
         when(authServiceClient.requirePlatformAdmin(anyString()))
                 .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
-                        "01A00000000000000000000002", "PLATFORM_ADMIN"));
+                        adminUserId, "PLATFORM_ADMIN"));
 
         mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
                         .header("If-Match", "0"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/admin/listings/{listingId}/decision", listingId)
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/resolve", caseId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
                         .header("If-Match", "1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -1876,27 +2299,174 @@ class ListingDraftApiTests {
                                   "reason": "Add clearer photos"
                                 }
                                 """))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.moderationCase.id", equalTo(caseId)))
+                .andExpect(jsonPath("$.moderationCase.caseStatus", equalTo("RESOLVED")))
+                .andExpect(jsonPath("$.listing.status", equalTo("CHANGES_REQUESTED")))
+                .andExpect(jsonPath("$.listing.version", equalTo(2)));
 
-        jdbcTemplate.update("""
-                update listings
-                set status = 'DRAFT',
-                    version = version + 1,
-                    updated_at = now(6)
-                where id = ?
-                """,
+        String firstDecisionId = jdbcTemplate.queryForObject(
+                "select id from listing_moderation_decisions where listing_id = ? and decision = 'REQUEST_CHANGES'",
+                String.class,
                 listingId);
+        Object firstDecisionCreatedAt = jdbcTemplate.queryForObject(
+                "select created_at from listing_moderation_decisions where id = ?",
+                Object.class,
+                firstDecisionId);
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("RESOLVED");
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "assigned_admin_user_id"))
+                .isEqualTo(adminUserId);
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "resolved_at")).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "version")).isEqualTo(2L);
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        "01U00000000000000000000099", "Irvine", "CA", "ACTIVE"));
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-token")))
+                        .header("If-Match", "2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(2)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+
+        mockMvc.perform(patch("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "2")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.quantity", equalTo(2)))
+                .andExpect(jsonPath("$.version", equalTo(3)))
+                .andExpect(jsonPath("$.moderationAction", equalTo("REQUEST_CHANGES")))
+                .andExpect(jsonPath("$.moderationReason", equalTo("Add clearer photos")));
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/submit", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "2"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_VERSION_CONFLICT")));
+
+        org.assertj.core.api.Assertions.assertThat(caseCountForListing(listingId)).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("RESOLVED");
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "version")).isEqualTo(2L);
 
         mockMvc.perform(post("/api/v1/listings/{listingId}/submit", listingId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
                         .header("If-Match", "3"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", equalTo("PENDING_REVIEW")))
-                .andExpect(jsonPath("$.moderationStatus", equalTo("PENDING")));
+                .andExpect(jsonPath("$.moderationStatus", equalTo("PENDING")))
+                .andExpect(jsonPath("$.version", equalTo(4)));
 
+        org.assertj.core.api.Assertions.assertThat(caseCountForListing(listingId)).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "id")).isEqualTo(caseId);
         org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("OPEN");
         org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "assigned_admin_user_id")).isNull();
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "resolved_at")).isNull();
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "version")).isEqualTo(3L);
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "submitted_by_user_id")).isEqualTo(USER_ID);
+
+        mockMvc.perform(post("/api/v1/listings/{listingId}/submit", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .header("If-Match", "3"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
+        org.assertj.core.api.Assertions.assertThat(caseCountForListing(listingId)).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "version")).isEqualTo(3L);
+
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseStatus", equalTo("CLAIMED")))
+                .andExpect(jsonPath("$.version", equalTo(4)));
+
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/resolve", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "4")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Seller supplied the requested changes"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.moderationCase.id", equalTo(caseId)))
+                .andExpect(jsonPath("$.moderationCase.caseStatus", equalTo("RESOLVED")))
+                .andExpect(jsonPath("$.moderationCase.version", equalTo(5)))
+                .andExpect(jsonPath("$.listing.status", equalTo("ACTIVE")))
+                .andExpect(jsonPath("$.listing.moderationStatus", equalTo("APPROVED")))
+                .andExpect(jsonPath("$.listing.version", equalTo(5)));
+
+        org.assertj.core.api.Assertions.assertThat(decisionCount(listingId, "REQUEST_CHANGES")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(decisionCount(listingId, "APPROVE")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                        "select reason from listing_moderation_decisions where id = ?",
+                        String.class,
+                        firstDecisionId))
+                .isEqualTo("Add clearer photos");
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                        "select created_at from listing_moderation_decisions where id = ?",
+                        Object.class,
+                        firstDecisionId))
+                .isEqualTo(firstDecisionCreatedAt);
+        org.assertj.core.api.Assertions.assertThat(caseCountForListing(listingId)).isEqualTo(1);
+    }
+
+    @Test
+    void ownerCanReplaceChangesRequestedMediaWhileAnotherSellerCannot() throws Exception {
+        String listingId = createChangesRequestedIndividualListing();
+        String mediaId = jdbcTemplate.queryForObject(
+                "select media_object_id from listing_images where listing_id = ?",
+                String.class,
+                listingId);
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        "01U00000000000000000000099", "Irvine", "CA", "ACTIVE"));
+        mockMvc.perform(put("/api/v1/listings/{listingId}/images", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("other-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "images": [
+                                    {"mediaId": "%s", "altText": "Clearer bike photo"}
+                                  ]
+                                }
+                                """.formatted(mediaId)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        mockMvc.perform(put("/api/v1/listings/{listingId}/images", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "images": [
+                                    {"mediaId": "%s", "altText": "Clearer bike photo"}
+                                  ]
+                                }
+                                """.formatted(mediaId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].altText", equalTo("Clearer bike photo")));
+
+        mockMvc.perform(get("/api/v1/listings/{listingId}", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("DRAFT")))
+                .andExpect(jsonPath("$.moderationStatus", equalTo("NOT_SUBMITTED")))
+                .andExpect(jsonPath("$.version", equalTo(3)));
     }
 
     @Test
@@ -2010,8 +2580,8 @@ class ListingDraftApiTests {
 
         mockMvc.perform(get("/api/v1/internal/chat/listings/{listingId}/conversation-eligibility", listingId)
                         .with(jwt()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code", equalTo("LISTING_INVALID_REQUEST")));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_NOT_FOUND")));
     }
 
     @Test
@@ -2568,7 +3138,45 @@ class ListingDraftApiTests {
     }
 
     @Test
-    void businessStoreListingsSearchReturnsOnlyApprovedBusinessListings() throws Exception {
+    void individualMarketplaceSearchFallsBackWhenSellerLabelsAreUnavailable() throws Exception {
+        String listingId = "01S00000000000000000000024";
+        try {
+            insertApprovedPublicListing(listingId, Instant.parse("2099-06-17T12:00:00Z"), "INDIVIDUAL");
+            when(authServiceClient.lookupPublicSellerLabels(anySet(), anySet()))
+                    .thenThrow(new RuntimeException("auth-service unavailable"));
+
+            mockMvc.perform(get("/api/v1/public/marketplace/listings/search"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(listingId)))
+                    .andExpect(jsonPath("$.data[?(@.id == '%s')].sellerDisplayName".formatted(listingId),
+                            hasItem("Marketplace seller")));
+        } finally {
+            jdbcTemplate.update("delete from listings where id = ?", listingId);
+        }
+    }
+
+    @Test
+    void closedListingFromStaleSearchCandidateFailsAuthoritativeMysqlVisibilityCheck() throws Exception {
+        String listingId = "01S00000000000000000000028";
+        try {
+            insertApprovedPublicListing(listingId, Instant.parse("2099-06-17T12:00:00Z"), "INDIVIDUAL");
+            jdbcTemplate.update(
+                    "update listings set status = 'CLOSED', updated_at = ? where id = ?",
+                    Timestamp.from(Instant.parse("2099-06-17T12:01:00Z")),
+                    listingId);
+
+            org.assertj.core.api.Assertions.assertThat(
+                            listingDraftRepository.findPublicListingsByIds(List.of(listingId)))
+                    .isEmpty();
+            mockMvc.perform(get("/api/v1/public/listings/{listingId}", listingId))
+                    .andExpect(status().isNotFound());
+        } finally {
+            jdbcTemplate.update("delete from listings where id = ?", listingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchReturnsOnlySelfPublishedBusinessListings() throws Exception {
         String individualListingId = "01S00000000000000000000003";
         String businessListingId = "01S00000000000000000000004";
         try {
@@ -2627,6 +3235,143 @@ class ListingDraftApiTests {
                     .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(nonMatchingListingId))));
         } finally {
             jdbcTemplate.update("delete from listings where id in (?, ?)", matchingListingId, nonMatchingListingId);
+        }
+    }
+
+    @Test
+    void businessStoreLocationFilterUsesTheLocationDisplayedFromPublicStoreMetadata() throws Exception {
+        String listingId = "01S00000000000000000000029";
+        try {
+            insertApprovedPublicListing(
+                    listingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "BUSINESS",
+                    "Store location fixture",
+                    "Business listing without duplicated location columns",
+                    "NEW",
+                    new BigDecimal("30.00"),
+                    null,
+                    null,
+                    CATEGORY_ID);
+            when(authServiceClient.lookupPublicSellerLabels(anySet(), anySet()))
+                    .thenReturn(new AuthServiceClient.AdminIdentityLabels(
+                            List.of(),
+                            List.of(new AuthServiceClient.BusinessIdentityLabel(
+                                    BUSINESS_ID,
+                                    "Acme Trading LLC",
+                                    STORE_ID,
+                                    "acme-trading-store",
+                                    "Acme Trading Store",
+                                    "Irvine",
+                                    "CA",
+                                    true))));
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("city", "irvine")
+                            .param("county", "ca"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(listingId)))
+                    .andExpect(jsonPath(
+                            "$.data[?(@.id == '%s')].publicCity".formatted(listingId),
+                            hasItem("Irvine")))
+                    .andExpect(jsonPath(
+                            "$.data[?(@.id == '%s')].publicRegion".formatted(listingId),
+                            hasItem("CA")));
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("city", "Tustin"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id").value(
+                            org.hamcrest.Matchers.not(hasItem(listingId))));
+        } finally {
+            jdbcTemplate.update("delete from listings where id = ?", listingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchMatchesSkuAndStoreName() throws Exception {
+        String skuListingId = "01S00000000000000000000021";
+        String storeNameListingId = "01S00000000000000000000022";
+        try {
+            insertApprovedPublicListing(
+                    skuListingId,
+                    Instant.parse("2099-06-17T12:00:00Z"),
+                    "BUSINESS",
+                    "Desk organizer",
+                    "Business SKU fixture",
+                    "NEW",
+                    new BigDecimal("30.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            jdbcTemplate.update("update listings set sku = ? where id = ?", "MOCHI-SKU-7788", skuListingId);
+            insertApprovedPublicListing(
+                    storeNameListingId,
+                    Instant.parse("2099-06-17T12:00:01Z"),
+                    "BUSINESS",
+                    "Shelf display stand",
+                    "Business store-name fixture",
+                    "NEW",
+                    new BigDecimal("40.00"),
+                    "Irvine",
+                    "Orange County",
+                    CATEGORY_ID);
+            when(authServiceClient.searchPublicBusinessStores(eq("Mochi House"), anySet(), anySet()))
+                    .thenReturn(List.of(new AuthServiceClient.PublicBusinessStoreSearchResult(
+                            BUSINESS_ID,
+                            STORE_ID,
+                            "Mochi House",
+                            "Acme Trading LLC")));
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "MOCHI-SKU-7788"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(skuListingId)));
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search")
+                            .param("q", "Mochi House"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id", hasItem(storeNameListingId)));
+        } finally {
+            jdbcTemplate.update("delete from listings where id in (?, ?)", skuListingId, storeNameListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchHidesItemsWhenBusinessStoreIsNotPublicActive() throws Exception {
+        String hiddenListingId = "01S00000000000000000000023";
+        try {
+            insertApprovedPublicListing(hiddenListingId, Instant.parse("2099-06-17T12:00:00Z"), "BUSINESS");
+            when(authServiceClient.searchPublicBusinessStores(
+                    org.mockito.ArgumentMatchers.isNull(),
+                    anySet(),
+                    anySet()))
+                    .thenReturn(List.of());
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].id").value(org.hamcrest.Matchers.not(hasItem(hiddenListingId))));
+        } finally {
+            jdbcTemplate.update("delete from listings where id = ?", hiddenListingId);
+        }
+    }
+
+    @Test
+    void businessStoreListingsSearchFailsClosedWhenBusinessVisibilityLookupIsUnavailable() throws Exception {
+        String hiddenListingId = "01S00000000000000000000025";
+        try {
+            insertApprovedPublicListing(hiddenListingId, Instant.parse("2099-06-17T12:00:00Z"), "BUSINESS");
+            when(authServiceClient.searchPublicBusinessStores(
+                    org.mockito.ArgumentMatchers.isNull(),
+                    anySet(),
+                    anySet()))
+                    .thenThrow(new RuntimeException("auth-service unavailable"));
+
+            mockMvc.perform(get("/api/v1/public/stores/listings/search"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data").isEmpty());
+        } finally {
+            jdbcTemplate.update("delete from listings where id = ?", hiddenListingId);
         }
     }
 
@@ -2890,25 +3635,31 @@ class ListingDraftApiTests {
             String categoryId) {
         String individualSellerUserId = "BUSINESS".equals(sellerType) ? null : USER_ID;
         String businessId = "BUSINESS".equals(sellerType) ? BUSINESS_ID : null;
+        String storeId = "BUSINESS".equals(sellerType) ? STORE_ID : null;
+        String moderationStatus = "BUSINESS".equals(sellerType) ? "NOT_SUBMITTED" : "APPROVED";
+        String publicationSource = "BUSINESS".equals(sellerType) ? "BUSINESS_SELF_PUBLISHED" : "ADMIN_REVIEW";
         boolean negotiable = !"BUSINESS".equals(sellerType);
         jdbcTemplate.update("""
                 insert into listings (
                     id, seller_type, individual_seller_user_id, business_id, store_id,
                     category_id, title, description, condition_code, condition_notes,
                     price_amount, currency, negotiable, sku, quantity, public_city, public_region,
-                    status, moderation_status, published_at, version, created_at, updated_at
+                    status, moderation_status, publication_source, published_at, version, created_at, updated_at
                 )
-                values (?, ?, ?, ?, null, ?, ?, 'Public browse fixture', 'GOOD', null,
+                values (?, ?, ?, ?, ?, ?, ?, 'Public browse fixture', 'GOOD', null,
                         10.00, 'USD', ?, null, 1, 'Irvine', 'CA',
-                        'ACTIVE', 'APPROVED', ?, 0, ?, ?)
+                        'ACTIVE', ?, ?, ?, 0, ?, ?)
                 """,
                 listingId,
                 sellerType,
                 individualSellerUserId,
                 businessId,
+                storeId,
                 categoryId,
                 title,
                 negotiable,
+                moderationStatus,
+                publicationSource,
                 Timestamp.from(publishedAt),
                 Timestamp.from(publishedAt),
                 Timestamp.from(publishedAt));
@@ -3065,6 +3816,92 @@ class ListingDraftApiTests {
                                 }
                                 """.formatted(mediaId)))
                 .andExpect(status().isOk());
+    }
+
+    private String createBusinessStoreItemDraft(String sku) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest(sku)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response).get("id").asText();
+    }
+
+    private int countBusinessItems(String businessId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from listings where seller_type = 'BUSINESS' and business_id = ?",
+                Integer.class,
+                businessId);
+        return count == null ? 0 : count;
+    }
+
+    private int countBusinessItemsByStatus(String businessId, String status) {
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from listings where seller_type = 'BUSINESS' and business_id = ? and status = ?",
+                Integer.class,
+                businessId,
+                status);
+        return count == null ? 0 : count;
+    }
+
+    private String createConfirmedBusinessStoreItemMedia(String listingId, String fileName) throws Exception {
+        String response = mockMvc.perform(post(
+                                "/api/v1/businesses/{businessId}/store/items/{listingId}/media/upload-request",
+                                BUSINESS_ID,
+                                listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "contentType": "image/png",
+                                  "fileName": "%s",
+                                  "sizeBytes": 1024
+                                }
+                                """.formatted(fileName)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String mediaId = objectMapper.readTree(response).get("id").asText();
+
+        mockMvc.perform(post(
+                                "/api/v1/businesses/{businessId}/store/items/{listingId}/media/{mediaId}/confirm",
+                                BUSINESS_ID,
+                                listingId,
+                                mediaId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sizeBytes": 1024
+                                }
+                                """))
+                .andExpect(status().isOk());
+        return mediaId;
+    }
+
+    private void attachBusinessStoreItemImage(String listingId, String mediaId) throws Exception {
+        mockMvc.perform(put("/api/v1/businesses/{businessId}/store/items/{listingId}/images", BUSINESS_ID, listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "images": [
+                                    {"mediaId": "%s", "altText": "keyboard.png"}
+                                  ]
+                                }
+                                """.formatted(mediaId)))
+                .andExpect(status().isOk());
+    }
+
+    private String imageIdForMedia(String mediaId) {
+        return jdbcTemplate.queryForObject(
+                "select id from listing_images where media_object_id = ?",
+                String.class,
+                mediaId);
     }
 
     private Integer caseCountForListing(String listingId) {

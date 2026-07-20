@@ -3,6 +3,7 @@ package com.msb.ecom.api_gateway.routes;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.error.ApiError;
 import com.msb.ecom.common.web.error.ApiErrorEnvelope;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,6 +14,7 @@ import org.springframework.web.servlet.function.*;
 import java.net.URI;
 import java.util.List;
 
+import static org.springframework.cloud.gateway.server.mvc.filter.BeforeFilterFunctions.removeRequestHeader;
 import static org.springframework.cloud.gateway.server.mvc.filter.CircuitBreakerFilterFunctions.circuitBreaker;
 import static org.springframework.cloud.gateway.server.mvc.filter.TokenRelayFilterFunctions.tokenRelay;
 import static org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctions.route;
@@ -39,8 +41,36 @@ public class Routes {
         @Value("${service.auth.url}")
         private String authServiceUrl;
 
+        @Value("${service.agent.url}")
+        private String agentServiceUrl;
+
         @Bean
         @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent", havingValue = "true")
+        public RouterFunction<ServerResponse> agentServiceRoute() {
+                return route("agent_service")
+                                .route(RequestPredicates.path("/api/v1/agent/**"),
+                                                http(agentServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("agentServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledAgentServiceRoute() {
+                return disabledRoute("disabled_agent_service", RequestPredicates.path("/api/v1/agent/**"));
+        }
+
+        @Bean
+        @Order(1)
         public RouterFunction<ServerResponse> chatServiceRoute() {
                 return route("chat_service")
                                 .route(RequestPredicates.path("/api/v1/listings/*/conversations"),
@@ -56,7 +86,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(1)
+        @Order(2)
         public RouterFunction<ServerResponse> productServiceRoute() {
                 return route("product_service")
                                 .route(RequestPredicates.path("/api/product/**")
@@ -77,7 +107,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(2)
+        @Order(3)
         public RouterFunction<ServerResponse> publicAuthServiceRoute() {
                 return route("public_auth_service")
                                 .route(RequestPredicates.path("/api/v1/public/user-avatars/**"),
@@ -90,7 +120,27 @@ public class Routes {
         }
 
         @Bean
-        @Order(3)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "category-guidance", havingValue = "true")
+        public RouterFunction<ServerResponse> categoryGuidanceServiceRoute() {
+                return route("category_guidance_service")
+                                .route(RequestPredicates.path("/api/v1/admin/categories/**"),
+                                                http(productServiceUrl))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("productServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "category-guidance", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledCategoryGuidanceServiceRoute() {
+                return disabledRoute("disabled_category_guidance_service",
+                                RequestPredicates.path("/api/v1/admin/categories/**"));
+        }
+
+        @Bean
+        @Order(4)
         public RouterFunction<ServerResponse> publicListingServiceRoute() {
                 return route("public_listing_service")
                                 .route(RequestPredicates.path("/api/v1/public/listings")
@@ -105,7 +155,7 @@ public class Routes {
         }
 
         @Bean
-        @Order(4)
+        @Order(5)
         public RouterFunction<ServerResponse> publicCategoryServiceRoute() {
                 return route("public_category_service")
                                 .route(RequestPredicates.path("/api/v1/categories")
@@ -117,9 +167,14 @@ public class Routes {
         }
 
         @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart-checkout", havingValue = "true")
         public RouterFunction<ServerResponse> orderServiceRoute() {
                 return route("order_service")
-                                .route(RequestPredicates.path("/api/order/**"), http(orderServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/cart")
+                                                .or(RequestPredicates.path("/api/v1/cart/**"))
+                                                .or(RequestPredicates.path("/api/v1/checkouts"))
+                                                .or(RequestPredicates.path("/api/v1/checkouts/**")),
+                                                http(orderServiceUrl))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("orderServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
@@ -127,9 +182,51 @@ public class Routes {
         }
 
         @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart-checkout", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledOrderServiceRoute() {
+                return disabledRoute("disabled_order_service",
+                                RequestPredicates.path("/api/v1/cart")
+                                                .or(RequestPredicates.path("/api/v1/cart/**"))
+                                                .or(RequestPredicates.path("/api/v1/checkouts"))
+                                                .or(RequestPredicates.path("/api/v1/checkouts/**")));
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-orders", havingValue = "true")
+        public RouterFunction<ServerResponse> businessOrderServiceRoute() {
+                return route("business_order_service")
+                                .route(RequestPredicates.path("/api/v1/businesses/*/orders")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/**")),
+                                                http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-orders", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledBusinessOrderServiceRoute() {
+                return disabledRoute("disabled_business_order_service",
+                                RequestPredicates.path("/api/v1/businesses/*/orders")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/**")));
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "inventory", havingValue = "true")
         public RouterFunction<ServerResponse> inventoryServiceRoute() {
                 return route("inventory_service")
-                                .route(RequestPredicates.path("/api/inventory/**"), http(inventoryServiceUrl))
+                                .route(RequestPredicates.path("/api/v1/businesses/*/inventory")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/inventory/**")),
+                                                http(inventoryServiceUrl))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("inventoryServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
@@ -137,6 +234,16 @@ public class Routes {
         }
 
         @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "inventory", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledInventoryServiceRoute() {
+                return disabledRoute("disabled_inventory_service",
+                                RequestPredicates.path("/api/v1/businesses/*/inventory")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/inventory/**")));
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "payment", havingValue = "true")
         public RouterFunction<ServerResponse> paymentServiceRoute() {
                 return route("payment_service")
                                 .route(RequestPredicates.path("/api/payment/**"), http(paymentServiceUrl))
@@ -168,6 +275,35 @@ public class Routes {
         }
 
         @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "payment", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledPaymentServiceRoute() {
+                return disabledRoute("disabled_payment_service", RequestPredicates.path("/api/payment/**"));
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "buyer-addresses", havingValue = "true")
+        public RouterFunction<ServerResponse> buyerAddressServiceRoute() {
+                return route("buyer_address_service")
+                                .route(RequestPredicates.path("/api/v1/users/me/addresses")
+                                                .or(RequestPredicates.path("/api/v1/users/me/addresses/**")),
+                                                http(authServiceUrl))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("authServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "buyer-addresses", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledBuyerAddressServiceRoute() {
+                return disabledRoute("disabled_buyer_address_service",
+                                RequestPredicates.path("/api/v1/users/me/addresses")
+                                                .or(RequestPredicates.path("/api/v1/users/me/addresses/**")));
+        }
+
+        @Bean
         public RouterFunction<ServerResponse> authWebhookRoute() {
                 return route("auth_webhook_service")
                                 .route(RequestPredicates.path("/api/v1/webhooks/business-verification"),
@@ -184,6 +320,10 @@ public class Routes {
                                                 .body(serviceUnavailable(request)))
                                 .POST("/fallbackRoute", request -> ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE)
                                                 .body(serviceUnavailable(request)))
+                                .PATCH("/fallbackRoute", request -> ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE)
+                                                .body(serviceUnavailable(request)))
+                                .DELETE("/fallbackRoute", request -> ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE)
+                                                .body(serviceUnavailable(request)))
                                 .build();
         }
 
@@ -194,5 +334,12 @@ public class Routes {
                                 "Service is temporarily unavailable. Please try again later.",
                                 List.of(),
                                 correlationId));
+        }
+
+        // Owns a quarantined API namespace locally so disabled capabilities cannot fall through to a service.
+        private RouterFunction<ServerResponse> disabledRoute(String routeId, RequestPredicate predicate) {
+                return route(routeId)
+                                .route(predicate, request -> ServerResponse.notFound().build())
+                                .build();
         }
 }

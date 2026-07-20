@@ -15,6 +15,6 @@ public interface ChatAuthClient {
     record IdentityLabels(List<UserLabel> users) {
     }
 
-    record UserLabel(String id, String displayName, String avatarUrl) {
+    record UserLabel(String id, String displayName, String publicHandle, String avatarUrl) {
     }
 }

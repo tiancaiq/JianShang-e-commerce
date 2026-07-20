@@ -575,7 +575,7 @@ Completion note:
 
 ### POSTSEARCH-STAB-P2-02 Manual Browser Smoke Checklist Refresh
 
-Status: planned.
+Status: complete.
 
 Problem:
 
@@ -608,9 +608,14 @@ Acceptance criteria:
 - A teammate can smoke-test the current MVP without reading chat history.
 - No code changes.
 
+Completion note:
+
+- See
+  `docs/mvp/fix/stabilization/post-search/postsearch-stab-p2-02-manual-browser-smoke-checklist-refresh.md`.
+
 ### POSTSEARCH-STAB-P2-03 Historical Demo And Deferred Module Cleanup
 
-Status: planned.
+Status: complete.
 
 Problem:
 
@@ -634,6 +639,14 @@ Acceptance criteria:
 
 - Active MVP code is visually easier to distinguish from deferred code.
 - No V2 behavior is reactivated.
+
+Completion note:
+
+- See
+  `docs/mvp/fix/stabilization/post-search/postsearch-stab-p2-03-historical-demo-deferred-module-cleanup.md`.
+- The audit found that `/cart` and `/account/addresses` are active V2 routes
+  in the current dirty worktree. They remain preserved for the V2 branch and
+  are explicitly excluded from the MVP staging boundary.
 
 ### POSTSEARCH-STAB-P2-04 Observability And Demo Diagnostics Notes
 

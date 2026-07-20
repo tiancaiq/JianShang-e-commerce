@@ -14,8 +14,13 @@ import { ToastService } from '../../core/services/toast.service';
       <header class="seller-header">
         <div>
           <p class="eyebrow">Marketplace account</p>
-          <h1>Become a Seller</h1>
-          <p>Register an individual seller profile before creating your first listing.</p>
+          @if (profile()?.status === 'ACTIVE') {
+            <h1>Seller profile</h1>
+            <p>Review your public seller details and completed sales.</p>
+          } @else {
+            <h1>Become a Seller</h1>
+            <p>Register an individual seller profile before creating your first listing.</p>
+          }
         </div>
         @if (profile()) {
           <span class="status-pill">{{ profile()?.status }}</span>

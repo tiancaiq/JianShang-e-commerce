@@ -99,6 +99,16 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldExposePublicStoreProfileWithoutLogin() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/stores/shen-ban-demo-store")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
 	void shouldRouteAuthOwnedAdminEndpointsThroughGateway() {
 		RestAssured.given()
 				.header("Authorization", "Bearer token")
@@ -140,6 +150,25 @@ class ApiGatewayApplicationTests {
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void deferredCheckoutRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/checkouts/01C00000000000000000000001")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void checkoutRequiresAuthentication() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/checkouts/01C00000000000000000000001")
+				.then()
+				.statusCode(401);
 	}
 
 	@Test
@@ -218,31 +247,52 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
-	void shouldReturnFallbackWhenOrderServiceDown() {
-		String orderJson = """
-				{
-				    "skuCode": "iphone_15",
-				    "price": 1000,
-				    "quantity": 1
-				}
-				""";
-
+	void deferredCartRouteIsNotRegisteredByDefault() {
 		RestAssured.given()
-				.contentType("application/json")
-				.body(orderJson)
+				.header("Authorization", "Bearer token")
 				.when()
-				.post("/api/order")
+				.get("/api/v1/cart")
 				.then()
-				.statusCode(anyOf(equalTo(401), equalTo(403)));
+				.statusCode(404);
 	}
 
 	@Test
-	void shouldReturnFallbackWhenInventoryServiceDown() {
+	void deferredInventoryRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/businesses/01B00000000000000000000001/inventory")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void deferredBusinessOrderRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/businesses/01B00000000000000000000001/orders")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void businessOrderRouteRequiresAuthenticationEvenWhenDisabled() {
 		RestAssured.given()
 				.when()
-				.get("/api/inventory?skuCode=iphone_15&quantity=1")
+				.get("/api/v1/businesses/01B00000000000000000000001/orders")
 				.then()
-				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
+				.statusCode(401);
+	}
+
+	@Test
+	void deferredPaymentRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.post("/api/payment")
+				.then()
+				.statusCode(404);
 	}
 
 	@Test
@@ -329,6 +379,45 @@ class ApiGatewayApplicationTests {
 				.get("/api/v1/users/me")
 				.then()
 				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
+	}
+
+	@Test
+	void shouldProtectBuyerAddressRoutes() {
+		RestAssured.given()
+				.when()
+				.get("/api/v1/users/me/addresses")
+				.then()
+				.statusCode(anyOf(equalTo(302), equalTo(401), equalTo(503)));
+	}
+
+	@Test
+	void deferredBuyerAddressRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/users/me/addresses")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void deferredAgentRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.post("/api/v1/agent/sessions")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void deferredCategoryGuidanceRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/admin/categories/01CATEGORY00000000000001/guidance")
+				.then()
+				.statusCode(404);
 	}
 
 	@Test

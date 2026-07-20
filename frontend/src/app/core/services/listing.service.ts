@@ -9,6 +9,8 @@ import {
   AdminListingRemoveRequest,
   BusinessStoreListingSearchPage,
   BusinessStoreListingSearchParams,
+  BusinessStoreItemSearchPage,
+  BusinessStoreItemSearchParams,
   Category,
   CreateListingDraftRequest,
   ListingEngagement,
@@ -119,6 +121,32 @@ export class ListingService {
     });
   }
 
+  searchBusinessStoreItems(
+    businessId: string,
+    params: BusinessStoreItemSearchParams = {},
+  ): Observable<BusinessStoreItemSearchPage> {
+    let httpParams = new HttpParams();
+    if (params.q?.trim()) {
+      httpParams = httpParams.set('q', params.q.trim());
+    }
+    if (params.status) {
+      httpParams = httpParams.set('status', params.status);
+    }
+    if (params.cursor?.trim()) {
+      httpParams = httpParams.set('cursor', params.cursor.trim());
+    }
+    if (params.limit !== null && params.limit !== undefined) {
+      httpParams = httpParams.set('limit', String(params.limit));
+    }
+    return this.http.get<BusinessStoreItemSearchPage>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/search`,
+      {
+        params: httpParams,
+        withCredentials: true,
+      },
+    );
+  }
+
   createBusinessStoreItem(businessId: string, request: CreateListingDraftRequest): Observable<ListingDraft> {
     return this.http.post<ListingDraft>(`${this.baseUrl}/businesses/${businessId}/store/items`, request, {
       withCredentials: true,
@@ -140,6 +168,39 @@ export class ListingService {
     return this.http.patch<ListingDraft>(
       `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}`,
       request,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
+  publishBusinessStoreItem(businessId: string, listingId: string, version: number): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/publish`,
+      null,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
+  pauseBusinessStoreItem(businessId: string, listingId: string, version: number): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/pause`,
+      null,
+      {
+        headers: { 'If-Match': String(version) },
+        withCredentials: true,
+      },
+    );
+  }
+
+  relistBusinessStoreItem(businessId: string, listingId: string, version: number): Observable<ListingDraft> {
+    return this.http.post<ListingDraft>(
+      `${this.baseUrl}/businesses/${businessId}/store/items/${listingId}/relist`,
+      null,
       {
         headers: { 'If-Match': String(version) },
         withCredentials: true,

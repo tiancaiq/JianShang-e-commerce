@@ -3,10 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterOutlet } from '@angular/router';
 import { take } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { CartService } from '../../core/services/cart.service';
 import { FloatingChatComponent } from '../../features/chat/floating-chat.component';
 import { MarketplaceNavbarComponent } from '../../features/marketplace/components/marketplace-navbar.component';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
+import { ToastService } from '../../core/services/toast.service';
 import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-marketplace-layout',
@@ -16,9 +19,9 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
     <div class="marketplace-shell" [class.account-dashboard-shell]="isAccountDashboardView()">
       <app-marketplace-navbar
         [authenticated]="authService.isAuthenticated()"
+        [cartCount]="cartEnabled ? cartService.count() : 0"
         [currentUser]="authService.user()"
         (loginRequested)="openAuthDialog()"
-        (logoutRequested)="authService.logout()"
         (searchRequested)="searchMarketplace($event)"
       />
 
@@ -329,6 +332,9 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
 })
 export class MarketplaceLayoutComponent implements OnInit {
   authService = inject(AuthService);
+  cartService = inject(CartService);
+  readonly cartEnabled = environment.features.cart;
+  private toastService = inject(ToastService);
   private router = inject(Router);
   authDialogOpen = signal(false);
   authDialogBusy = signal(false);
@@ -339,7 +345,17 @@ export class MarketplaceLayoutComponent implements OnInit {
   authDisplayName = '';
 
   ngOnInit(): void {
-    this.authService.ensureSession().subscribe();
+    this.showSignedOutConfirmation();
+    this.authService.ensureSession().subscribe(state => {
+      if (!this.cartEnabled) {
+        return;
+      }
+      if (state.authenticated) {
+        this.cartService.load().subscribe({ error: () => undefined });
+      } else {
+        this.cartService.reset();
+      }
+    });
   }
 
   openAuthDialog(): void {
@@ -471,5 +487,15 @@ export class MarketplaceLayoutComponent implements OnInit {
       return '/';
     }
     return url;
+  }
+
+  private showSignedOutConfirmation(): void {
+    const url = this.router.url || '';
+    if (!url.includes('signedOut=1')) {
+      return;
+    }
+    this.toastService.success('Signed out successfully');
+    const path = url.split(/[?#]/, 1)[0] || '/';
+    this.router.navigateByUrl(path, { replaceUrl: true });
   }
 }

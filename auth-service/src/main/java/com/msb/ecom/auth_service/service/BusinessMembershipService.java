@@ -14,6 +14,10 @@ import java.util.List;
 public class BusinessMembershipService {
 
     public static final String LISTING_DRAFT_CREATE = "LISTING_DRAFT_CREATE";
+    public static final String INVENTORY_VIEW = "INVENTORY_VIEW";
+    public static final String INVENTORY_MANAGE = "INVENTORY_MANAGE";
+    public static final String ORDER_VIEW = "ORDER_VIEW";
+    public static final String ORDER_FINANCE_VIEW = "ORDER_FINANCE_VIEW";
 
     private final AuthService authService;
     private final JdbcTemplate jdbcTemplate;
@@ -43,9 +47,20 @@ public class BusinessMembershipService {
                 .orElseThrow(BusinessMembershipNotFoundException::new);
     }
 
-    private List<String> permissionsFor(String role) {
+    // Keeps role-to-permission expansion in one Auth-owned policy boundary.
+    static List<String> permissionsFor(String role) {
         return switch (role) {
-            case "OWNER", "MANAGER" -> List.of(LISTING_DRAFT_CREATE);
+            case "OWNER" -> List.of(
+                    LISTING_DRAFT_CREATE,
+                    INVENTORY_VIEW,
+                    INVENTORY_MANAGE,
+                    ORDER_VIEW,
+                    ORDER_FINANCE_VIEW);
+            case "MANAGER" -> List.of(
+                    LISTING_DRAFT_CREATE,
+                    INVENTORY_VIEW,
+                    INVENTORY_MANAGE,
+                    ORDER_VIEW);
             default -> List.of();
         };
     }

@@ -21,6 +21,11 @@ public interface AuthServiceClient {
 
     AdminIdentityLabels lookupPublicSellerLabels(Set<String> userIds, Set<String> businessIds);
 
+    List<PublicBusinessStoreSearchResult> searchPublicBusinessStores(
+            String query,
+            Set<String> businessIds,
+            Set<String> storeIds);
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     record IndividualSellerAuthorization(
             String userId,
@@ -93,7 +98,22 @@ public interface AuthServiceClient {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record BusinessIdentityLabel(
             String id,
-            String legalName
+            String legalName,
+            String storeId,
+            String storeSlug,
+            String storeName,
+            String publicCity,
+            String publicRegion,
+            boolean verified
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record PublicBusinessStoreSearchResult(
+            String businessId,
+            String storeId,
+            String storeName,
+            String businessLegalName
     ) {
     }
 }

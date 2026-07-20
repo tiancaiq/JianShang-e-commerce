@@ -7,7 +7,7 @@ Status: complete.
 Separate buyer-facing public discovery into two UI surfaces:
 
 - individual marketplace
-- business stores
+- business item shopping
 
 This keeps individual trade browsing visually and semantically separate from
 business storefront browsing while still using one Angular app.
@@ -27,8 +27,9 @@ Rules:
 - `/` and `/marketplace` render the individual marketplace experience.
 - The marketplace page filters the current public listing feed to
   `sellerType=INDIVIDUAL`.
-- `/stores` renders a business-store browsing surface using current approved
-  public business listings grouped by safe seller display name.
+- `/stores` renders a business item browsing surface using current approved
+  public business listings as product cards with safe business seller display
+  metadata.
 - Public navigation now exposes `Marketplace`, `Stores`, and `Sell`.
 - Admin links remain hidden from public navigation.
 - V2 commerce concepts remain absent from active public navigation and store

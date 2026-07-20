@@ -1,6 +1,5 @@
-import { DecimalPipe } from '@angular/common';
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { DOCUMENT, DecimalPipe } from '@angular/common';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ChatMessage, ChatParticipantSummary, ConversationSummary } from '../../core/models/chat.model';
@@ -15,11 +14,13 @@ import {
   publicListingOwnerLabel,
 } from '../../shared/listing/public-listing-display';
 import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profile-card.component';
+import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import { toAgentListingSelection } from '../agent/agent-listing-context.model';
 
 @Component({
   selector: 'app-public-listing-detail',
   standalone: true,
-  imports: [DecimalPipe, FormsModule, ListingImageGalleryComponent, RouterLink, UserProfileCardComponent],
+  imports: [DecimalPipe, ListingImageGalleryComponent, RouterLink, UserProfileCardComponent],
   template: `
     <section class="listing-detail">
       @if (loading()) {
@@ -48,8 +49,11 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
                 <span class="category-tag">{{ listing()?.categoryName }}</span>
                 <span class="condition-tag">{{ conditionLabel(listing()?.condition || '') }}</span>
                 <strong class="seller-type-tag" [class.business]="listing()?.sellerType === 'BUSINESS'">
-                  {{ listing()?.sellerType === 'INDIVIDUAL' ? 'Individual seller' : 'Business seller' }}
+                  {{ listing()?.sellerType === 'INDIVIDUAL' ? 'Individual seller' : (listing()?.storeName || ownerLabel(listing())) }}
                 </strong>
+                @if (listing()?.sellerType === 'BUSINESS' && listing()?.businessVerified) {
+                  <span class="verified-tag">Verified business</span>
+                }
               </div>
 
               <h1>{{ listing()?.title }}</h1>
@@ -98,9 +102,24 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
                   <button class="message-button" type="button" [disabled]="startingConversation()" (click)="messageSeller()">
                     {{ messageButtonLabel() }}
                   </button>
+                  @if (canLaunchAgent()) {
+                    <div class="agent-help-launch">
+                      <button type="button" (click)="openAgentForListing()">
+                        <span>AI listing help</span>
+                        <strong>Ask AI about this listing</strong>
+                      </button>
+                      <small>Uses published listing details. Nothing is sent to the seller.</small>
+                    </div>
+                  }
                   @if (conversationError()) {
                     <p class="conversation-error">{{ conversationError() }}</p>
                   }
+                }
+              } @else {
+                @if (listing()?.storeSlug) {
+                  <a class="store-button" [routerLink]="['/stores', listing()?.storeSlug]">
+                    View {{ listing()?.storeName || 'store' }}
+                  </a>
                 }
               }
 
@@ -113,7 +132,7 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
                   </div>
                   <div>
                     <dt>Quantity</dt>
-                    <dd>{{ listing()?.quantity || 1 }} available</dd>
+                    <dd>Quantity listed: {{ listing()?.quantity || 1 }}</dd>
                   </div>
                   <div>
                     <dt>Seller</dt>
@@ -132,7 +151,18 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
               </aside>
             </article>
 
-            <app-user-profile-card class="seller-profile" [user]="sellerProfile()" [showSellAction]="false" />
+            @if (listing()?.sellerType === 'INDIVIDUAL') {
+              <app-user-profile-card class="seller-profile" [user]="sellerProfile()" [showSellAction]="false" />
+            } @else {
+              <aside class="store-profile" aria-label="Business store profile">
+                <span class="store-profile-label">Verified business</span>
+                <h2>{{ listing()?.storeName || ownerLabel(listing()) }}</h2>
+                <p>{{ locationLabel(listing()) }}</p>
+                @if (listing()?.storeSlug) {
+                  <a [routerLink]="['/stores', listing()?.storeSlug]">Open public store profile</a>
+                }
+              </aside>
+            }
           </div>
         </div>
 
@@ -152,7 +182,7 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
 
         @if (chatOpen() && conversation()) {
           <div class="chat-backdrop" (click)="closeChat()"></div>
-          <aside class="chat-drawer" role="dialog" aria-modal="true" aria-label="Listing chat">
+          <aside class="chat-drawer" role="dialog" aria-modal="true" aria-label="Listing chat" (click)="$event.stopPropagation()">
             <header class="chat-header">
               @if (conversation()?.listing?.thumbnailUrl) {
                 <img [src]="conversation()?.listing?.thumbnailUrl || ''" [alt]="conversation()?.listing?.title || 'Listing image'" />
@@ -181,17 +211,18 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
               }
             </section>
 
-            <form class="chat-composer" (ngSubmit)="sendChatMessage()">
+            <form class="chat-composer" (submit)="sendChatMessage($event)">
               <textarea
+                #messageBodyInput
                 name="messageBody"
                 maxlength="2000"
                 rows="3"
-                [ngModel]="messageDraft()"
-                (ngModelChange)="messageDraft.set($event)"
+                [value]="messageDraft()"
+                (input)="messageDraft.set(messageBodyInput.value)"
                 placeholder="Write a message"></textarea>
               <div class="chat-compose-actions">
                 <span>{{ messageDraft().length }}/2000</span>
-                <button type="submit" [disabled]="sendingMessage() || !messageDraft().trim()">
+                <button type="submit" [disabled]="sendingMessage() || !messageDraft().trim()" (click)="$event.stopPropagation()">
                   {{ sendingMessage() ? 'Sending...' : 'Send' }}
                 </button>
               </div>
@@ -279,6 +310,35 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
       display: block;
     }
 
+    .store-profile {
+      display: grid;
+      gap: 0.55rem;
+      padding: 1rem;
+      border: 1px solid rgba(56, 168, 149, 0.24);
+      border-radius: 8px;
+      background: #f5fcfa;
+    }
+
+    .store-profile-label,
+    .verified-tag {
+      color: #246558;
+      font-size: 0.75rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .store-profile p {
+      margin: 0;
+      color: var(--market-muted);
+      font-weight: 750;
+    }
+
+    .store-profile a {
+      color: var(--market-accent-dark);
+      font-weight: 900;
+      text-underline-offset: 3px;
+    }
+
     .badge-row,
     .price-line {
       display: flex;
@@ -295,6 +355,7 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
     .category-tag,
     .condition-tag,
     .seller-type-tag,
+    .verified-tag,
     .negotiable-pill {
       min-height: 28px;
       display: inline-flex;
@@ -492,22 +553,77 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
       display: none;
     }
 
-    .message-button {
+    .message-button,
+    .store-button {
       min-height: 48px;
-      border: 0;
-      border-radius: 999px;
-      background: linear-gradient(135deg, #ff79b8, #8b6fe8);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--market-accent-dark);
+      border-radius: 8px;
+      background: var(--market-accent-dark);
       color: #fff;
       cursor: pointer;
       font: inherit;
       font-weight: 900;
       padding: 0.75rem 1rem;
       box-shadow: 0 14px 26px rgba(190, 58, 131, 0.2);
+      text-decoration: none;
     }
 
     .message-button:disabled {
       cursor: wait;
       opacity: 0.68;
+    }
+
+    .agent-help-launch {
+      display: grid;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .agent-help-launch button {
+      min-width: 0;
+      min-height: 54px;
+      display: grid;
+      justify-items: start;
+      gap: 0.12rem;
+      border: 1px solid rgba(190, 47, 118, 0.3);
+      border-left: 4px solid #f7b84b;
+      border-radius: 8px;
+      background: #fffafd;
+      color: var(--market-ink);
+      cursor: pointer;
+      font: inherit;
+      padding: 0.62rem 0.8rem;
+      text-align: left;
+    }
+
+    .agent-help-launch button:focus-visible {
+      outline: 2px solid rgba(190, 47, 118, 0.3);
+      outline-offset: 2px;
+    }
+
+    .agent-help-launch button span {
+      color: var(--market-accent-dark);
+      font-size: 0.65rem;
+      font-weight: 950;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .agent-help-launch button strong {
+      overflow-wrap: anywhere;
+      font-size: 0.82rem;
+      font-weight: 950;
+    }
+
+    .agent-help-launch small {
+      color: var(--market-muted);
+      font-size: 0.68rem;
+      font-weight: 750;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
     }
 
     .conversation-message,
@@ -529,7 +645,7 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
     .chat-backdrop {
       position: fixed;
       inset: 0;
-      z-index: 40;
+      z-index: 120;
       background: rgba(42, 26, 50, 0.18);
     }
 
@@ -537,7 +653,7 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
       position: fixed;
       right: 1.25rem;
       bottom: 1.25rem;
-      z-index: 41;
+      z-index: 121;
       width: min(390px, calc(100vw - 2rem));
       max-height: min(680px, calc(100vh - 2rem));
       display: grid;
@@ -813,12 +929,14 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
     }
   `],
 })
-export class PublicListingDetailComponent implements OnInit {
+export class PublicListingDetailComponent implements OnDestroy, OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly listingService = inject(ListingService);
   private readonly chatService = inject(ChatService);
   private readonly authService = inject(AuthService);
+  private readonly document = inject(DOCUMENT);
+  readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
 
   listing = signal<PublicListing | null>(null);
   loading = signal(false);
@@ -865,6 +983,10 @@ export class PublicListingDetailComponent implements OnInit {
     return publicListingConditionLabel(condition);
   }
 
+  ngOnDestroy(): void {
+    this.setListingChatDialogOpen(false);
+  }
+
   locationLabel(listing: PublicListing | null): string {
     return publicListingLocationLabel(listing, 'Not set');
   }
@@ -900,7 +1022,7 @@ export class PublicListingDetailComponent implements OnInit {
       return '';
     }
     if (listing.sellerType === 'BUSINESS') {
-      return 'Business listings are view-only in the MVP. Purchase flows are not available yet.';
+      return 'Quantity shown is catalog information only. Purchasing tools are not available in MVP.';
     }
     return 'Payment and delivery are arranged directly between users. Meet in public and avoid sharing private addresses.';
   }
@@ -957,6 +1079,7 @@ export class PublicListingDetailComponent implements OnInit {
         next: conversation => {
           this.conversation.set(conversation);
           this.chatOpen.set(true);
+          this.setListingChatDialogOpen(true);
           this.loadMessages(conversation.id);
         },
         error: error => {
@@ -970,11 +1093,38 @@ export class PublicListingDetailComponent implements OnInit {
       });
   }
 
-  closeChat(): void {
-    this.chatOpen.set(false);
+  canLaunchAgent(): boolean {
+    return this.aiAssistantEnabled
+      && this.authService.isAuthenticated()
+      && this.listing()?.sellerType === 'INDIVIDUAL';
   }
 
-  sendChatMessage(): void {
+  /** Opens the authenticated Agent route with only public, display-safe listing context. */
+  openAgentForListing(): void {
+    const listing = this.listing();
+    if (!this.canLaunchAgent() || !listing) {
+      return;
+    }
+    const selection = toAgentListingSelection(listing.id, listing.title);
+    if (!selection) {
+      return;
+    }
+    void this.router.navigate(['/account/messages/agent'], {
+      queryParams: {
+        listingId: selection.listingId,
+        title: selection.title,
+      },
+    });
+  }
+
+  closeChat(): void {
+    this.chatOpen.set(false);
+    this.setListingChatDialogOpen(false);
+  }
+
+  sendChatMessage(event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
     const conversation = this.conversation();
     const body = this.messageDraft().trim();
     if (!conversation || !body || this.sendingMessage()) {
@@ -1043,6 +1193,10 @@ export class PublicListingDetailComponent implements OnInit {
     this.visitCount.set(engagement.visitCount);
     this.likeCount.set(engagement.likeCount);
     this.likedByMe.set(engagement.likedByMe);
+  }
+
+  private setListingChatDialogOpen(open: boolean): void {
+    this.document.body.classList.toggle('listing-chat-dialog-open', open);
   }
 
   private conversationErrorMessage(error: { status?: number; error?: { error?: { code?: string } } }): string {

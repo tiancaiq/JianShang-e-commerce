@@ -14,6 +14,7 @@ export interface ChatListingSummary {
 export interface ChatParticipantSummary {
   participantId: string;
   displayName: string;
+  publicHandle?: string | null;
   avatarUrl: string | null;
   initials: string;
   roleInConversation: 'BUYER' | 'SELLER';

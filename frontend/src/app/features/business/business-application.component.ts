@@ -6,6 +6,8 @@ import { BusinessApplicationService } from '../../core/services/business-applica
 import { ToastService } from '../../core/services/toast.service';
 import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
 
+type ApplicationTimelineState = 'complete' | 'current' | 'pending' | 'rejected';
+
 @Component({
   selector: 'app-business-application',
   standalone: true,
@@ -31,6 +33,14 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
         <section class="success-panel">
           <h2>{{ applicationTitle() }}</h2>
           <p class="status-copy">{{ applicationDescription() }}</p>
+          <ol class="application-timeline" aria-label="Business application progress">
+            @for (step of applicationTimeline(); track step.label) {
+              <li [class]="'timeline-' + step.state" [attr.aria-current]="step.state === 'current' || step.state === 'rejected' ? 'step' : null">
+                <span aria-hidden="true"></span>
+                <strong>{{ step.label }}</strong>
+              </li>
+            }
+          </ol>
           <dl>
             <div>
               <dt>Legal name</dt>
@@ -351,6 +361,74 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       line-height: 1.5;
     }
 
+    .application-timeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      margin: 0 0 1.25rem;
+      padding: 0;
+      list-style: none;
+    }
+
+    .application-timeline li {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      gap: 0.45rem;
+      color: var(--color-text-muted);
+      font-size: 0.72rem;
+      text-align: center;
+    }
+
+    .application-timeline li::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--color-border);
+      z-index: 0;
+    }
+
+    .application-timeline li:first-child::before {
+      left: 50%;
+    }
+
+    .application-timeline li:last-child::before {
+      right: 50%;
+    }
+
+    .application-timeline li span {
+      position: relative;
+      z-index: 1;
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--color-border);
+      border-radius: 50%;
+      background: var(--color-bg-secondary);
+    }
+
+    .application-timeline .timeline-complete,
+    .application-timeline .timeline-current {
+      color: var(--color-text-primary);
+    }
+
+    .application-timeline .timeline-complete span,
+    .application-timeline .timeline-current span {
+      border-color: var(--color-accent);
+      background: var(--color-accent);
+    }
+
+    .application-timeline .timeline-rejected {
+      color: var(--color-danger);
+    }
+
+    .application-timeline .timeline-rejected span {
+      border-color: var(--color-danger);
+      background: var(--color-danger);
+    }
+
     .success-panel dl {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -372,6 +450,36 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       .form-grid,
       .success-panel dl {
         grid-template-columns: 1fr;
+      }
+
+      .application-timeline {
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+      }
+
+      .application-timeline li {
+        grid-template-columns: 18px minmax(0, 1fr);
+        justify-items: start;
+        text-align: left;
+      }
+
+      .application-timeline li::before {
+        top: -0.6rem;
+        bottom: -0.6rem;
+        left: 8px;
+        right: auto;
+        width: 2px;
+        height: auto;
+      }
+
+      .application-timeline li:first-child::before {
+        top: 8px;
+        left: 8px;
+      }
+
+      .application-timeline li:last-child::before {
+        right: auto;
+        bottom: calc(100% - 8px);
       }
 
       .actions {
@@ -565,6 +673,23 @@ export class BusinessApplicationComponent implements OnInit {
     }
   }
 
+  applicationTimeline(): Array<{ label: string; state: ApplicationTimelineState }> {
+    const status = this.application()?.status || 'DRAFT';
+    const currentIndex = switchTimelineIndex(status);
+    const failedIndex = status === 'VERIFICATION_FAILED' ? 2 : status === 'REJECTED' ? 4 : -1;
+    const labels = ['Draft', 'Submitted', 'Verification', 'Admin review', status === 'REJECTED' ? 'Rejected' : 'Approved'];
+    return labels.map((label, index) => ({
+      label,
+      state: index === failedIndex
+        ? 'rejected'
+        : index < currentIndex
+          ? 'complete'
+          : index === currentIndex
+            ? 'current'
+            : 'pending',
+    }));
+  }
+
   private validate(): boolean {
     if (!this.legalName.trim()) {
       this.errorMsg.set('Legal business name is required.');
@@ -628,5 +753,24 @@ export class BusinessApplicationComponent implements OnInit {
     }
     const countryCode = this.contactPhoneCountryCode.trim();
     return `${countryCode}${digits}`;
+  }
+}
+
+function switchTimelineIndex(status: string): number {
+  switch (status) {
+    case 'DRAFT':
+      return 0;
+    case 'PENDING_VERIFICATION':
+      return 2;
+    case 'VERIFICATION_FAILED':
+      return 2;
+    case 'UNDER_REVIEW':
+    case 'INFORMATION_REQUESTED':
+      return 3;
+    case 'APPROVED':
+    case 'REJECTED':
+      return 4;
+    default:
+      return 1;
   }
 }

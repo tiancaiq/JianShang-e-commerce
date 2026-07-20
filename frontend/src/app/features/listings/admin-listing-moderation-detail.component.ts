@@ -160,6 +160,7 @@ import { ToastService } from '../../core/services/toast.service';
                 <label>
                   <span>Decision</span>
                   <select name="decision" [(ngModel)]="decision" [disabled]="saving()">
+                    <option value="">Select decision</option>
                     <option value="APPROVE">Approve</option>
                     <option value="REJECT">Reject</option>
                     <option value="REQUEST_CHANGES">Request changes</option>
@@ -563,7 +564,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
   readonly activeActionErrorMsg = signal('');
 
   readonly conditionOptions: ListingCondition[] = ['NEW', 'OPEN_BOX', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS'];
-  decision: ListingModerationDecision = 'APPROVE';
+  decision: ListingModerationDecision | '' = '';
   reason = '';
   activeEdit = {
     categoryId: '',
@@ -614,6 +615,11 @@ export class AdminListingModerationDetailComponent implements OnInit {
       return;
     }
 
+    if (!this.decision) {
+      this.decisionErrorMsg.set('Select a decision before resolving this case.');
+      return;
+    }
+
     const reason = this.reason.trim();
     if (!reason) {
       this.decisionErrorMsg.set('Decision reason is required.');
@@ -636,6 +642,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
         this.populateActiveEdit(detail);
         this.saving.set(false);
         this.reason = '';
+        this.decision = '';
         this.toastService.success('Listing moderation case resolved.');
       },
       error: error => {

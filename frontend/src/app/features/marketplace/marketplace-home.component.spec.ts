@@ -1,6 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { ListingService } from '../../core/services/listing.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -161,9 +161,10 @@ describe('MarketplaceHomeComponent public browse regression', () => {
     expect(fixture.nativeElement.textContent).toContain('HTTP 503');
   });
 
-  it('sends marketplace filter controls to backend search', () => {
+  it('sends marketplace filter controls to backend search and stores them in the URL', async () => {
     fixture.detectChanges();
     listingService.searchMarketplaceListings.calls.reset();
+    const router = TestBed.inject(Router);
 
     component.searchTerm = 'bike';
     component.selectedCondition = 'GOOD';
@@ -185,6 +186,12 @@ describe('MarketplaceHomeComponent public browse regression', () => {
       sort: 'price_asc',
       cursor: null,
     });
+    await fixture.whenStable();
+    expect(router.url).toContain('q=bike');
+    expect(router.url).toContain(`categoryId=${category.id}`);
+    expect(router.url).toContain('condition=GOOD');
+    expect(router.url).toContain('sort=price_asc');
+    expect(router.url).toContain('city=Irvine');
   });
 
   it('handles numeric price inputs from browser number controls', () => {

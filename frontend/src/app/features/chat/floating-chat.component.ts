@@ -1,16 +1,19 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ChatListingSummary, ChatMessage, ConversationListItem, ConversationSummary } from '../../core/models/chat.model';
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
+import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-service-thread.component';
 
 @Component({
   selector: 'app-floating-chat',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink],
+  imports: [AgentCustomerServiceThreadComponent, DatePipe, FormsModule, RouterLink],
   template: `
     @if (authService.isAuthenticated()) {
       <div class="floating-chat" [class.open]="open()">
@@ -36,20 +39,22 @@ import { ChatService } from '../../core/services/chat.service';
                     (ngModelChange)="conversationQuery.set($event)">
                 </label>
 
-                <button
-                  type="button"
-                  class="conversation-row agent-row"
-                  [class.active]="agentSelected()"
-                  (click)="showAgentPlaceholder()">
-                  <span class="avatar-initials agent-initials">AI</span>
-                  <span class="conversation-copy">
-                    <span class="row-title">
-                      <strong>Marketplace agent</strong>
-                      <small>Coming soon</small>
+                @if (aiAssistantEnabled) {
+                  <button
+                    type="button"
+                    class="conversation-row agent-row"
+                    [class.active]="agentSelected()"
+                    (click)="showAgent()">
+                    <span class="avatar-initials agent-initials">AI</span>
+                    <span class="conversation-copy">
+                      <span class="row-title">
+                        <strong>Marketplace agent</strong>
+                        <small>AI assistant</small>
+                      </span>
+                      <span class="row-preview">Ask about a listing</span>
                     </span>
-                    <span class="row-preview">Chat with an agent</span>
-                  </span>
-                </button>
+                  </button>
+                }
 
                 @if (loadingConversations()) {
                   <div class="chat-empty list-empty">Loading conversations...</div>
@@ -88,7 +93,7 @@ import { ChatService } from '../../core/services/chat.service';
                           <strong>{{ conversation.otherParticipant.displayName }}</strong>
                           <time>{{ conversationTime(conversation) }}</time>
                         </span>
-                        <small>{{ listingTitle(conversation.listing) }}</small>
+                        <small>{{ participantHandle(conversation.otherParticipant) }} · {{ listingTitle(conversation.listing) }}</small>
                         <span class="row-preview">{{ preview(conversation) }}</span>
                       </span>
                       @if (conversation.unread) {
@@ -128,6 +133,13 @@ import { ChatService } from '../../core/services/chat.service';
                     Safety note: Payment and delivery are arranged directly between users. Meet in public.
                   </section>
 
+                  <ol class="trade-progress" aria-label="Trade completion status">
+                    <li [class.current]="completionStage() === 0" [class.complete]="completionStage() > 0">Discussing</li>
+                    <li [class.current]="completionStage() === 1" [class.complete]="completionStage() > 1">Seller done</li>
+                    <li [class.current]="completionStage() === 2" [class.complete]="completionStage() > 2">Awaiting buyer</li>
+                    <li [class.current]="completionStage() === 3">Completed</li>
+                  </ol>
+
                   @if (activeConversation()?.completion?.currentUserCanMarkDone) {
                     <section class="trade-card">
                       <div>
@@ -156,10 +168,28 @@ import { ChatService } from '../../core/services/chat.service';
                         <span>{{ completionStatusText() }}</span>
                       </div>
                       @if (activeConversation()?.completion?.currentUserCanConfirm) {
+                        <button type="button" [disabled]="completionActionLoading()" (click)="openConfirmationReview()">
+                          Review
+                        </button>
+                      }
+                    </section>
+                  }
+
+                  @if (confirmationReviewOpen() && activeConversation()?.completion?.currentUserCanConfirm) {
+                    <section class="confirmation-review" aria-label="Review trade confirmation">
+                      <strong>Confirm this handoff</strong>
+                      <dl>
+                        <div><dt>Item</dt><dd>{{ activeConversation()?.listing?.title }}</dd></div>
+                        <div><dt>Qty</dt><dd>{{ activeConversation()?.completion?.quantitySold || 1 }}</dd></div>
+                        <div><dt>Seller</dt><dd>{{ sellerLabel() }} <small>{{ sellerHandle() }}</small></dd></div>
+                      </dl>
+                      <p>Payment happened off-platform. MSB Commerce does not verify or protect that payment.</p>
+                      <div class="review-actions">
+                        <button type="button" class="secondary" (click)="confirmationReviewOpen.set(false)">Back</button>
                         <button type="button" [disabled]="completionActionLoading()" (click)="confirmCompleted()">
                           {{ completionActionLoading() ? 'Confirming...' : 'Confirm completed' }}
                         </button>
-                      }
+                      </div>
                     </section>
                   }
 
@@ -181,27 +211,34 @@ import { ChatService } from '../../core/services/chat.service';
                     }
                   </section>
 
-                  <form class="composer" (ngSubmit)="sendMessage()">
-                    <textarea
-                      name="floatingMessageBody"
-                      rows="2"
-                      maxlength="2000"
-                      [ngModel]="draft()"
-                      (ngModelChange)="draft.set($event)"
-                      placeholder="Write a message..."></textarea>
-                    <div class="composer-actions">
-                      <span>{{ draft().length }}/2000</span>
-                      <button type="submit" [disabled]="sending() || !draft().trim()">
-                        {{ sending() ? 'Sending...' : 'Send' }}
-                      </button>
-                    </div>
-                  </form>
-                } @else if (agentSelected()) {
-                  <div class="thread-placeholder agent-placeholder">
-                    <span class="agent-large-icon">AI</span>
-                    <strong>Marketplace agent is coming soon</strong>
-                    <span>Buyer and seller messages are ready now. Agent chat will be added in a later slice.</span>
-                  </div>
+                  @if (conversationReadOnly()) {
+                    <footer class="completed-footer">
+                      <span><strong>Completed</strong> · Read-only</span>
+                      @if (currentUserIsSeller()) {
+                        <a routerLink="/account/listings" (click)="close()">Listing history</a>
+                      }
+                    </footer>
+                  } @else {
+                    <form class="composer" (ngSubmit)="sendMessage()">
+                      <textarea
+                        name="floatingMessageBody"
+                        rows="2"
+                        maxlength="2000"
+                        [ngModel]="draft()"
+                        (ngModelChange)="draft.set($event)"
+                        placeholder="Write a message..."></textarea>
+                      <div class="composer-actions">
+                        <span>{{ draft().length }}/2000</span>
+                        <button type="submit" [disabled]="sending() || !draft().trim()">
+                          {{ sending() ? 'Sending...' : 'Send' }}
+                        </button>
+                      </div>
+                    </form>
+                  }
+                } @else if (aiAssistantEnabled && agentSelected()) {
+                  <app-agent-customer-service-thread
+                    [compact]="true"
+                    (closeRequested)="close()" />
                 } @else {
                   <div class="thread-placeholder">
                     <strong>Select a conversation</strong>
@@ -232,6 +269,10 @@ import { ChatService } from '../../core/services/chat.service';
       bottom: 1.25rem;
       z-index: 80;
       color: var(--market-ink);
+    }
+
+    :host-context(body.listing-chat-dialog-open) .floating-chat {
+      display: none;
     }
 
     .chat-launcher {
@@ -587,6 +628,30 @@ import { ChatService } from '../../core/services/chat.service';
       padding: 0.56rem 0.65rem;
     }
 
+    .trade-progress {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      flex-shrink: 0;
+      margin: 0.65rem 0.85rem 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .trade-progress li {
+      border-top: 3px solid var(--market-line);
+      color: var(--market-muted);
+      font-size: 0.58rem;
+      font-weight: 900;
+      padding: 0.34rem 0.12rem 0;
+      text-align: center;
+    }
+
+    .trade-progress li.complete,
+    .trade-progress li.current {
+      border-color: var(--market-accent-dark);
+      color: var(--market-accent-dark);
+    }
+
     .trade-card,
     .completion-status {
       display: grid;
@@ -609,6 +674,92 @@ import { ChatService } from '../../core/services/chat.service';
     .completion-status.done {
       border-color: rgba(42, 168, 135, 0.22);
       background: #f7fff7;
+    }
+
+    .confirmation-review {
+      flex-shrink: 0;
+      margin: 0.65rem 0.85rem 0;
+      border: 1px solid rgba(190, 47, 118, 0.28);
+      border-radius: 8px;
+      background: #fff8fc;
+      padding: 0.65rem;
+    }
+
+    .confirmation-review dl {
+      display: grid;
+      grid-template-columns: 1.6fr 0.5fr 1.3fr;
+      gap: 0.35rem;
+      margin: 0.5rem 0;
+    }
+
+    .confirmation-review dl div {
+      border: 1px solid var(--market-line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 0.38rem;
+    }
+
+    .confirmation-review dt,
+    .confirmation-review p {
+      color: var(--market-muted);
+      font-size: 0.62rem;
+      font-weight: 850;
+    }
+
+    .confirmation-review dd {
+      margin: 0.12rem 0 0;
+      font-size: 0.68rem;
+      font-weight: 900;
+    }
+
+    .confirmation-review dd small {
+      color: var(--market-accent-dark);
+    }
+
+    .confirmation-review p {
+      margin: 0 0 0.5rem;
+      line-height: 1.35;
+    }
+
+    .review-actions,
+    .completed-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .review-actions button,
+    .completed-footer a {
+      min-height: 32px;
+      display: inline-flex;
+      align-items: center;
+      border: 0;
+      border-radius: 8px;
+      background: var(--market-accent-dark);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.68rem;
+      font-weight: 900;
+      padding: 0 0.58rem;
+      text-decoration: none;
+    }
+
+    .review-actions button.secondary {
+      border: 1px solid var(--market-line);
+      background: #fff;
+      color: var(--market-muted);
+    }
+
+    .completed-footer {
+      flex-shrink: 0;
+      border-top: 1px solid var(--market-line);
+      background: #f7fff7;
+      color: #286c59;
+      font-size: 0.7rem;
+      font-weight: 850;
+      padding: 0.58rem 0.75rem;
     }
 
     .trade-card strong,
@@ -881,7 +1032,8 @@ import { ChatService } from '../../core/services/chat.service';
 
       .thread-listing,
       .trade-card,
-      .completion-status {
+      .completion-status,
+      .confirmation-review dl {
         align-items: stretch;
         grid-template-columns: 1fr;
       }
@@ -902,9 +1054,11 @@ import { ChatService } from '../../core/services/chat.service';
 })
 export class FloatingChatComponent {
   readonly defaultNotice = 'Payment and delivery are arranged directly by participants.';
+  readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
 
   readonly authService = inject(AuthService);
   private readonly chatService = inject(ChatService);
+  private readonly locallyReadConversationIds = new Set<string>();
 
   open = signal(false);
   conversations = signal<ConversationListItem[]>([]);
@@ -919,6 +1073,7 @@ export class FloatingChatComponent {
   sending = signal(false);
   completionActionLoading = signal(false);
   completionQuantity = signal(1);
+  confirmationReviewOpen = signal(false);
 
   unreadCount = computed(() => this.conversations().filter(conversation => conversation.unread).length);
 
@@ -938,6 +1093,10 @@ export class FloatingChatComponent {
   });
 
   constructor() {
+    this.chatService.conversationRead$
+      .pipe(takeUntilDestroyed())
+      .subscribe(conversationId => this.markConversationReadLocally(conversationId, false));
+
     effect(() => {
       if (this.authService.isAuthenticated()) {
         this.refreshConversations();
@@ -969,19 +1128,27 @@ export class FloatingChatComponent {
     this.messages.set([]);
     this.draft.set('');
     this.completionQuantity.set(1);
+    this.confirmationReviewOpen.set(false);
   }
 
-  showAgentPlaceholder(): void {
+  /** Opens only the separate Agent thread; buyer/seller chat state is cleared, never reused. */
+  showAgent(): void {
+    if (!this.aiAssistantEnabled) {
+      return;
+    }
     this.activeConversation.set(null);
     this.agentSelected.set(true);
     this.messages.set([]);
     this.draft.set('');
     this.completionQuantity.set(1);
+    this.confirmationReviewOpen.set(false);
   }
 
   openConversation(conversationId: string): void {
     this.agentSelected.set(false);
     this.loadingThread.set(true);
+    this.confirmationReviewOpen.set(false);
+    this.markConversationReadLocally(conversationId);
     this.chatService.getConversation(conversationId).subscribe({
       next: conversation => {
         this.activeConversation.set(conversation);
@@ -998,7 +1165,7 @@ export class FloatingChatComponent {
   sendMessage(): void {
     const conversation = this.activeConversation();
     const body = this.draft().trim();
-    if (!conversation || !body || this.sending()) {
+    if (!conversation || !body || this.sending() || this.conversationReadOnly()) {
       return;
     }
     this.sending.set(true);
@@ -1028,7 +1195,8 @@ export class FloatingChatComponent {
 
   confirmCompleted(): void {
     const conversation = this.activeConversation();
-    if (!conversation || !conversation.completion?.currentUserCanConfirm || this.completionActionLoading()) {
+    if (!conversation || !conversation.completion?.currentUserCanConfirm
+      || !this.confirmationReviewOpen() || this.completionActionLoading()) {
       return;
     }
     this.completionActionLoading.set(true);
@@ -1144,6 +1312,49 @@ export class FloatingChatComponent {
     return '';
   }
 
+  openConfirmationReview(): void {
+    if (this.activeConversation()?.completion?.currentUserCanConfirm) {
+      this.confirmationReviewOpen.set(true);
+    }
+  }
+
+  completionStage(): number {
+    const status = this.activeConversation()?.completion?.status;
+    if (status === 'BUYER_CONFIRMED') {
+      return 3;
+    }
+    if (status === 'SELLER_MARKED_DONE') {
+      return 2;
+    }
+    return 0;
+  }
+
+  conversationReadOnly(): boolean {
+    return this.activeConversation()?.completion?.status === 'BUYER_CONFIRMED';
+  }
+
+  sellerLabel(): string {
+    return this.activeConversation()?.participants
+      .find(participant => participant.roleInConversation === 'SELLER')?.displayName || 'Marketplace seller';
+  }
+
+  currentUserIsSeller(): boolean {
+    return this.activeConversation()?.participants
+      .some(participant => participant.currentUser && participant.roleInConversation === 'SELLER') || false;
+  }
+
+  sellerHandle(): string {
+    const participant = this.activeConversation()?.participants
+      .find(item => item.roleInConversation === 'SELLER');
+    return this.participantHandle(participant);
+  }
+
+  participantHandle(participant: { participantId: string; publicHandle?: string | null } | null | undefined): string {
+    const handle = participant?.publicHandle?.trim()
+      || `member-${participant?.participantId?.slice(-8).toLowerCase() || 'unknown'}`;
+    return `@${handle.replace(/^@/, '')}`;
+  }
+
   normalizeQuantityInput(value: unknown): number {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed < 1) {
@@ -1158,7 +1369,7 @@ export class FloatingChatComponent {
     this.chatService.getConversations(null, 20)
       .pipe(finalize(() => this.loadingConversations.set(false)))
       .subscribe({
-        next: page => this.conversations.set(page.items),
+        next: page => this.conversations.set(this.applyLocalReadState(page.items)),
         error: () => {
           this.conversations.set([]);
           this.conversationError.set(true);
@@ -1181,14 +1392,32 @@ export class FloatingChatComponent {
       });
   }
 
-  private markConversationReadLocally(conversationId: string): void {
+  private markConversationReadLocally(conversationId: string, notify = true): void {
+    this.locallyReadConversationIds.add(conversationId);
     this.conversations.update(conversations => conversations.map(conversation => (
       conversation.id === conversationId ? { ...conversation, unread: false } : conversation
     )));
+    if (notify) {
+      this.chatService.notifyConversationRead(conversationId);
+    }
+  }
+
+  private applyLocalReadState(conversations: ConversationListItem[]): ConversationListItem[] {
+    if (!this.locallyReadConversationIds.size) {
+      return conversations;
+    }
+    return conversations.map(conversation => (
+      this.locallyReadConversationIds.has(conversation.id) ? { ...conversation, unread: false } : conversation
+    ));
   }
 
   private applyCompletion(completion: ConversationSummary['completion']): void {
-    this.activeConversation.update(conversation => conversation ? { ...conversation, completion } : conversation);
+    this.confirmationReviewOpen.set(false);
+    this.activeConversation.update(conversation => conversation ? {
+      ...conversation,
+      status: completion?.status === 'BUYER_CONFIRMED' ? 'LOCKED' : conversation.status,
+      completion,
+    } : conversation);
   }
 
   private quantityLabel(quantity: number | null | undefined): string {

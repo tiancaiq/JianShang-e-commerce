@@ -2,6 +2,7 @@ export type ListingSellerType = 'INDIVIDUAL' | 'BUSINESS';
 export type ListingCondition = 'NEW' | 'OPEN_BOX' | 'LIKE_NEW' | 'GOOD' | 'FAIR' | 'FOR_PARTS';
 export type ListingMediaUploadStatus = 'PENDING_UPLOAD' | 'UPLOADED' | 'FAILED';
 export type ListingMediaModerationStatus = 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+export type ListingPublicationSource = 'ADMIN_REVIEW' | 'BUSINESS_SELF_PUBLISHED';
 export type ListingModerationDecision = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
 export type ListingModerationHistoryDecision = ListingModerationDecision | 'ADMIN_EDIT' | 'ADMIN_REMOVE';
 export type ListingModerationCaseFilter = 'open' | 'unassigned' | 'assigned_to_me' | 'resolved';
@@ -80,6 +81,9 @@ export interface ListingDraft {
   businessId: string | null;
   storeId?: string | null;
   sellerDisplayName?: string | null;
+  storeSlug?: string | null;
+  storeName?: string | null;
+  businessVerified?: boolean;
   categoryId: string;
   title: string;
   description: string;
@@ -94,10 +98,41 @@ export interface ListingDraft {
   publicRegion: string | null;
   status: string;
   moderationStatus: string;
+  publicationSource: ListingPublicationSource | null;
+  publishedAt: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
+  moderationAction?: string | null;
+  moderationReason?: string | null;
+  moderationActionAt?: string | null;
   images?: ListingImage[];
+}
+
+export type BusinessStoreItemManagementStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'REMOVED_BY_ADMIN';
+
+export interface BusinessStoreItemSearchParams {
+  q?: string | null;
+  status?: BusinessStoreItemManagementStatus | null;
+  cursor?: string | null;
+  limit?: number | null;
+}
+
+export interface BusinessStoreItemStatusSummary {
+  total: number;
+  draft: number;
+  active: number;
+  paused: number;
+  removed: number;
+}
+
+export interface BusinessStoreItemSearchPage {
+  data: ListingDraft[];
+  page: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+  summary: BusinessStoreItemStatusSummary;
 }
 
 export interface ListingMediaUploadRequest {
@@ -193,6 +228,10 @@ export interface PublicListing {
   sellerType: ListingSellerType;
   sellerDisplayName?: string | null;
   sellerAvatarUrl?: string | null;
+  storeId?: string | null;
+  storeSlug?: string | null;
+  storeName?: string | null;
+  businessVerified?: boolean;
   categoryId: string;
   categorySlug: string;
   categoryName: string;

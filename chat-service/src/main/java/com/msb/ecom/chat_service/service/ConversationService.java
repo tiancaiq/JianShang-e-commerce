@@ -164,6 +164,11 @@ public class ConversationService {
         if (!"OPEN".equals(conversation.status())) {
             throw new ChatMessageValidationException("Conversation is not open for messages.");
         }
+        CompletionRecord completion = conversationRepository.findCompletionByConversationId(normalizedConversationId)
+                .orElse(null);
+        if (completion != null && "BUYER_CONFIRMED".equals(completion.status())) {
+            throw new ChatMessageValidationException("Completed conversations are read-only.");
+        }
         validateMessageRequest(request);
         Instant now = Instant.now();
         MessageRecord message = conversationRepository.insertTextMessage(
@@ -251,6 +256,7 @@ public class ConversationService {
             throw new ChatCompletionNotAllowedException("This completion has been cancelled.");
         }
         if ("BUYER_CONFIRMED".equals(completion.status())) {
+            conversationRepository.lockConversation(conversation.id(), Instant.now());
             return toCompletionResponse(completion, conversation, actor.userId(), true);
         }
         if (!"SELLER_MARKED_DONE".equals(completion.status())) {
@@ -264,6 +270,7 @@ public class ConversationService {
                 confirmed.sellerUserId(),
                 confirmed.buyerUserId(),
                 confirmed.quantitySold());
+        conversationRepository.lockConversation(conversation.id(), Instant.now());
         log.info("Buyer confirmed listing completion completionId={} listingId={} conversationId={} quantitySold={}",
                 confirmed.id(), confirmed.listingId(), confirmed.conversationId(), confirmed.quantitySold());
         return toCompletionResponse(confirmed, conversation, actor.userId(), true);
@@ -558,9 +565,11 @@ public class ConversationService {
         ChatAuthClient.UserLabel label = labels.get(userId);
         String displayName = currentUser ? "You" : displayName(role, label);
         String avatarUrl = label == null ? null : label.avatarUrl();
+        String publicHandle = label == null ? fallbackHandle(userId) : label.publicHandle();
         return new ChatParticipantSummary(
                 userId,
                 displayName,
+                publicHandle,
                 avatarUrl,
                 initials(displayName),
                 role,
@@ -572,6 +581,11 @@ public class ConversationService {
             return label.displayName().trim();
         }
         return "SELLER".equals(role) ? "Marketplace seller" : "Marketplace user";
+    }
+
+    private String fallbackHandle(String userId) {
+        String suffix = userId.substring(Math.max(0, userId.length() - 8)).toLowerCase(Locale.ROOT);
+        return "member-" + suffix;
     }
 
     private String initials(String displayName) {

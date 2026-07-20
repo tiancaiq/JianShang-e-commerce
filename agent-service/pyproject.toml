@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "msb-agent-service"
+version = "0.9.0"
+description = "Isolated AI runtime with durable knowledge and agent persistence."
+requires-python = ">=3.12"
+dependencies = [
+  "aiokafka>=0.12,<1",
+  "aiomysql>=0.2,<1",
+  "cryptography>=44,<47",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "openai>=2.30,<3",
+  "opensearch-py[async]>=2.8,<3",
+  "prometheus-client>=0.21,<1",
+  "pydantic>=2.10,<3",
+  "tiktoken>=0.9,<1",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "testcontainers>=4.10,<5",
+]
+
+[project.scripts]
+msb-agent-service = "msb_agent_service.main:run"
+msb-knowledge-index = "msb_agent_service.knowledge_index:main"
+msb-knowledge-ingestion = "msb_agent_service.knowledge_rebuild:main"
+msb-llm-smoke = "msb_agent_service.smoke:run"
+msb-agent-eval = "msb_agent_service.customer_service_evaluation:main"
+msb-agent-release-gate = "msb_agent_service.customer_service_release_gate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
 import {
   Category,
   ListingCondition,
@@ -96,9 +96,13 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
                 <app-brand-mascot variant="badge" alt="MSB marketplace mascot empty state" />
                 <div>
                   <strong>{{ hasActiveSearch() ? 'No sweet finds yet' : 'No approved individual listings yet' }}</strong>
-                  <p>{{ hasActiveSearch() ? 'Try changing your filters or check back soon.' : 'Fresh local listings will appear here once approved.' }}</p>
+                  <p>{{ hasActiveSearch() ? activeFilterSummary() : 'Fresh local listings will appear here once approved.' }}</p>
+                  @if (hasActiveSearch() && suggestedCategoryName()) {
+                    <p class="suggestion">Suggested category: {{ suggestedCategoryName() }}</p>
+                  }
                   @if (hasActiveSearch()) {
                     <button type="button" (click)="clearFilters()">Clear filters</button>
+                    <button type="button" class="secondary-empty-action" (click)="browseAllItems()">Browse all individual items</button>
                   }
                 </div>
               </div>
@@ -782,6 +786,7 @@ export class MarketplaceHomeComponent implements OnInit {
   maxPrice: string | number = '';
   city = '';
   county = '';
+  private lastSearchKey: string | null = null;
 
   ngOnInit(): void {
     this.listingService.getCategories().subscribe({
@@ -789,12 +794,21 @@ export class MarketplaceHomeComponent implements OnInit {
       error: () => this.categories.set([]),
     });
     this.route.queryParamMap.subscribe(params => {
-      this.searchTerm = params.get('q') || '';
-      this.runSearch();
+      this.applyQueryParams(params);
+      const key = this.searchStateKey();
+      if (key !== this.lastSearchKey) {
+        this.fetchFirstPage();
+      }
     });
   }
 
   runSearch(): void {
+    this.fetchFirstPage();
+    this.syncUrlSearchState();
+  }
+
+  private fetchFirstPage(): void {
+    this.lastSearchKey = this.searchStateKey();
     this.loading.set(true);
     this.loadingMore.set(false);
     this.errorMsg.set('');
@@ -881,6 +895,10 @@ export class MarketplaceHomeComponent implements OnInit {
     this.runSearch();
   }
 
+  browseAllItems(): void {
+    this.clearFilters();
+  }
+
   featuredListing(): MarketplaceBrowseListing | null {
     return this.marketplaceListings()[0] || null;
   }
@@ -917,6 +935,36 @@ export class MarketplaceHomeComponent implements OnInit {
 
   conditionLabel(condition: ListingCondition): string {
     return publicListingConditionLabel(condition);
+  }
+
+  activeFilterSummary(): string {
+    const parts: string[] = [];
+    if (this.searchTerm.trim()) {
+      parts.push(`keyword "${this.searchTerm.trim()}"`);
+    }
+    if (this.selectedCategoryId !== 'ALL') {
+      parts.push(`category ${this.suggestedCategoryName() || this.selectedCategoryId}`);
+    }
+    if (this.selectedCondition !== 'ALL') {
+      parts.push(`condition ${this.conditionLabel(this.selectedCondition)}`);
+    }
+    if (this.hasNumberInput(this.minPrice) || this.hasNumberInput(this.maxPrice)) {
+      parts.push(`price ${this.minPrice || '0'} to ${this.maxPrice || 'any'}`);
+    }
+    if (this.city.trim()) {
+      parts.push(`city ${this.city.trim()}`);
+    }
+    if (this.county.trim()) {
+      parts.push(`county ${this.county.trim()}`);
+    }
+    if (this.sortMode !== 'none') {
+      parts.push(`sort ${this.sortLabel(this.sortMode)}`);
+    }
+    return parts.length ? `Active filters: ${parts.join(', ')}.` : 'No active filters.';
+  }
+
+  suggestedCategoryName(): string {
+    return this.categoryOptions().find(category => category.id === this.selectedCategoryId)?.name || '';
   }
 
   productFor(listing: MarketplaceBrowseListing): MarketplaceUiProduct {
@@ -966,6 +1014,64 @@ export class MarketplaceHomeComponent implements OnInit {
       sort: this.sortMode === 'none' ? null : this.sortMode,
       cursor,
     };
+  }
+
+  private applyQueryParams(params: ParamMap): void {
+    this.searchTerm = params.get('q') || '';
+    this.selectedCategoryId = params.get('categoryId') || 'ALL';
+    this.selectedCondition = this.validCondition(params.get('condition'));
+    this.sortMode = this.validSort(params.get('sort'));
+    this.minPrice = params.get('minPrice') || '';
+    this.maxPrice = params.get('maxPrice') || '';
+    this.city = params.get('city') || '';
+    this.county = params.get('county') || '';
+  }
+
+  private syncUrlSearchState(): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: this.queryParamsFromState(),
+      replaceUrl: false,
+    });
+  }
+
+  private queryParamsFromState(): Record<string, string | null> {
+    return {
+      q: this.searchTerm.trim() || null,
+      categoryId: this.selectedCategoryId === 'ALL' ? null : this.selectedCategoryId,
+      condition: this.selectedCondition === 'ALL' ? null : this.selectedCondition,
+      minPrice: this.hasNumberInput(this.minPrice) ? String(this.minPrice) : null,
+      maxPrice: this.hasNumberInput(this.maxPrice) ? String(this.maxPrice) : null,
+      city: this.city.trim() || null,
+      county: this.county.trim() || null,
+      sort: this.sortMode === 'none' ? null : this.sortMode,
+    };
+  }
+
+  private searchStateKey(): string {
+    return JSON.stringify(this.queryParamsFromState());
+  }
+
+  private validCondition(value: string | null): ListingCondition | 'ALL' {
+    return ['NEW', 'OPEN_BOX', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS'].includes(value || '')
+      ? value as ListingCondition
+      : 'ALL';
+  }
+
+  private validSort(value: string | null): MarketplaceListingSort {
+    return ['newest', 'price_asc', 'price_desc'].includes(value || '')
+      ? value as MarketplaceListingSort
+      : 'none';
+  }
+
+  private sortLabel(sort: MarketplaceListingSort): string {
+    if (sort === 'price_asc') {
+      return 'price low to high';
+    }
+    if (sort === 'price_desc') {
+      return 'price high to low';
+    }
+    return 'newest';
   }
 
   private optionalNumber(value: string | number | null | undefined): number | null {

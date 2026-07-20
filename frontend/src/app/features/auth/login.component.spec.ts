@@ -59,7 +59,20 @@ describe('LoginComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
     expect(text).toContain('Sign in or create your MSB account');
+    expect(text).toContain('Marketplace Account');
     expect(text).toContain('Create account');
+  });
+
+  it('shows signed-out confirmation on login surfaces', () => {
+    const { fixture } = createFixture({
+      client: 'admin-portal',
+      signedOut: '1',
+    });
+
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+
+    expect(text).toContain('Admin Portal');
+    expect(text).toContain('Signed out successfully');
   });
 
   it('uses the marketplace popup flow for marketplace sign-in', () => {
@@ -84,6 +97,7 @@ describe('LoginComponent', () => {
 
     expect(authService.login).toHaveBeenCalledOnceWith('seller-portal', '/seller/business/apply');
     expect(authService.loginWithPopup).not.toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).textContent || '').toContain('Business Seller Portal');
   });
 
   it('uses regular Keycloak redirect for admin portal sign-in', () => {
@@ -96,6 +110,19 @@ describe('LoginComponent', () => {
 
     expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/admin/business-applications');
     expect(authService.loginWithPopup).not.toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).textContent || '').toContain('Admin Portal');
+    expect((fixture.nativeElement as HTMLElement).textContent || '').toContain('Secure staff sign-in');
+  });
+
+  it('drops unsafe return URLs before redirect login', () => {
+    const { fixture, authService } = createFixture({
+      client: 'admin-portal',
+      returnUrl: 'https://evil.example/admin',
+    });
+
+    fixture.componentInstance.handleLogin();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/');
   });
 
   it('does not advertise self-registration for seller or admin sign-in', () => {

@@ -70,6 +70,20 @@ It does not include an admin queue or application search yet.
 - Provider callbacks and admin decisions are appended to
   `business_verification_events`.
 
+## Applicant Visibility
+
+The business application page presents the current application as a simple
+timeline:
+
+```text
+Draft -> Submitted -> Verification -> Admin review -> Approved/Rejected
+```
+
+Pending applications highlight their current stage. Approved applications
+link into the business account/store management experience. Rejected
+applications show the stored decision reason and retain the existing path to
+start a new application.
+
 ## Local Verification
 
 Run backend tests:

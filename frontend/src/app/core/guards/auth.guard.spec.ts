@@ -111,6 +111,30 @@ describe('authGuard', () => {
     expect(router.url).toBe('/login?client=marketplace&returnUrl=%2Fdashboard');
   });
 
+  it('requires authentication for protected account routes after a full reload finds no session', async () => {
+    const authService = {
+      refreshSession: jasmine.createSpy('refreshSession').and.returnValue(of({ authenticated: false, user: null })),
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([
+          { path: 'login', component: TestLoginComponent },
+          { path: 'account/profile', component: TestDashboardComponent, canActivate: [authGuard] },
+        ]),
+        { provide: AuthService, useValue: authService },
+      ],
+    });
+
+    const router = TestBed.inject(Router);
+
+    await router.navigateByUrl('/account/profile');
+
+    expect(authService.refreshSession).toHaveBeenCalled();
+    expect(router.url).toBe('/login?client=marketplace&returnUrl=%2Faccount%2Fprofile');
+  });
+
   it('loads a protected frontend route with an authenticated session', async () => {
     const authService = {
       refreshSession: () => of({ authenticated: true, user: null }),

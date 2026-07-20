@@ -97,6 +97,7 @@ class ConversationApiTests {
                 .andExpect(jsonPath("$.participants[0].currentUser", equalTo(true)))
                 .andExpect(jsonPath("$.participants[1].participantId", equalTo(SELLER_ID)))
                 .andExpect(jsonPath("$.participants[1].displayName", equalTo("Alex Seller")))
+                .andExpect(jsonPath("$.participants[1].publicHandle", equalTo("alex-sells")))
                 .andExpect(jsonPath("$.participants[1].roleInConversation", equalTo("SELLER")))
                 .andExpect(jsonPath("$.participants[1].currentUser", equalTo(false)))
                 .andExpect(jsonPath("$.participants[1].avatarUrl", equalTo("/api/v1/public/user-avatars/%s?v=4".formatted(SELLER_ID))))
@@ -569,6 +570,19 @@ class ConversationApiTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", equalTo("BUYER_CONFIRMED")));
 
+        mockMvc.perform(get("/api/v1/conversations/{conversationId}", conversationId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("buyer-token"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", equalTo("LOCKED")))
+                .andExpect(jsonPath("$.completion.status", equalTo("BUYER_CONFIRMED")));
+
+        mockMvc.perform(post("/api/v1/conversations/{conversationId}/messages", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"This should remain read-only.\"}")
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("buyer-token"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("CHAT_INVALID_MESSAGE")));
+
         Integer completions = jdbcTemplate.queryForObject("select count(*) from listing_trade_completions", Integer.class);
         org.assertj.core.api.Assertions.assertThat(completions).isEqualTo(1);
         verify(productClient, times(1)).completeListingTrade(
@@ -689,6 +703,7 @@ class ConversationApiTests {
                             .map(id -> new ChatAuthClient.UserLabel(
                                     id,
                                     id.equals(SELLER_ID) ? "Alex Seller" : "Buyer User",
+                                    id.equals(SELLER_ID) ? "alex-sells" : "buyer-user",
                                     id.equals(SELLER_ID) ? "/api/v1/public/user-avatars/%s?v=4".formatted(id) : null))
                             .toList();
                     return new ChatAuthClient.IdentityLabels(labels);

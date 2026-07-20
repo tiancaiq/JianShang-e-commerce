@@ -88,6 +88,8 @@ export function listingDraft(overrides: Partial<ListingDraft> = {}): ListingDraf
     publicRegion: 'CA',
     status: 'DRAFT',
     moderationStatus: 'NOT_SUBMITTED',
+    publicationSource: null,
+    publishedAt: null,
     version: 0,
     createdAt: '2026-06-17T12:00:00Z',
     updatedAt: '2026-06-17T12:00:00Z',

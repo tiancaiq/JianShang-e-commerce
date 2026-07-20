@@ -13,10 +13,17 @@ import com.msb.ecom.auth_service.service.AvatarNotFoundException;
 import com.msb.ecom.auth_service.service.AvatarStorageException;
 import com.msb.ecom.auth_service.service.IndividualSellerAlreadyActiveException;
 import com.msb.ecom.auth_service.service.IndividualSellerProfileNotFoundException;
+import com.msb.ecom.auth_service.service.InternalCommerceAuthorizationException;
 import com.msb.ecom.auth_service.service.ProfileVersionConflictException;
+import com.msb.ecom.auth_service.service.AddressBookLimitReachedException;
+import com.msb.ecom.auth_service.service.AddressNotFoundException;
+import com.msb.ecom.auth_service.service.AddressValidationException;
+import com.msb.ecom.auth_service.service.AddressVersionConflictException;
+import com.msb.ecom.auth_service.service.BuyerAddressNotFoundException;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.error.ApiError;
 import com.msb.ecom.common.web.error.ApiErrorEnvelope;
+import com.msb.ecom.common.web.error.FieldError;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -29,6 +36,66 @@ import java.util.List;
 @RestControllerAdvice
 @Slf4j
 public class AuthServiceExceptionHandler {
+
+    @ExceptionHandler(AddressValidationException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAddressValidation(
+            AddressValidationException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "ADDRESS_INVALID",
+                        "One or more address fields are invalid.",
+                        List.of(new FieldError(exception.field(), exception.fieldCode())),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(AddressNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAddressNotFound(
+            AddressNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "ADDRESS_NOT_FOUND",
+                        "Address was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BuyerAddressNotFoundException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBuyerAddressNotFound(
+            BuyerAddressNotFoundException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "BUYER_ADDRESS_NOT_FOUND",
+                        "Buyer address was not found.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(AddressVersionConflictException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAddressVersionConflict(
+            AddressVersionConflictException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "ADDRESS_VERSION_CONFLICT",
+                        "The address changed. Refresh and try again.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(AddressBookLimitReachedException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleAddressBookLimitReached(
+            AddressBookLimitReachedException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "ADDRESS_BOOK_LIMIT_REACHED",
+                        "The address book already contains 20 addresses.",
+                        List.of(),
+                        CorrelationIdFilter.current(request))));
+    }
 
     @ExceptionHandler(ProfileVersionConflictException.class)
     public ResponseEntity<ApiErrorEnvelope> handleProfileVersionConflict(
@@ -205,5 +272,20 @@ public class AuthServiceExceptionHandler {
                         "Store slug is already in use.",
                         List.of(),
                         CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(InternalCommerceAuthorizationException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleInternalCommerceAuthorization(
+            InternalCommerceAuthorizationException exception,
+            HttpServletRequest request) {
+        String correlationId = CorrelationIdFilter.current(request);
+        log.warn("Denied internal commerce request path={} correlationId={}",
+                request.getRequestURI(), correlationId);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiErrorEnvelope(new ApiError(
+                        "INTERNAL_COMMERCE_AUTH_REQUIRED",
+                        "Internal commerce service authentication is required.",
+                        List.of(),
+                        correlationId)));
     }
 }

@@ -4,17 +4,21 @@ import com.msb.ecom.auth_service.dto.AdminDashboardSummaryResponse;
 import com.msb.ecom.auth_service.dto.AdminIdentityLabelsResponse;
 import com.msb.ecom.auth_service.dto.BusinessIdentityLabelResponse;
 import com.msb.ecom.auth_service.dto.PlatformAdminResponse;
+import com.msb.ecom.auth_service.dto.PublicBusinessStoreSearchResponse;
 import com.msb.ecom.auth_service.dto.UserIdentityLabelResponse;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.common.core.validation.FixedLengthIds;
+import com.msb.ecom.common.core.validation.TextInputs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 @Service
@@ -63,6 +67,65 @@ public class AdminAuthorizationService {
         return labelResponse(userIds, businessIds, true);
     }
 
+    @Transactional(readOnly = true)
+    // Returns only public-safe active business/store records for storefront search and product-service visibility revalidation.
+    public List<PublicBusinessStoreSearchResponse> publicBusinessStores(
+            String query,
+            Set<String> businessIds,
+            Set<String> storeIds) {
+        String normalizedQuery = TextInputs.collapseWhitespaceToNull(query);
+        if (normalizedQuery != null && normalizedQuery.length() > 120) {
+            throw new IllegalArgumentException("Store search query is too long.");
+        }
+        Set<String> normalizedBusinessIds = normalizedIds(businessIds);
+        Set<String> normalizedStoreIds = normalizedIds(storeIds);
+        if (normalizedQuery == null && normalizedBusinessIds.isEmpty() && normalizedStoreIds.isEmpty()) {
+            return List.of();
+        }
+
+        StringBuilder sql = new StringBuilder("""
+                select b.id as business_id,
+                       s.id as store_id,
+                       s.name as store_name,
+                       b.legal_name as business_legal_name
+                from businesses b
+                join stores s on s.business_id = b.id
+                where b.status = 'ACTIVE'
+                  and s.status = 'ACTIVE'
+                """);
+        List<Object> parameters = new ArrayList<>();
+
+        if (normalizedQuery != null) {
+            String pattern = "%" + escapedLike(normalizedQuery.toLowerCase(Locale.ROOT)) + "%";
+            sql.append("""
+                    and (
+                         lower(s.name) like ? escape '!'
+                      or lower(b.legal_name) like ? escape '!'
+                    )
+                    """);
+            parameters.add(pattern);
+            parameters.add(pattern);
+        }
+        if (!normalizedBusinessIds.isEmpty()) {
+            sql.append(" and b.id in (%s)\n".formatted(placeholders(normalizedBusinessIds.size())));
+            parameters.addAll(normalizedBusinessIds);
+        }
+        if (!normalizedStoreIds.isEmpty()) {
+            sql.append(" and s.id in (%s)\n".formatted(placeholders(normalizedStoreIds.size())));
+            parameters.addAll(normalizedStoreIds);
+        }
+
+        sql.append(" order by s.name, b.id limit 50");
+        return jdbcTemplate.query(
+                sql.toString(),
+                (rs, rowNum) -> new PublicBusinessStoreSearchResponse(
+                        rs.getString("business_id"),
+                        rs.getString("store_id"),
+                        rs.getString("store_name"),
+                        rs.getString("business_legal_name")),
+                parameters.toArray());
+    }
+
     private AdminIdentityLabelsResponse labelResponse(Set<String> userIds, Set<String> businessIds, boolean publicOnly) {
         Set<String> normalizedUserIds = normalizedIds(userIds);
         Set<String> normalizedBusinessIds = normalizedIds(businessIds);
@@ -72,6 +135,7 @@ public class AdminAuthorizationService {
                 : jdbcTemplate.query("""
                         select id,
                                coalesce(nullif(trim(display_name), ''), 'Marketplace user') as display_name,
+                               public_handle,
                                avatar_url
                         from users
                         where id in (%s)
@@ -81,20 +145,32 @@ public class AdminAuthorizationService {
                         (rs, rowNum) -> new UserIdentityLabelResponse(
                                 rs.getString("id"),
                                 rs.getString("display_name"),
+                                rs.getString("public_handle"),
                                 rs.getString("avatar_url")),
                         normalizedUserIds.toArray());
         List<BusinessIdentityLabelResponse> businesses = normalizedBusinessIds.isEmpty()
                 ? List.of()
                 : jdbcTemplate.query("""
-                        select id, legal_name
-                        from businesses
-                        where id in (%s)
+                        select b.id, b.legal_name,
+                               s.id as store_id, s.slug as store_slug, s.name as store_name,
+                               a.public_city, a.public_region,
+                               case when b.status = 'ACTIVE' then true else false end as verified
+                        from businesses b
+                        join business_applications a on a.id = b.application_id
+                        left join stores s on s.business_id = b.id and s.status = 'ACTIVE'
+                        where b.id in (%s)
                         %s
-                        order by id
-                        """.formatted(placeholders(normalizedBusinessIds.size()), publicOnly ? "and status = 'ACTIVE'" : ""),
+                        order by b.id
+                        """.formatted(placeholders(normalizedBusinessIds.size()), publicOnly ? "and b.status = 'ACTIVE'" : ""),
                         (rs, rowNum) -> new BusinessIdentityLabelResponse(
                                 rs.getString("id"),
-                                rs.getString("legal_name")),
+                                rs.getString("legal_name"),
+                                rs.getString("store_id"),
+                                rs.getString("store_slug"),
+                                rs.getString("store_name"),
+                                rs.getString("public_city"),
+                                rs.getString("public_region"),
+                                rs.getBoolean("verified")),
                         normalizedBusinessIds.toArray());
 
         return new AdminIdentityLabelsResponse(users, businesses);
@@ -130,5 +206,12 @@ public class AdminAuthorizationService {
 
     private String placeholders(int count) {
         return String.join(", ", java.util.Collections.nCopies(count, "?"));
+    }
+
+    private String escapedLike(String value) {
+        return value
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
     }
 }

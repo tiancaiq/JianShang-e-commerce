@@ -44,6 +44,7 @@ describe('AdminListingModerationDetailComponent', () => {
       sellerType: 'INDIVIDUAL',
       individualSellerUserId: '01U00000000000000000000001',
       businessId: null,
+      storeId: null,
       categoryId: '01K00000000000000000000001',
       title: 'Used bicycle',
       description: 'A reliable city bike.',
@@ -58,6 +59,8 @@ describe('AdminListingModerationDetailComponent', () => {
       publicRegion: 'CA',
       status: 'PENDING_REVIEW',
       moderationStatus: 'PENDING',
+      publicationSource: null,
+      publishedAt: null,
       version: 1,
       createdAt: '2026-06-17T11:00:00Z',
       updatedAt: '2026-06-17T12:00:00Z',
@@ -160,6 +163,19 @@ describe('AdminListingModerationDetailComponent', () => {
     expect(text).toContain('Morgan Admin');
     expect(text).toContain('PENDING_REVIEW / PENDING');
     expect(text).toContain('Blue bike');
+    expect(component.decision).toBe('');
+    expect(text).toContain('Select decision');
+  });
+
+  it('requires admins to select a decision before resolving', () => {
+    fixture.detectChanges();
+    component.decision = '';
+    component.reason = 'Looks good';
+
+    component.resolveCase();
+
+    expect(listingService.resolveListingModerationCase).not.toHaveBeenCalled();
+    expect(component.decisionErrorMsg()).toBe('Select a decision before resolving this case.');
   });
 
   it('loads review images through the admin media endpoint', () => {
@@ -208,6 +224,7 @@ describe('AdminListingModerationDetailComponent', () => {
     spyOn(window, 'confirm').and.returnValue(true);
     listingService.resolveListingModerationCase.and.returnValue(throwError(() => ({ status: 409 })));
     fixture.detectChanges();
+    component.decision = 'APPROVE';
     component.reason = 'Listing looks good';
 
     component.resolveCase();

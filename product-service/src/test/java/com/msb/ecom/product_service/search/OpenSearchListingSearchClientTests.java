@@ -59,6 +59,8 @@ class OpenSearchListingSearchClientTests {
                         "Irvine",
                         "Orange County",
                         "price_asc",
+                        List.of(),
+                        List.of(),
                         new BigDecimal("12.00"),
                         Instant.parse("2026-07-01T00:00:00Z"),
                         "01CURSOR000000000000001"),

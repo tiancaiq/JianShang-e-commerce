@@ -1,136 +1,133 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import { Category, PublicListing } from '../../core/models/listing.model';
+import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
+import { Category, ListingCondition, PublicListing, PublicListingSort } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { BrandLoadingScreenComponent } from '../../shared/components/ui/brand-loading-screen.component';
 import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
-import { publicListingPrimaryImageUrl } from '../../shared/listing/public-listing-display';
+import {
+  publicListingConditionLabel,
+  publicListingLocationLabel,
+  publicListingOwnerLabel,
+  publicListingPrimaryImageUrl,
+} from '../../shared/listing/public-listing-display';
 
-interface StorefrontPreview {
-  key: string;
-  name: string;
-  city: string;
-  county: string;
-  activeListings: number;
-  categories: string[];
-  coverImageUrl: string;
-  coverAlt: string;
-  logoUrl: string | null;
-}
+type BusinessConditionFilter = ListingCondition | 'ALL';
+type BusinessSortFilter = PublicListingSort;
 
 @Component({
   selector: 'app-business-stores',
   standalone: true,
   imports: [BrandLoadingScreenComponent, BrandMascotComponent, FormsModule, RouterLink],
   template: `
-    <section class="stores-page">
-      <header class="stores-hero">
+    <section class="business-items-page">
+      <header class="business-hero">
         <div class="hero-copy">
-          <p class="eyebrow">Verified storefronts</p>
-          <h1>Browse verified stores</h1>
-          <p>Shop from approved business sellers and discover local storefronts.</p>
-          <form class="store-search" role="search" (submit)="runSearch(); $event.preventDefault()">
+          <p class="eyebrow">Business catalog</p>
+          <h1>Shop verified business items</h1>
+          <p>Browse catalog items published by approved business sellers.</p>
+          <form class="business-search" role="search" (submit)="runSearch(); $event.preventDefault()">
             <label>
-              <span>Search stores</span>
+              <span>Search business items</span>
               <input
                 name="q"
                 type="search"
                 [(ngModel)]="searchTerm"
-                placeholder="Search stores, categories, or cities..."
+                placeholder="Search products, stores, or categories..."
               />
             </label>
             <button type="submit">Search</button>
-            <a routerLink="/business/apply" class="hero-store-link">Create store</a>
+            <a routerLink="/business/apply" class="hero-store-link">Become a business seller</a>
           </form>
-        </div>
-
-        <div class="hero-illustration" aria-hidden="true">
-          <div class="shop-window">
-            <app-brand-mascot variant="badge" alt="" />
-            <div class="shelf shelf-top"></div>
-            <div class="shelf shelf-bottom"></div>
-            <span class="sparkle s1"></span>
-            <span class="sparkle s2"></span>
-          </div>
         </div>
       </header>
 
-      <section class="stores-layout" aria-labelledby="stores-title">
-        <main class="stores-main">
-          <div class="stores-panel">
+      <section class="business-layout" aria-labelledby="business-items-title">
+        <main class="business-main">
+          <div class="items-panel">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Approved sellers</p>
-                <h2 id="stores-title">Business Storefronts</h2>
+                <p class="eyebrow">Approved business items</p>
+                <h2 id="business-items-title">Business Items</h2>
               </div>
-              <span class="result-count">{{ stores().length }} {{ stores().length === 1 ? 'store found' : 'stores found' }}</span>
+              <span class="result-count">
+                {{ listings().length }} {{ listings().length === 1 ? 'item found' : 'items found' }}
+              </span>
             </div>
 
             @if (loading()) {
               <app-brand-loading-screen
-                label="Loading verified stores"
-                detail="Fetching approved storefronts and active listings."
+                label="Loading business items"
+                detail="Fetching active products from approved business sellers."
               />
             } @else if (errorMsg()) {
               <div class="empty-state error-state">
-                <app-brand-mascot variant="badge" alt="Store loading error" />
+                <app-brand-mascot variant="badge" alt="Business item loading error" />
                 <div>
                   <strong>{{ errorMsg() }}</strong>
-                  <p>Refresh the search to try loading business storefronts again.</p>
+                  <p>Refresh the search to try loading business items again.</p>
                   <button type="button" (click)="runSearch()">Retry</button>
                 </div>
               </div>
-            } @else if (stores().length === 0) {
+            } @else if (listings().length === 0) {
               <div class="empty-state">
-                <app-brand-mascot variant="badge" alt="No verified stores found" />
+                <app-brand-mascot variant="badge" alt="No business items found" />
                 <div>
-                  <strong>No verified stores found</strong>
-                  <p>Try changing your filters or search another city.</p>
+                  <strong>No business items found</strong>
+                  <p>{{ hasActiveSearch() ? activeFilterSummary() : 'Approved business items will appear here once stores publish them.' }}</p>
+                  @if (hasActiveSearch() && suggestedCategoryName()) {
+                    <p class="suggestion">Suggested category: {{ suggestedCategoryName() }}</p>
+                  }
                   <button type="button" (click)="clearFilters()">Clear filters</button>
+                  @if (hasActiveSearch()) {
+                    <button type="button" class="secondary-button" (click)="browseAllBusinessItems()">Browse all business items</button>
+                  }
                 </div>
               </div>
             } @else {
-              <div class="store-grid">
-                @for (store of stores(); track store.key) {
-                  <article class="store-card">
-                    <div class="store-cover">
-                      @if (store.coverImageUrl) {
-                        <img [src]="store.coverImageUrl" [alt]="store.coverAlt" />
+              <div class="item-grid">
+                @for (item of listings(); track item.id) {
+                  <article class="item-card">
+                    <a [routerLink]="['/listings', item.id]" class="item-image-link" [attr.aria-label]="'View ' + item.title">
+                      @if (imageUrl(item)) {
+                        <img [src]="imageUrl(item)" [alt]="primaryImageAlt(item)" />
                       } @else {
-                        <div class="cover-fallback">
-                          <span>Verified store</span>
+                        <div class="image-fallback">
+                          <span>{{ item.categoryName }}</span>
                         </div>
                       }
-                      <div class="store-logo" aria-hidden="true">
-                        @if (store.logoUrl) {
-                          <img [src]="store.logoUrl" [alt]="store.name" />
+                      <span class="business-badge">Business</span>
+                    </a>
+
+                    <div class="item-body">
+                      <div class="item-meta-row">
+                        <span>{{ item.categoryName }}</span>
+                        <span>{{ conditionLabel(item.condition) }}</span>
+                      </div>
+
+                      <h3>
+                        <a [routerLink]="['/listings', item.id]">{{ item.title }}</a>
+                      </h3>
+
+                      <p class="seller-line">
+                        Sold by
+                        @if (item.storeSlug) {
+                          <a [routerLink]="['/stores', item.storeSlug]">{{ item.storeName || ownerLabel(item) }}</a>
                         } @else {
-                          <span>{{ initials(store.name) }}</span>
+                          <span>{{ item.storeName || ownerLabel(item) }}</span>
                         }
-                      </div>
-                    </div>
-
-                    <div class="store-body">
-                      <div class="store-title-row">
-                        <h3>{{ store.name }}</h3>
-                        <span class="verified-badge">Verified</span>
-                      </div>
-                      <p class="store-location">{{ locationLabel(store) }}</p>
-
-                      <div class="store-meta">
-                        <span>{{ store.activeListings }} {{ store.activeListings === 1 ? 'active listing' : 'active listings' }}</span>
-                      </div>
-
-                      <div class="category-chips" aria-label="Store categories">
-                        @for (category of store.categories.slice(0, 3); track category) {
-                          <span>{{ category }}</span>
+                        @if (item.businessVerified) {
+                          <span class="verified-label">Verified</span>
                         }
+                      </p>
+                      <p class="location-line">{{ locationLabel(item) }}</p>
+
+                      <div class="price-row">
+                        <strong>{{ formatPrice(item) }}</strong>
+                        <span>Business item</span>
                       </div>
 
-                      <a routerLink="/stores" class="visit-store-link">
-                        Visit store
-                      </a>
+                      <a [routerLink]="['/listings', item.id]" class="view-item-link">View item</a>
                     </div>
                   </article>
                 }
@@ -138,7 +135,7 @@ interface StorefrontPreview {
               @if (hasMore()) {
                 <div class="load-more-row">
                   <button type="button" (click)="loadMore()" [disabled]="loadingMore()">
-                    {{ loadingMore() ? 'Loading...' : 'Load more stores' }}
+                    {{ loadingMore() ? 'Loading...' : 'Load more items' }}
                   </button>
                 </div>
               }
@@ -146,11 +143,11 @@ interface StorefrontPreview {
           </div>
         </main>
 
-        <aside class="filter-panel" aria-label="Filter business storefronts">
+        <aside class="filter-panel" aria-label="Filter business items">
           <div class="filter-heading">
             <div>
-              <span>Store filters</span>
-              <small>Verified business sellers only</small>
+              <span>Item filters</span>
+              <small>Approved business listings only</small>
             </div>
             @if (hasActiveSearch()) {
               <button type="button" class="clear-button" (click)="clearFilters()">Clear</button>
@@ -158,6 +155,16 @@ interface StorefrontPreview {
           </div>
 
           <form class="filter-stack" (submit)="runSearch(); $event.preventDefault()">
+            <label>
+              <span>Sort by</span>
+              <select name="sort" [(ngModel)]="sort">
+                <option value="none">Default</option>
+                <option value="newest">Newest</option>
+                <option value="price_asc">Price low to high</option>
+                <option value="price_desc">Price high to low</option>
+              </select>
+            </label>
+
             <label>
               <span>Category</span>
               <select name="category" [(ngModel)]="selectedCategoryId">
@@ -169,6 +176,30 @@ interface StorefrontPreview {
             </label>
 
             <label>
+              <span>Condition</span>
+              <select name="condition" [(ngModel)]="selectedCondition">
+                <option value="ALL">Any condition</option>
+                <option value="NEW">New</option>
+                <option value="OPEN_BOX">Open box</option>
+                <option value="LIKE_NEW">Like new</option>
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="FOR_PARTS">For parts</option>
+              </select>
+            </label>
+
+            <div class="price-fields">
+              <label>
+                <span>Min price</span>
+                <input name="minPrice" type="number" min="0" step="0.01" [(ngModel)]="minPrice" />
+              </label>
+              <label>
+                <span>Max price</span>
+                <input name="maxPrice" type="number" min="0" step="0.01" [(ngModel)]="maxPrice" />
+              </label>
+            </div>
+
+            <label>
               <span>City</span>
               <input name="city" type="search" [(ngModel)]="city" placeholder="Irvine" />
             </label>
@@ -176,16 +207,6 @@ interface StorefrontPreview {
             <label>
               <span>County</span>
               <input name="county" type="search" [(ngModel)]="county" placeholder="Orange County" />
-            </label>
-
-            <label class="check-row">
-              <input name="verifiedOnly" type="checkbox" [(ngModel)]="verifiedOnly" />
-              <span>Verified only</span>
-            </label>
-
-            <label class="check-row">
-              <input name="hasActiveListings" type="checkbox" [(ngModel)]="hasActiveListingsOnly" />
-              <span>Has active listings</span>
             </label>
 
             <div class="filter-actions">
@@ -198,58 +219,36 @@ interface StorefrontPreview {
     </section>
   `,
   styles: [`
-    .stores-page {
+    .business-items-page {
       display: flex;
       flex-direction: column;
-      gap: 1.1rem;
+      gap: 1rem;
     }
 
-    .stores-hero,
-    .stores-panel,
+    .business-hero,
+    .items-panel,
     .filter-panel,
-    .store-card,
+    .item-card,
     .empty-state {
       border: 1px solid rgba(236, 79, 163, 0.18);
-      border-radius: 24px;
-      background: rgba(255, 255, 255, 0.94);
-      box-shadow: 0 18px 42px rgba(132, 77, 160, 0.11);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 14px 34px rgba(132, 77, 160, 0.1);
     }
 
-    .stores-hero {
-      min-height: 260px;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(280px, 390px);
-      gap: 1rem;
-      overflow: hidden;
-      position: relative;
+    .business-hero {
+      min-height: 250px;
+      display: flex;
+      align-items: center;
       padding: clamp(1.25rem, 3vw, 2rem);
       background:
-        radial-gradient(circle at 82% 18%, rgba(236, 79, 163, 0.18), transparent 34%),
-        radial-gradient(circle at 58% 96%, rgba(139, 92, 246, 0.16), transparent 32%),
-        linear-gradient(135deg, rgba(255, 245, 251, 0.97), rgba(244, 239, 255, 0.92));
-    }
-
-    .stores-hero::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(45deg, rgba(236, 79, 163, 0.08) 25%, transparent 25%),
-        linear-gradient(-45deg, rgba(139, 92, 246, 0.07) 25%, transparent 25%);
-      background-size: 34px 34px;
-      opacity: 0.23;
-      pointer-events: none;
-    }
-
-    .hero-copy,
-    .hero-illustration {
-      position: relative;
-      z-index: 1;
+        radial-gradient(circle at 84% 18%, rgba(236, 79, 163, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(255, 245, 251, 0.98), rgba(242, 247, 255, 0.94));
     }
 
     .hero-copy {
+      width: min(100%, 840px);
       display: flex;
-      max-width: 760px;
       flex-direction: column;
       justify-content: center;
     }
@@ -277,16 +276,16 @@ interface StorefrontPreview {
       letter-spacing: 0;
     }
 
-    .stores-hero p:not(.eyebrow) {
-      max-width: 620px;
+    .business-hero p:not(.eyebrow) {
+      max-width: 640px;
       margin-top: 0.8rem;
       color: var(--market-muted);
       font-weight: 800;
       line-height: 1.55;
     }
 
-    .store-search {
-      max-width: 760px;
+    .business-search {
+      max-width: 820px;
       margin-top: 1.15rem;
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto auto;
@@ -294,83 +293,18 @@ interface StorefrontPreview {
       align-items: end;
     }
 
-    .hero-illustration {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .shop-window {
-      width: min(100%, 340px);
-      aspect-ratio: 1 / 0.86;
-      position: relative;
-      display: grid;
-      place-items: center;
-      border: 1px solid rgba(236, 79, 163, 0.18);
-      border-radius: 28px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 232, 248, 0.48)),
-        linear-gradient(135deg, rgba(236, 79, 163, 0.16), rgba(139, 92, 246, 0.16));
-      box-shadow: inset 0 0 0 8px rgba(255, 255, 255, 0.34);
-      opacity: 0.72;
-    }
-
-    .shop-window app-brand-mascot {
-      width: 132px;
-      filter: drop-shadow(0 18px 22px rgba(132, 77, 160, 0.16));
-    }
-
-    .shelf,
-    .sparkle {
-      position: absolute;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.72);
-    }
-
-    .shelf {
-      left: 12%;
-      right: 12%;
-      height: 12px;
-      box-shadow: 0 12px 22px rgba(132, 77, 160, 0.08);
-    }
-
-    .shelf-top {
-      top: 24%;
-    }
-
-    .shelf-bottom {
-      bottom: 20%;
-    }
-
-    .sparkle {
-      width: 12px;
-      height: 12px;
-      background: #ff8cc8;
-    }
-
-    .s1 {
-      top: 18%;
-      right: 20%;
-    }
-
-    .s2 {
-      bottom: 26%;
-      left: 18%;
-      background: #9b7cf8;
-    }
-
-    .stores-layout {
+    .business-layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 300px;
       gap: 1rem;
       align-items: start;
     }
 
-    .stores-main {
+    .business-main {
       min-width: 0;
     }
 
-    .stores-panel,
+    .items-panel,
     .filter-panel {
       padding: 1rem;
     }
@@ -442,12 +376,18 @@ interface StorefrontPreview {
       gap: 0.8rem;
     }
 
+    .price-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+    }
+
     input,
     select {
       width: 100%;
       min-height: 46px;
       border: 1px solid rgba(139, 92, 246, 0.22);
-      border-radius: 14px;
+      border-radius: 12px;
       background: rgba(255, 255, 255, 0.94);
       color: var(--market-ink);
       padding: 0 0.85rem;
@@ -459,13 +399,13 @@ interface StorefrontPreview {
 
     button,
     .hero-store-link,
-    .visit-store-link {
+    .view-item-link {
       min-height: 46px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       border: 1px solid rgba(236, 79, 163, 0.3);
-      border-radius: 14px;
+      border-radius: 12px;
       background: rgba(255, 255, 255, 0.94);
       color: #9d3fb9;
       padding: 0 1rem;
@@ -475,14 +415,15 @@ interface StorefrontPreview {
       white-space: nowrap;
     }
 
-    .store-search button,
+    .business-search button,
     .hero-store-link,
     .filter-actions button:first-child,
-    .visit-store-link {
+    .view-item-link,
+    .load-more-row button {
       border: 0;
       background: linear-gradient(135deg, #ec4fa3, #8b5cf6);
       color: #fff;
-      box-shadow: 0 12px 26px rgba(139, 92, 246, 0.2);
+      box-shadow: 0 10px 22px rgba(139, 92, 246, 0.2);
     }
 
     .secondary-button,
@@ -502,29 +443,12 @@ interface StorefrontPreview {
     select:focus,
     button:focus,
     .hero-store-link:focus,
-    .visit-store-link:focus {
+    .view-item-link:focus,
+    .item-image-link:focus,
+    .item-card h3 a:focus {
       border-color: #ec4fa3;
       box-shadow: 0 0 0 3px rgba(236, 79, 163, 0.18);
       outline: none;
-    }
-
-    .check-row {
-      min-height: 48px;
-      flex-direction: row;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 0.6rem;
-      border: 1px solid rgba(139, 92, 246, 0.18);
-      border-radius: 16px;
-      background: rgba(255, 245, 251, 0.64);
-      padding: 0 0.8rem;
-      color: var(--market-ink);
-    }
-
-    .check-row input {
-      width: 18px;
-      min-height: 18px;
-      accent-color: #ec4fa3;
     }
 
     .filter-actions {
@@ -533,13 +457,13 @@ interface StorefrontPreview {
       gap: 0.65rem;
     }
 
-    .store-grid {
+    .item-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 1rem;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.9rem;
     }
 
-    .store-card {
+    .item-card {
       overflow: hidden;
       display: flex;
       min-width: 0;
@@ -547,141 +471,151 @@ interface StorefrontPreview {
       transition: transform 160ms ease, box-shadow 160ms ease;
     }
 
-    .store-card:hover {
+    .item-card:hover {
       transform: translateY(-2px);
-      box-shadow: 0 22px 46px rgba(132, 77, 160, 0.15);
+      box-shadow: 0 18px 38px rgba(132, 77, 160, 0.15);
     }
 
-    .store-cover {
+    .item-image-link {
       position: relative;
-      aspect-ratio: 16 / 9;
+      display: block;
+      aspect-ratio: 1 / 1;
       overflow: hidden;
       background: linear-gradient(135deg, rgba(255, 219, 239, 0.92), rgba(228, 218, 255, 0.92));
+      color: inherit;
+      text-decoration: none;
     }
 
-    .store-cover img,
-    .store-logo img {
+    .item-image-link img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       object-position: center;
+      transition: transform 180ms ease;
     }
 
-    .store-cover::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, transparent 45%, rgba(69, 38, 86, 0.2));
-      pointer-events: none;
+    .item-card:hover .item-image-link img {
+      transform: scale(1.03);
     }
 
-    .cover-fallback {
+    .image-fallback {
       width: 100%;
       height: 100%;
       display: grid;
       place-items: center;
       color: #9d3fb9;
       font-weight: 900;
+      text-align: center;
       text-transform: uppercase;
       letter-spacing: 0.08em;
+      padding: 1rem;
     }
 
-    .store-logo {
+    .business-badge {
       position: absolute;
-      left: 1rem;
-      bottom: -26px;
-      z-index: 1;
-      width: 66px;
-      height: 66px;
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      border: 4px solid #fff;
+      top: 0.7rem;
+      left: 0.7rem;
       border-radius: 999px;
-      background: linear-gradient(135deg, #ec4fa3, #8b5cf6);
-      color: #fff;
-      font-size: 1.3rem;
+      background: rgba(255, 255, 255, 0.92);
+      color: #149475;
+      padding: 0.32rem 0.58rem;
+      font-size: 0.72rem;
       font-weight: 950;
-      box-shadow: 0 14px 26px rgba(132, 77, 160, 0.18);
+      box-shadow: 0 8px 18px rgba(69, 38, 86, 0.12);
     }
 
-    .store-body {
+    .item-body {
       display: flex;
       flex: 1;
       min-width: 0;
       flex-direction: column;
-      gap: 0.65rem;
-      padding: 2.3rem 1rem 1rem;
+      gap: 0.55rem;
+      padding: 0.85rem;
     }
 
-    .store-title-row {
+    .item-meta-row {
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0.75rem;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      min-height: 26px;
     }
 
-    .store-title-row h3 {
-      min-width: 0;
+    .item-meta-row span {
+      border-radius: 999px;
+      background: rgba(236, 79, 163, 0.1);
+      color: #c43d91;
+      padding: 0.26rem 0.5rem;
+      font-size: 0.7rem;
+      font-weight: 900;
+    }
+
+    .item-meta-row span + span {
+      background: rgba(139, 92, 246, 0.1);
+      color: #7653c9;
+    }
+
+    .item-card h3 {
+      min-height: 2.6em;
       color: var(--market-ink);
-      font-size: 1.12rem;
-      line-height: 1.18;
+      font-size: 1rem;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    .item-card h3 a {
+      color: inherit;
+      text-decoration: none;
       overflow-wrap: anywhere;
     }
 
-    .verified-badge,
-    .store-meta span,
-    .category-chips span {
-      border-radius: 999px;
-      font-size: 0.76rem;
-      font-weight: 900;
-      white-space: nowrap;
-    }
-
-    .verified-badge {
-      background: rgba(16, 185, 129, 0.11);
-      color: #149475;
-      padding: 0.32rem 0.58rem;
-    }
-
-    .store-location {
-      min-width: 0;
+    .seller-line,
+    .location-line {
       color: var(--market-muted);
-      font-size: 0.88rem;
-      font-weight: 850;
+      font-size: 0.82rem;
+      font-weight: 820;
+      line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .store-meta {
+    .seller-line a {
+      color: var(--market-accent-dark);
+      text-underline-offset: 2px;
+    }
+
+    .verified-label {
+      margin-left: 0.35rem;
+      color: #14785f;
+      font-size: 0.7rem;
+      font-weight: 950;
+      text-transform: uppercase;
+    }
+
+    .price-row {
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.45rem;
-    }
-
-    .store-meta span {
-      background: rgba(139, 92, 246, 0.1);
-      color: #7b55cf;
-      padding: 0.34rem 0.62rem;
-    }
-
-    .category-chips {
-      min-height: 30px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.45rem;
-    }
-
-    .category-chips span {
-      background: rgba(236, 79, 163, 0.1);
-      color: #c43d91;
-      padding: 0.32rem 0.58rem;
-    }
-
-    .visit-store-link {
-      width: 100%;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.6rem;
       margin-top: auto;
+    }
+
+    .price-row strong {
+      color: var(--market-ink);
+      font-size: 1.18rem;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .price-row span {
+      color: #149475;
+      font-size: 0.78rem;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .view-item-link {
+      width: 100%;
     }
 
     .load-more-row {
@@ -692,10 +626,6 @@ interface StorefrontPreview {
 
     .load-more-row button {
       min-width: 180px;
-      border: 0;
-      background: linear-gradient(135deg, #ec4fa3, #8b5cf6);
-      color: #fff;
-      box-shadow: 0 12px 26px rgba(139, 92, 246, 0.2);
     }
 
     .load-more-row button:disabled {
@@ -736,25 +666,15 @@ interface StorefrontPreview {
       color: #b83272;
     }
 
-    @media (max-width: 1180px) {
-      .store-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    @media (max-width: 1260px) {
+      .item-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
     }
 
-    @media (max-width: 900px) {
-      .stores-hero,
-      .stores-layout,
-      .store-grid {
+    @media (max-width: 980px) {
+      .business-layout {
         grid-template-columns: 1fr;
-      }
-
-      .stores-hero {
-        min-height: auto;
-      }
-
-      .hero-illustration {
-        display: none;
       }
 
       .filter-panel {
@@ -762,8 +682,20 @@ interface StorefrontPreview {
         order: -1;
       }
 
-      .store-search {
+      .item-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .business-search,
+      .item-grid,
+      .price-fields {
         grid-template-columns: 1fr;
+      }
+
+      .business-hero {
+        min-height: auto;
       }
 
       .section-head {
@@ -780,9 +712,10 @@ interface StorefrontPreview {
 })
 export class BusinessStoresComponent implements OnInit {
   private readonly listingService = inject(ListingService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   readonly listings = signal<PublicListing[]>([]);
-  readonly stores = signal<StorefrontPreview[]>([]);
   readonly categories = signal<Category[]>([]);
   readonly loading = signal(false);
   readonly loadingMore = signal(false);
@@ -792,36 +725,50 @@ export class BusinessStoresComponent implements OnInit {
 
   searchTerm = '';
   selectedCategoryId = 'ALL';
+  selectedCondition: BusinessConditionFilter = 'ALL';
+  sort: BusinessSortFilter = 'none';
+  minPrice: number | null = null;
+  maxPrice: number | null = null;
   city = '';
   county = '';
-  verifiedOnly = true;
-  hasActiveListingsOnly = true;
+  private lastSearchKey: string | null = null;
 
   ngOnInit(): void {
     this.listingService.getCategories().subscribe({
       next: categories => this.categories.set(categories),
       error: () => this.categories.set([]),
     });
-    this.runSearch();
+    this.route.queryParamMap.subscribe(params => {
+      this.applyQueryParams(params);
+      const key = this.searchStateKey();
+      if (key !== this.lastSearchKey) {
+        this.fetchFirstPage();
+      }
+    });
   }
 
   runSearch(): void {
+    this.fetchFirstPage();
+    this.syncUrlSearchState();
+  }
+
+  private fetchFirstPage(): void {
+    this.lastSearchKey = this.searchStateKey();
     this.loading.set(true);
     this.loadingMore.set(false);
     this.errorMsg.set('');
     this.nextCursor.set(null);
     this.listingService.searchBusinessStoreListings(this.searchParams()).subscribe({
       next: response => {
-        this.listings.set(response.data);
-        this.stores.set(this.buildStorefronts(this.listings()));
+        this.listings.set(response.data.filter(item => item.sellerType === 'BUSINESS'));
         this.nextCursor.set(response.page.nextCursor);
         this.hasMore.set(response.page.hasMore);
         this.loading.set(false);
       },
       error: error => {
         this.errorMsg.set(error.status
-          ? `Business stores could not be loaded. HTTP ${error.status}.`
-          : 'Business stores could not be loaded.');
+          ? `Business items could not be loaded. HTTP ${error.status}.`
+          : 'Business items could not be loaded.');
         this.loading.set(false);
       },
     });
@@ -836,16 +783,18 @@ export class BusinessStoresComponent implements OnInit {
     this.errorMsg.set('');
     this.listingService.searchBusinessStoreListings(this.searchParams(cursor)).subscribe({
       next: response => {
-        this.listings.set([...this.listings(), ...response.data]);
-        this.stores.set(this.buildStorefronts(this.listings()));
+        this.listings.set([
+          ...this.listings(),
+          ...response.data.filter(item => item.sellerType === 'BUSINESS'),
+        ]);
         this.nextCursor.set(response.page.nextCursor);
         this.hasMore.set(response.page.hasMore);
         this.loadingMore.set(false);
       },
       error: error => {
         this.errorMsg.set(error.status
-          ? `Business stores could not be loaded. HTTP ${error.status}.`
-          : 'Business stores could not be loaded.');
+          ? `Business items could not be loaded. HTTP ${error.status}.`
+          : 'Business items could not be loaded.');
         this.loadingMore.set(false);
       },
     });
@@ -861,82 +810,166 @@ export class BusinessStoresComponent implements OnInit {
   clearFilters(): void {
     this.searchTerm = '';
     this.selectedCategoryId = 'ALL';
+    this.selectedCondition = 'ALL';
+    this.sort = 'none';
+    this.minPrice = null;
+    this.maxPrice = null;
     this.city = '';
     this.county = '';
-    this.verifiedOnly = true;
-    this.hasActiveListingsOnly = true;
     this.runSearch();
+  }
+
+  browseAllBusinessItems(): void {
+    this.clearFilters();
   }
 
   hasActiveSearch(): boolean {
     return Boolean(
       this.searchTerm.trim()
       || this.selectedCategoryId !== 'ALL'
+      || this.selectedCondition !== 'ALL'
+      || this.sort !== 'none'
+      || this.minPrice !== null
+      || this.maxPrice !== null
       || this.city.trim()
-      || this.county.trim()
-      || !this.verifiedOnly
-      || !this.hasActiveListingsOnly,
+      || this.county.trim(),
     );
   }
 
-  initials(name: string): string {
-    const words = name.trim().split(/\s+/).filter(Boolean).slice(0, 2);
-    const initials = words.map(word => word[0]?.toUpperCase()).join('');
-    return initials || 'MS';
-  }
-
-  locationLabel(store: StorefrontPreview): string {
-    const city = store.city.trim();
-    const county = store.county.trim();
-    if (city && county) {
-      return `${city}, ${county}`;
+  activeFilterSummary(): string {
+    const parts: string[] = [];
+    if (this.searchTerm.trim()) {
+      parts.push(`keyword "${this.searchTerm.trim()}"`);
     }
-    return city || county || 'Local storefront';
-  }
-
-  private buildStorefronts(listings: PublicListing[]): StorefrontPreview[] {
-    const storefronts = new Map<string, StorefrontPreview>();
-    for (const listing of listings.filter(item => item.sellerType === 'BUSINESS')) {
-      const name = listing.sellerDisplayName?.trim() || 'Verified business';
-      const city = listing.publicCity || '';
-      const county = listing.publicRegion || '';
-      const key = `${name.toLowerCase()}|${city.toLowerCase()}|${county.toLowerCase()}`;
-      const current = storefronts.get(key);
-      const categorySet = new Set(current?.categories || []);
-      categorySet.add(listing.categoryName);
-      const coverImageUrl = current?.coverImageUrl || this.imageUrl(listing);
-      storefronts.set(key, {
-        key,
-        name,
-        city,
-        county,
-        activeListings: (current?.activeListings || 0) + 1,
-        categories: [...categorySet],
-        coverImageUrl,
-        coverAlt: coverImageUrl
-          ? `${name} storefront preview`
-          : 'Soft pastel verified storefront preview',
-        logoUrl: current?.logoUrl || listing.sellerAvatarUrl || null,
-      });
+    if (this.selectedCategoryId !== 'ALL') {
+      parts.push(`category ${this.suggestedCategoryName() || this.selectedCategoryId}`);
     }
-    return [...storefronts.values()].sort((left, right) => left.name.localeCompare(right.name));
+    if (this.selectedCondition !== 'ALL') {
+      parts.push(`condition ${this.conditionLabel(this.selectedCondition)}`);
+    }
+    if (this.minPrice !== null || this.maxPrice !== null) {
+      parts.push(`price ${this.minPrice ?? '0'} to ${this.maxPrice ?? 'any'}`);
+    }
+    if (this.city.trim()) {
+      parts.push(`city ${this.city.trim()}`);
+    }
+    if (this.county.trim()) {
+      parts.push(`county ${this.county.trim()}`);
+    }
+    if (this.sort !== 'none') {
+      parts.push(`sort ${this.sortLabel(this.sort)}`);
+    }
+    return parts.length ? `Active filters: ${parts.join(', ')}.` : 'No active filters.';
   }
 
-  private imageUrl(listing: PublicListing): string {
+  suggestedCategoryName(): string {
+    return this.categoryOptions().find(category => category.id === this.selectedCategoryId)?.name || '';
+  }
+
+  imageUrl(listing: PublicListing): string {
     return publicListingPrimaryImageUrl(listing, url => this.listingService.mediaUrl(url));
+  }
+
+  primaryImageAlt(listing: PublicListing): string {
+    return listing.images[0]?.altText || listing.images[0]?.originalFileName || listing.title;
+  }
+
+  ownerLabel(listing: PublicListing): string {
+    return publicListingOwnerLabel(listing);
+  }
+
+  locationLabel(listing: PublicListing): string {
+    return publicListingLocationLabel(listing, 'Ships from business');
+  }
+
+  conditionLabel(condition: ListingCondition): string {
+    return publicListingConditionLabel(condition);
+  }
+
+  formatPrice(listing: PublicListing): string {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: listing.currency || 'USD',
+    }).format(listing.priceAmount);
   }
 
   private searchParams(cursor: string | null = null) {
     return {
       q: this.searchTerm,
       categoryId: this.selectedCategoryId === 'ALL' ? null : this.selectedCategoryId,
-      condition: null,
-      minPrice: null,
-      maxPrice: null,
+      condition: this.selectedCondition === 'ALL' ? null : this.selectedCondition,
+      minPrice: this.minPrice,
+      maxPrice: this.maxPrice,
       city: this.city,
       county: this.county,
-      sort: null,
+      sort: this.sort === 'none' ? null : this.sort,
       cursor,
     };
+  }
+
+  private applyQueryParams(params: ParamMap): void {
+    this.searchTerm = params.get('q') || '';
+    this.selectedCategoryId = params.get('categoryId') || 'ALL';
+    this.selectedCondition = this.validCondition(params.get('condition'));
+    this.sort = this.validSort(params.get('sort'));
+    this.minPrice = this.optionalNumber(params.get('minPrice'));
+    this.maxPrice = this.optionalNumber(params.get('maxPrice'));
+    this.city = params.get('city') || '';
+    this.county = params.get('county') || '';
+  }
+
+  private syncUrlSearchState(): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: this.queryParamsFromState(),
+      replaceUrl: false,
+    });
+  }
+
+  private queryParamsFromState(): Record<string, string | null> {
+    return {
+      q: this.searchTerm.trim() || null,
+      categoryId: this.selectedCategoryId === 'ALL' ? null : this.selectedCategoryId,
+      condition: this.selectedCondition === 'ALL' ? null : this.selectedCondition,
+      minPrice: this.minPrice === null ? null : String(this.minPrice),
+      maxPrice: this.maxPrice === null ? null : String(this.maxPrice),
+      city: this.city.trim() || null,
+      county: this.county.trim() || null,
+      sort: this.sort === 'none' ? null : this.sort,
+    };
+  }
+
+  private searchStateKey(): string {
+    return JSON.stringify(this.queryParamsFromState());
+  }
+
+  private optionalNumber(value: string | null): number | null {
+    if (!value?.trim()) {
+      return null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private validCondition(value: string | null): BusinessConditionFilter {
+    return ['NEW', 'OPEN_BOX', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS'].includes(value || '')
+      ? value as ListingCondition
+      : 'ALL';
+  }
+
+  private validSort(value: string | null): BusinessSortFilter {
+    return ['newest', 'price_asc', 'price_desc'].includes(value || '')
+      ? value as PublicListingSort
+      : 'none';
+  }
+
+  private sortLabel(sort: BusinessSortFilter): string {
+    if (sort === 'price_asc') {
+      return 'price low to high';
+    }
+    if (sort === 'price_desc') {
+      return 'price high to low';
+    }
+    return 'newest';
   }
 }

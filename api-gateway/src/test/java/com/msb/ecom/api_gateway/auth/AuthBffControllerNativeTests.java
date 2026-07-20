@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -65,7 +66,7 @@ class AuthBffControllerNativeTests {
     private MockMvc mockMvc(NativeAuthService nativeAuthService) {
         return MockMvcBuilders.standaloneSetup(new AuthBffController(
                         nativeAuthService,
-                        new OAuth2SessionTokenRefresher(null, null, RestClient.builder())))
+                        mock(OAuth2SessionTokenRefresher.class)))
                 .setCustomArgumentResolvers(new NullCsrfTokenResolver())
                 .build();
     }

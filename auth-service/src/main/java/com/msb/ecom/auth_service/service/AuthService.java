@@ -131,12 +131,14 @@ public class AuthService {
                     return existing;
                 })
                 .orElseGet(() -> {
+                    String id = ulidGenerator.next();
                     User created = User.create(
-                            ulidGenerator.next(),
+                            id,
                             subject,
                             email,
                             actor.emailVerified(),
-                            displayName);
+                            displayName,
+                            publicHandle(id));
                     log.info("Creating identity user mapping for keycloakSub={}", subject);
                     return userRepository.save(created);
                 });
@@ -230,6 +232,11 @@ public class AuthService {
             throw new IllegalArgumentException("Avatar URL is invalid");
         }
         return trimmed;
+    }
+
+    // Generates a stable non-PII handle when an identity is first projected into the application database.
+    private String publicHandle(String userId) {
+        return "member-" + userId.toLowerCase(Locale.ROOT);
     }
 
     private void requireCurrentProfileVersion(User user, Long expectedVersion) {

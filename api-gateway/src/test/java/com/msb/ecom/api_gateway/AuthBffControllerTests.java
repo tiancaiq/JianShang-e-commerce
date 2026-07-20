@@ -1,6 +1,7 @@
 package com.msb.ecom.api_gateway;
 
 import com.msb.ecom.api_gateway.auth.LoginReturnUrl;
+import com.msb.ecom.api_gateway.auth.OAuth2SessionTokenRefresher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -11,6 +12,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
 
 import java.util.List;
 import java.util.Map;
@@ -18,7 +20,9 @@ import java.util.Map;
 import static org.hamcrest.Matchers.containsString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,6 +42,9 @@ class AuthBffControllerTests {
     @MockitoBean
     private OAuth2AuthorizedClientService authorizedClientService;
 
+    @MockitoBean
+    private OAuth2SessionTokenRefresher tokenRefresher;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -46,6 +53,14 @@ class AuthBffControllerTests {
         mockMvc.perform(get("/api/v1/auth/login").param("client", "marketplace"))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", containsString("/oauth2/authorization/marketplace")));
+
+        mockMvc.perform(get("/api/v1/auth/login").param("client", "seller-portal"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/seller-portal")));
+
+        mockMvc.perform(get("/api/v1/auth/login").param("client", "admin-portal"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("/oauth2/authorization/admin-portal")));
     }
 
     @Test
@@ -237,6 +252,27 @@ class AuthBffControllerTests {
     }
 
     @Test
+    void unusableAuthorizedClientClearsPhantomSessionAuthentication() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        when(tokenRefresher.refreshIfNecessary(any()))
+                .thenReturn(OAuth2SessionTokenRefresher.RefreshResult.SESSION_UNAVAILABLE);
+
+        mockMvc.perform(get("/api/v1/auth/session")
+                        .session(session)
+                        .with(oidcLogin()
+                                .idToken(idToken -> idToken
+                                        .subject("keycloak-sub-123")
+                                        .claim("email", "alex@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(false))
+                .andExpect(jsonPath("$.user").doesNotExist())
+                .andExpect(jsonPath("$.csrf.token").isString());
+
+        mockMvc.perform(get("/api/v1/users/me").session(session))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void stateChangingRequestsRequireCsrf() throws Exception {
         mockMvc.perform(post("/api/v1/auth/logout"))
                 .andExpect(status().isForbidden());
@@ -265,8 +301,49 @@ class AuthBffControllerTests {
                         containsString("http://localhost:8181/realms/msb-local/protocol/openid-connect/logout")))
                 .andExpect(header().string("Location", containsString("id_token_hint=")))
                 .andExpect(header().string("Location", containsString("post_logout_redirect_uri=http://localhost:4200/")))
+                .andExpect(header().string("Location", containsString("signedOut%3D1")))
                 .andExpect(header().string("Set-Cookie", containsString("JSESSIONID=;")));
 
         verify(authorizedClientService).removeAuthorizedClient(anyString(), anyString());
+    }
+
+    @Test
+    void logoutRedirectsSellerPortalBackToSellerLogin() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .param("client", "seller-portal")
+                        .with(csrf())
+                        .with(oidcLogin()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string(
+                        "Location",
+                        containsString("post_logout_redirect_uri=http://localhost:4200/login")))
+                .andExpect(header().string("Location", containsString("client%3Dseller-portal")))
+                .andExpect(header().string("Location", containsString("signedOut%3D1")));
+    }
+
+    @Test
+    void logoutRedirectsAdminPortalBackToAdminLogin() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .param("client", "admin-portal")
+                        .with(csrf())
+                        .with(oidcLogin()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string(
+                        "Location",
+                        containsString("post_logout_redirect_uri=http://localhost:4200/login")))
+                .andExpect(header().string("Location", containsString("client%3Dadmin-portal")))
+                .andExpect(header().string("Location", containsString("signedOut%3D1")));
+    }
+
+    @Test
+    void logoutIgnoresUnknownClientHint() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .param("client", "unknown")
+                        .with(csrf())
+                        .with(oidcLogin()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", containsString("post_logout_redirect_uri=http://localhost:4200/")))
+                .andExpect(header().string("Location", containsString("signedOut%3D1")))
+                .andExpect(header().string("Location", org.hamcrest.Matchers.not(containsString("client%3Dunknown"))));
     }
 }

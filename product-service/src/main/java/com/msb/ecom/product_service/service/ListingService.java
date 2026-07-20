@@ -4,6 +4,7 @@ import com.msb.ecom.common.core.validation.FixedLengthIds;
 import com.msb.ecom.common.core.validation.TextInputs;
 import com.msb.ecom.common.web.security.CurrentActor;
 import com.msb.ecom.common.web.security.CurrentActorProvider;
+import com.msb.ecom.product_service.model.BusinessSkuConflictException;
 import com.msb.ecom.product_service.model.CategoryNotFoundException;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.model.ListingMediaNotFoundException;
@@ -12,10 +13,13 @@ import com.msb.ecom.product_service.model.ListingSellerType;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
 import com.msb.ecom.product_service.model.ModerationCaseNotFoundException;
 import com.msb.ecom.product_service.model.ModerationCaseVersionConflictException;
+import com.msb.ecom.product_service.knowledge.ListingKnowledgePublicationService;
 import com.msb.ecom.product_service.service.AuthServiceClient;
 import com.msb.ecom.product_service.service.AuthServiceClient.BusinessMembershipAuthorization;
 import com.msb.ecom.product_service.service.AuthServiceClient.IndividualSellerAuthorization;
 import com.msb.ecom.product_service.repository.CategoryRepository;
+import com.msb.ecom.product_service.repository.BusinessStoreItemSearchCriteria;
+import com.msb.ecom.product_service.repository.BusinessStoreItemStatusCounts;
 import com.msb.ecom.product_service.repository.ListingDraftInsert;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.repository.ListingDraftRepository.ListingOwnerSnapshot;
@@ -41,6 +45,8 @@ import com.msb.ecom.product_service.dto.AdminListingModerationCaseDetailResponse
 import com.msb.ecom.product_service.dto.AdminListingModerationCaseResponse;
 import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
 import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
+import com.msb.ecom.product_service.dto.BusinessStoreItemSearchPageResponse;
+import com.msb.ecom.product_service.dto.BusinessStoreItemSearchRequest;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
 import com.msb.ecom.product_service.dto.ChatTradeCompletionRequest;
@@ -67,6 +73,7 @@ import com.msb.ecom.product_service.storage.StorageUploadTarget;
 import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -90,6 +97,8 @@ import java.util.regex.Pattern;
 public class ListingService {
 
     static final int PUBLIC_BROWSE_LIMIT = 24;
+    private static final int PUBLIC_BUSINESS_VISIBILITY_CANDIDATE_LIMIT = 500;
+    static final int BUSINESS_STORE_ITEM_MANAGEMENT_LIMIT = 24;
     private static final String DEFAULT_INDIVIDUAL_SELLER_LABEL = "Marketplace seller";
     private static final String DEFAULT_BUSINESS_SELLER_LABEL = "Business seller";
     private static final Pattern SAFE_FILE_PART = Pattern.compile("[^A-Za-z0-9._-]");
@@ -111,6 +120,7 @@ public class ListingService {
     private final ListingMediaStorageProperties mediaStorageProperties;
     private final ListingSearchProperties listingSearchProperties;
     private final OpenSearchListingSearchClient openSearchListingSearchClient;
+    private final ListingKnowledgePublicationService listingKnowledgePublicationService;
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getActiveCategories() {
@@ -154,6 +164,43 @@ public class ListingService {
         return withSellerLabels(withImages(listingDraftRepository.findByBusinessId(membership.businessId())));
     }
 
+    @Transactional(readOnly = true)
+    // Returns one authorized business catalog page plus lifecycle counts for the seller management screen.
+    public BusinessStoreItemSearchPageResponse searchBusinessStoreItems(
+            String businessId,
+            BusinessStoreItemSearchRequest request) {
+        String normalizedBusinessId = normalizedRequiredId("Business ID", businessId);
+        CurrentActor actor = currentActorProvider.currentActor();
+        AuthServiceClient.BusinessStoreContextAuthorization context =
+                authServiceClient.requireBusinessStoreContext(actor.accessToken(), normalizedBusinessId);
+        BusinessStoreItemSearchCriteria criteria = BusinessStoreItemSearchRequests.criteria(request);
+        int limit = BusinessStoreItemSearchRequests.normalizedLimit(
+                request.limit(),
+                BUSINESS_STORE_ITEM_MANAGEMENT_LIMIT);
+
+        List<ListingDraftResponse> fetched = listingDraftRepository.searchBusinessStoreItems(
+                context.businessId(),
+                criteria,
+                limit + 1);
+        boolean hasMore = fetched.size() > limit;
+        List<ListingDraftResponse> rows = hasMore ? fetched.subList(0, limit) : fetched;
+        String nextCursor = hasMore && !rows.isEmpty()
+                ? BusinessStoreItemSearchRequests.encodeCursor(rows.get(rows.size() - 1))
+                : null;
+        BusinessStoreItemStatusCounts counts =
+                listingDraftRepository.countBusinessStoreItemStatuses(context.businessId());
+
+        return new BusinessStoreItemSearchPageResponse(
+                withSellerLabels(withImages(rows)),
+                new BusinessStoreItemSearchPageResponse.PageMetadata(nextCursor, hasMore),
+                new BusinessStoreItemSearchPageResponse.StatusSummary(
+                        counts.total(),
+                        counts.draft(),
+                        counts.active(),
+                        counts.paused(),
+                        counts.removed()));
+    }
+
     @Transactional
     // Creates a business store item draft from the current approved store context; no public publishing occurs here.
     public ListingDraftResponse createBusinessStoreItemDraft(String businessId, CreateListingDraftRequest request) {
@@ -176,11 +223,89 @@ public class ListingService {
             String listingId,
             long expectedVersion,
             CreateListingDraftRequest request) {
-        ListingDraftResponse listing = getBusinessStoreItem(businessId, listingId);
-        return updateDraft(
-                listing.id(),
-                expectedVersion,
-                businessStoreItemRequest(normalizedRequiredId("Business ID", businessId), request));
+        ListingDraftResponse listing = requireBusinessStoreItemAccess(businessId, listingId, true);
+        if (!canBusinessSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Pause an active store item before editing it.");
+        }
+        if (!categoryRepository.activeCategoryExists(request.categoryId())) {
+            throw new CategoryNotFoundException();
+        }
+
+        CreateListingDraftRequest normalizedRequest =
+                businessStoreItemRequest(normalizedRequiredId("Business ID", businessId), request);
+        ListingDraftUpdate update = businessUpdate(
+                new ListingOwnerSnapshot(
+                        listing.id(),
+                        ListingSellerType.BUSINESS,
+                        null,
+                        listing.businessId(),
+                        listing.status()),
+                normalizedRequest);
+        int updated;
+        try {
+            updated = "PAUSED".equals(listing.status())
+                    ? listingDraftRepository.updatePausedBusinessStoreItem(listing.id(), expectedVersion, update, Instant.now())
+                    : listingDraftRepository.updateDraft(listing.id(), expectedVersion, update, Instant.now());
+        } catch (DuplicateKeyException exception) {
+            throw duplicateBusinessSku(listing.businessId(), update.sku());
+        }
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+
+        log.info("Updated business store item listingId={} businessId={} status={}",
+                listing.id(), listing.businessId(), listing.status());
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id())
+                .orElseThrow(ListingNotFoundException::new)));
+    }
+
+    @Transactional
+    // Self-publishes a complete active-store item to the public /stores surface without admin moderation.
+    public ListingDraftResponse publishBusinessStoreItem(String businessId, String listingId, long expectedVersion) {
+        ListingDraftResponse listing = requireBusinessStoreItemAccess(businessId, listingId, true);
+        if (!"DRAFT".equals(listing.status())) {
+            throw new IllegalArgumentException("Only draft store items can be published.");
+        }
+        requirePublishableBusinessStoreItem(listing);
+
+        int updated = listingDraftRepository.publishBusinessStoreItem(listing.id(), expectedVersion, Instant.now());
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        upsertListingSearchProjection(listing.id());
+        log.info("Published business store item listingId={} businessId={}", listing.id(), listing.businessId());
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+    }
+
+    @Transactional
+    // Pauses a self-published store item so it no longer appears on /stores.
+    public ListingDraftResponse pauseBusinessStoreItem(String businessId, String listingId, long expectedVersion) {
+        ListingDraftResponse listing = requireBusinessStoreItemAccess(businessId, listingId, false);
+        int updated = listingDraftRepository.pauseBusinessStoreItem(listing.id(), expectedVersion, Instant.now());
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        removeListingFromSearchIndex(listing.id());
+        log.info("Paused business store item listingId={} businessId={}", listing.id(), listing.businessId());
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+    }
+
+    @Transactional
+    // Relists a paused self-published store item while preserving its original published timestamp.
+    public ListingDraftResponse relistBusinessStoreItem(String businessId, String listingId, long expectedVersion) {
+        ListingDraftResponse listing = requireBusinessStoreItemAccess(businessId, listingId, true);
+        if (!"PAUSED".equals(listing.status())) {
+            throw new IllegalArgumentException("Only paused store items can be relisted.");
+        }
+        requirePublishableBusinessStoreItem(listing);
+
+        int updated = listingDraftRepository.relistBusinessStoreItem(listing.id(), expectedVersion, Instant.now());
+        if (updated == 0) {
+            throw new ListingVersionConflictException();
+        }
+        upsertListingSearchProjection(listing.id());
+        log.info("Relisted business store item listingId={} businessId={}", listing.id(), listing.businessId());
+        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
     }
 
     @Transactional(readOnly = true)
@@ -239,21 +364,23 @@ public class ListingService {
             throw new IllegalArgumentException("Only active approved individual listings can be completed from chat.");
         }
 
-        int updated = listingDraftRepository.closeActiveIndividualListingFromChat(normalizedListingId, sellerUserId, Instant.now());
+        Instant now = Instant.now();
+        int updated = listingDraftRepository.closeActiveIndividualListingFromChat(normalizedListingId, sellerUserId, now);
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
+        ListingDraftResponse updatedListing = reconcileListingKnowledge(listing, now);
         removeListingFromSearchIndex(normalizedListingId);
         log.info("Closed listing from chat completion listingId={} sellerUserId={} conversationId={} quantitySold={}",
                 normalizedListingId, sellerUserId, request.conversationId(), quantitySold);
-        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(normalizedListingId)
-                .orElseThrow(ListingNotFoundException::new)));
+        return withSellerLabels(withImages(updatedListing));
     }
 
     @Transactional(readOnly = true)
     // Public browse is intentionally fixed-size until SEARCH-03 adds cursor pagination.
     public List<PublicListingResponse> getPublicListings() {
-        List<PublicListingResponse> listings = listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT).stream()
+        List<PublicListingResponse> listings = visiblePublicListings(
+                listingDraftRepository.findPublicListings(PUBLIC_BROWSE_LIMIT)).stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
         return withPublicSellerLabels(listings);
@@ -264,6 +391,9 @@ public class ListingService {
     public List<PublicListingResponse> getMyLikedListings() {
         List<PublicListingResponse> listings = listingDraftRepository
                 .findPublicLikedListingsForUser(currentUserId(), PUBLIC_BROWSE_LIMIT)
+                .stream()
+                .toList();
+        listings = visiblePublicListings(listings)
                 .stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
@@ -307,12 +437,14 @@ public class ListingService {
             String sellerType,
             PublicListingSearchCriteria criteria,
             int limit) {
-        if (!listingSearchProperties.openSearchEnabled()) {
-            return listingDraftRepository.searchPublicListingsBySellerType(sellerType, criteria, limit);
+        if (!listingSearchProperties.openSearchEnabled() || "BUSINESS".equals(sellerType)) {
+            return visibleBusinessStoreListings(
+                    sellerType,
+                    listingDraftRepository.searchPublicListingsBySellerType(sellerType, criteria, limit));
         }
         List<String> listingIds = openSearchListingSearchClient.searchIds(sellerType, criteria, limit);
         // OpenSearch only chooses candidate IDs; MySQL still revalidates public visibility before response.
-        return listingDraftRepository.findPublicListingsByIds(listingIds);
+        return visibleBusinessStoreListings(sellerType, listingDraftRepository.findPublicListingsByIds(listingIds));
     }
 
     @Transactional(readOnly = true)
@@ -324,7 +456,7 @@ public class ListingService {
     @Transactional(readOnly = true)
     // SEARCH-01B applies storefront filters only to approved active business listings.
     public PublicListingSearchPageResponse searchBusinessStoreListings(PublicListingSearchRequest request) {
-        PublicListingSearchCriteria criteria = PublicListingSearchRequests.criteria(request);
+        PublicListingSearchCriteria criteria = businessStoreSearchCriteria(PublicListingSearchRequests.criteria(request));
         return pagedPublicListings(
                 "BUSINESS",
                 criteria,
@@ -332,10 +464,164 @@ public class ListingService {
     }
 
     private List<PublicListingResponse> getPublicListingsBySellerType(String sellerType) {
-        List<PublicListingResponse> listings = listingDraftRepository.findPublicListingsBySellerType(sellerType, PUBLIC_BROWSE_LIMIT).stream()
+        List<PublicListingResponse> listings = visibleBusinessStoreListings(
+                        sellerType,
+                        listingDraftRepository.findPublicListingsBySellerType(sellerType, PUBLIC_BROWSE_LIMIT))
+                .stream()
                 .map(this::publicListingWithImagesAndNotice)
                 .toList();
         return withPublicSellerLabels(listings);
+    }
+
+    private PublicListingSearchCriteria businessStoreSearchCriteria(PublicListingSearchCriteria criteria) {
+        try {
+            Set<String> candidateBusinessIds = listingDraftRepository.findSelfPublishedBusinessIds(
+                    PUBLIC_BUSINESS_VISIBILITY_CANDIDATE_LIMIT);
+            if (candidateBusinessIds.isEmpty()) {
+                return criteria.withVisibleBusinessIds(List.of()).withBusinessIds(List.of());
+            }
+            List<AuthServiceClient.PublicBusinessStoreSearchResult> visibleStores = authServiceClient
+                    .searchPublicBusinessStores(null, candidateBusinessIds, Set.of());
+            List<String> visibleBusinessIds = (visibleStores == null
+                    ? List.<AuthServiceClient.PublicBusinessStoreSearchResult>of()
+                    : visibleStores)
+                    .stream()
+                    .map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(this::hasText)
+                    .distinct()
+                    .toList();
+            PublicListingSearchCriteria visibleCriteria = criteria.withVisibleBusinessIds(visibleBusinessIds);
+            if (hasText(criteria.city()) || hasText(criteria.county())) {
+                visibleCriteria = visibleCriteria
+                        .withVisibleBusinessIds(businessIdsMatchingPublicLocation(visibleBusinessIds, criteria))
+                        .withoutLocationFilters();
+            }
+            if (!hasText(criteria.keyword())) {
+                return visibleCriteria;
+            }
+            List<AuthServiceClient.PublicBusinessStoreSearchResult> matchedStores = authServiceClient
+                    .searchPublicBusinessStores(criteria.keyword(), Set.of(), Set.of());
+            List<String> matchedBusinessIds = (matchedStores == null
+                    ? List.<AuthServiceClient.PublicBusinessStoreSearchResult>of()
+                    : matchedStores)
+                    .stream()
+                    .map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(this::hasText)
+                    .distinct()
+                    .toList();
+            return visibleCriteria.withBusinessIds(matchedBusinessIds);
+        } catch (ListingAuthorizationException exception) {
+            log.warn("Auth-service public business store visibility lookup failed; hiding business search results.");
+            return criteria.withVisibleBusinessIds(List.of()).withBusinessIds(List.of());
+        } catch (RuntimeException exception) {
+            log.warn("Auth-service public business store visibility lookup unavailable; hiding business search results.");
+            return criteria.withVisibleBusinessIds(List.of()).withBusinessIds(List.of());
+        }
+    }
+
+    // Applies storefront location filters to auth-owned public store metadata, which is also shown on listing cards.
+    private List<String> businessIdsMatchingPublicLocation(
+            List<String> visibleBusinessIds,
+            PublicListingSearchCriteria criteria) {
+        if (visibleBusinessIds.isEmpty()) {
+            return List.of();
+        }
+        AuthServiceClient.AdminIdentityLabels labels = authServiceClient.lookupPublicSellerLabels(
+                Set.of(),
+                new LinkedHashSet<>(visibleBusinessIds));
+        Map<String, AuthServiceClient.BusinessIdentityLabel> businesses = businessIdentityMap(labels);
+        return visibleBusinessIds.stream()
+                .filter(businessId -> publicStoreLocationMatches(
+                        businesses.get(businessId),
+                        criteria.city(),
+                        criteria.county()))
+                .toList();
+    }
+
+    private boolean publicStoreLocationMatches(
+            AuthServiceClient.BusinessIdentityLabel business,
+            String city,
+            String region) {
+        return business != null
+                && publicLocationPartMatches(city, business.publicCity())
+                && publicLocationPartMatches(region, business.publicRegion());
+    }
+
+    private boolean publicLocationPartMatches(String requested, String actual) {
+        if (!hasText(requested)) {
+            return true;
+        }
+        String normalizedActual = TextInputs.collapseWhitespaceToNull(actual);
+        return normalizedActual != null && requested.equalsIgnoreCase(normalizedActual);
+    }
+
+    private List<PublicListingResponse> visibleBusinessStoreListings(
+            String sellerType,
+            List<PublicListingResponse> listings) {
+        if (!"BUSINESS".equals(sellerType) || listings.isEmpty()) {
+            return listings;
+        }
+        Set<String> businessIds = collectSellerIds(
+                listings,
+                listing -> "BUSINESS".equals(listing.sellerType()),
+                PublicListingResponse::sellerId);
+        if (businessIds.isEmpty()) {
+            return List.of();
+        }
+        try {
+            List<AuthServiceClient.PublicBusinessStoreSearchResult> stores =
+                    authServiceClient.searchPublicBusinessStores(null, businessIds, Set.of());
+            Set<String> visibleBusinessIds = (stores == null ? List.<AuthServiceClient.PublicBusinessStoreSearchResult>of() : stores)
+                    .stream()
+                    .map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(this::hasText)
+                    .collect(Collectors.toCollection(HashSet::new));
+            return listings.stream()
+                    .filter(listing -> visibleBusinessIds.contains(listing.sellerId()))
+                    .toList();
+        } catch (ListingAuthorizationException exception) {
+            log.warn("Auth-service public business store visibility lookup failed; hiding business search results.");
+            return List.of();
+        } catch (RuntimeException exception) {
+            log.warn("Auth-service public business store visibility lookup unavailable; hiding business search results.");
+            return List.of();
+        }
+    }
+
+    private List<PublicListingResponse> visiblePublicListings(List<PublicListingResponse> listings) {
+        Set<String> visibleBusinessIds = visibleBusinessIdsFor(listings);
+        return listings.stream()
+                .filter(listing -> visiblePublicListing(listing, visibleBusinessIds))
+                .toList();
+    }
+
+    private boolean visiblePublicListing(PublicListingResponse listing, Set<String> visibleBusinessIds) {
+        return !"BUSINESS".equals(listing.sellerType()) || visibleBusinessIds.contains(listing.sellerId());
+    }
+
+    private Set<String> visibleBusinessIdsFor(List<PublicListingResponse> listings) {
+        Set<String> businessIds = collectSellerIds(
+                listings,
+                listing -> "BUSINESS".equals(listing.sellerType()),
+                PublicListingResponse::sellerId);
+        if (businessIds.isEmpty()) {
+            return Set.of();
+        }
+        try {
+            List<AuthServiceClient.PublicBusinessStoreSearchResult> stores =
+                    authServiceClient.searchPublicBusinessStores(null, businessIds, Set.of());
+            return (stores == null ? List.<AuthServiceClient.PublicBusinessStoreSearchResult>of() : stores)
+                    .stream()
+                    .map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(this::hasText)
+                    .collect(Collectors.toCollection(HashSet::new));
+        } catch (ListingAuthorizationException exception) {
+            log.warn("Auth-service public business store visibility lookup failed; hiding business browse results.");
+            return Set.of();
+        } catch (RuntimeException exception) {
+            log.warn("Auth-service public business store visibility lookup unavailable; hiding business browse results.");
+            return Set.of();
+        }
     }
 
     private PublicListingResponse publicListingWithImagesAndNotice(PublicListingResponse listing) {
@@ -345,6 +631,10 @@ public class ListingService {
                 listing.sellerId(),
                 listing.sellerDisplayName(),
                 listing.sellerAvatarUrl(),
+                listing.storeId(),
+                listing.storeSlug(),
+                listing.storeName(),
+                listing.businessVerified(),
                 listing.categoryId(),
                 listing.categorySlug(),
                 listing.categoryName(),
@@ -405,6 +695,12 @@ public class ListingService {
             long expectedVersion,
             CreateListingDraftRequest request) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        ListingDraftResponse before = listingDraftRepository.findOptionalById(listing.id())
+                .orElseThrow(ListingNotFoundException::new);
+        if (listing.sellerType() == ListingSellerType.BUSINESS && !"DRAFT".equals(listing.status())) {
+            throw new IllegalArgumentException(
+                    "Use the business store item route to edit paused items; active items must be paused first.");
+        }
         if (!canSellerEdit(listing.status())) {
             throw new IllegalArgumentException("Listing cannot be edited in its current state.");
         }
@@ -420,32 +716,46 @@ public class ListingService {
             case BUSINESS -> businessUpdate(listing, request);
         };
 
-        int updated = listingDraftRepository.updateDraft(listing.id(), expectedVersion, update, Instant.now());
+        Instant now = Instant.now();
+        int updated;
+        try {
+            updated = listingDraftRepository.updateDraft(listing.id(), expectedVersion, update, now);
+        } catch (DuplicateKeyException exception) {
+            if (listing.sellerType() == ListingSellerType.BUSINESS) {
+                throw duplicateBusinessSku(listing.businessId(), update.sku());
+            }
+            throw exception;
+        }
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
 
         log.info("Updated listing draft id={} sellerType={}", listing.id(), listing.sellerType());
+        ListingDraftResponse updatedListing = reconcileListingKnowledge(before, now);
         removeListingFromSearchIndex(listing.id());
-        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+        return withSellerLabels(withImages(updatedListing));
     }
 
     @Transactional
     // Seller close removes a listing from any public/moderation queue without deleting its audit history.
     public ListingDraftResponse closeListing(String listingId, long expectedVersion) {
         ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        ListingDraftResponse before = listingDraftRepository.findOptionalById(listing.id())
+                .orElseThrow(ListingNotFoundException::new);
         if (!canSellerClose(listing.status())) {
             throw new IllegalArgumentException("Only draft, pending-review, or active listings can be closed.");
         }
 
-        int updated = listingDraftRepository.closeListing(listing.id(), expectedVersion, Instant.now());
+        Instant now = Instant.now();
+        int updated = listingDraftRepository.closeListing(listing.id(), expectedVersion, now);
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
 
         log.info("Closed listing id={} sellerType={}", listing.id(), listing.sellerType());
+        ListingDraftResponse updatedListing = reconcileListingKnowledge(before, now);
         removeListingFromSearchIndex(listing.id());
-        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+        return withSellerLabels(withImages(updatedListing));
     }
 
     @Transactional
@@ -520,10 +830,11 @@ public class ListingService {
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
+        ListingDraftResponse updatedListing = reconcileListingKnowledge(listing, now);
         recordAdminListingAction(listing.id(), "ADMIN_EDIT", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin edited active listing listingId={} adminUserId={}", listing.id(), admin.userId());
         upsertListingSearchProjection(listing.id());
-        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+        return withSellerLabels(withImages(updatedListing));
     }
 
     @Transactional
@@ -533,16 +844,17 @@ public class ListingService {
             long expectedVersion,
             AdminListingRemoveRequest request) {
         AuthServiceClient.PlatformAdminAuthorization admin = requirePlatformAdmin();
-        ListingDraftResponse listing = activeApprovedListing(normalizedRequiredId("Listing ID", listingId));
+        ListingDraftResponse listing = activePublicListing(normalizedRequiredId("Listing ID", listingId));
         Instant now = Instant.now();
         int updated = listingDraftRepository.removeActiveListingByAdmin(listing.id(), expectedVersion, now);
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
+        ListingDraftResponse updatedListing = reconcileListingKnowledge(listing, now);
         recordAdminListingAction(listing.id(), "ADMIN_REMOVE", request.reason(), admin.userId(), expectedVersion + 1, now);
         log.info("Admin removed active listing listingId={} adminUserId={}", listing.id(), admin.userId());
         removeListingFromSearchIndex(listing.id());
-        return withSellerLabels(withImages(listingDraftRepository.findOptionalById(listing.id()).orElseThrow(ListingNotFoundException::new)));
+        return withSellerLabels(withImages(updatedListing));
     }
 
     // Rebuilds the derived OpenSearch listing projection from authoritative MySQL rows.
@@ -734,11 +1046,13 @@ public class ListingService {
         };
 
         Instant publishedAt = "APPROVE".equals(decision) ? now : null;
+        String publicationSource = "APPROVE".equals(decision) ? "ADMIN_REVIEW" : null;
         int updated = listingDraftRepository.applyModerationDecision(
                 listing.id(),
                 expectedVersion,
                 nextStatus,
                 nextModerationStatus,
+                publicationSource,
                 publishedAt,
                 now);
         if (updated == 0) {
@@ -747,6 +1061,7 @@ public class ListingService {
             throw new ListingVersionConflictException();
         }
         listingMediaRepository.markImagesModerationStatus(listing.id(), nextModerationStatus, Timestamp.from(now));
+        reconcileListingKnowledge(listing, now);
 
         ListingModerationDecisionResponse response = listingModerationDecisionRepository.insert(
                 new ListingModerationDecisionInsert(
@@ -962,6 +1277,8 @@ public class ListingService {
             String listingId,
             UpdateListingImagesRequest request) {
         ListingOwnerSnapshot listing = draftListingForMedia(listingId);
+        ListingDraftResponse before = listingDraftRepository.findOptionalById(listing.id())
+                .orElseThrow(ListingNotFoundException::new);
         List<ListingImageRequest> requestedImages = request.images() == null ? List.of() : request.images();
         if (requestedImages.size() > 10) {
             throw new IllegalArgumentException("A listing can have up to 10 images.");
@@ -994,6 +1311,7 @@ public class ListingService {
 
         listingMediaRepository.replaceImages(listing.id(), inserts);
         listingDraftRepository.markSellerEdited(listing.id(), now);
+        reconcileListingKnowledge(before, now);
         removeListingFromSearchIndex(listing.id());
         List<ListingImageResponse> images = listingMediaRepository.findImagesByListingId(listing.id());
         log.info("Updated listing images listingId={} count={}", listing.id(), images.size());
@@ -1076,7 +1394,7 @@ public class ListingService {
     }
 
     private ListingDraftResponse withImages(ListingDraftResponse listing) {
-        return new ListingDraftResponse(
+        ListingDraftResponse withMedia = new ListingDraftResponse(
                 listing.id(),
                 listing.sellerType(),
                 listing.individualSellerUserId(),
@@ -1097,10 +1415,17 @@ public class ListingService {
                 listing.publicRegion(),
                 listing.status(),
                 listing.moderationStatus(),
+                listing.publicationSource(),
+                listing.publishedAt(),
                 listing.version(),
                 listing.createdAt(),
                 listing.updatedAt(),
+                listing.moderationAction(),
+                listing.moderationReason(),
+                listing.moderationActionAt(),
                 listingMediaRepository.findImagesByListingId(listing.id()));
+        return withMedia.withModerationAction(
+                listingModerationDecisionRepository.findLatestByListingId(listing.id()).orElse(null));
     }
 
     private List<ListingDraftResponse> withSellerLabels(List<ListingDraftResponse> listings) {
@@ -1136,11 +1461,28 @@ public class ListingService {
                         PublicListingResponse::sellerId));
         Map<String, String> users = userLabelMap(labels);
         Map<String, String> businesses = businessLabelMap(labels);
+        Map<String, AuthServiceClient.BusinessIdentityLabel> businessIdentities = businessIdentityMap(labels);
         Map<String, String> userAvatars = userAvatarMap(labels);
         return listings.stream()
-                .map(listing -> listing.withSellerLabel(
-                        sellerDisplayName(listing, users, businesses),
-                        "INDIVIDUAL".equals(listing.sellerType()) ? userAvatars.get(listing.sellerId()) : null))
+                .map(listing -> {
+                    if ("BUSINESS".equals(listing.sellerType())) {
+                        AuthServiceClient.BusinessIdentityLabel business = businessIdentities.get(listing.sellerId());
+                        if (business != null) {
+                            String storeName = hasText(business.storeName()) ? business.storeName() : business.legalName();
+                            return listing.withBusinessStoreIdentity(
+                                    storeName,
+                                    business.storeId(),
+                                    business.storeSlug(),
+                                    storeName,
+                                    business.verified(),
+                                    business.publicCity(),
+                                    business.publicRegion());
+                        }
+                    }
+                    return listing.withSellerLabel(
+                            sellerDisplayName(listing, users, businesses),
+                            "INDIVIDUAL".equals(listing.sellerType()) ? userAvatars.get(listing.sellerId()) : null);
+                })
                 .toList();
     }
 
@@ -1173,6 +1515,9 @@ public class ListingService {
         } catch (ListingAuthorizationException exception) {
             log.warn("Auth-service public seller label lookup failed; using neutral seller labels.");
             return new AuthServiceClient.AdminIdentityLabels(List.of(), List.of());
+        } catch (RuntimeException exception) {
+            log.warn("Auth-service public seller label lookup unavailable; using neutral seller labels.");
+            return new AuthServiceClient.AdminIdentityLabels(List.of(), List.of());
         }
     }
 
@@ -1191,6 +1536,15 @@ public class ListingService {
                 .collect(Collectors.toMap(
                         AuthServiceClient.BusinessIdentityLabel::id,
                         AuthServiceClient.BusinessIdentityLabel::legalName,
+                        (left, right) -> left));
+    }
+
+    private Map<String, AuthServiceClient.BusinessIdentityLabel> businessIdentityMap(
+            AuthServiceClient.AdminIdentityLabels labels) {
+        return safeBusinesses(labels).stream()
+                .collect(Collectors.toMap(
+                        AuthServiceClient.BusinessIdentityLabel::id,
+                        Function.identity(),
                         (left, right) -> left));
     }
 
@@ -1252,7 +1606,8 @@ public class ListingService {
         AuthServiceClient.BusinessStoreContextAuthorization context =
                 authServiceClient.requireBusinessStoreContext(actor.accessToken(), businessId);
 
-        return listingDraftRepository.insertDraft(new ListingDraftInsert(
+        String sku = normalizedRequiredText("SKU", request.sku(), 64);
+        ListingDraftInsert draft = new ListingDraftInsert(
                 ulidGenerator.next(),
                 ListingSellerType.BUSINESS,
                 null,
@@ -1266,11 +1621,29 @@ public class ListingService {
                 request.price().amount(),
                 request.price().currency().toUpperCase(Locale.ROOT),
                 false,
-                normalizedRequiredText("SKU", request.sku(), 64),
+                sku,
                 request.quantity(),
                 null,
                 null,
-                Instant.now()));
+                Instant.now());
+        try {
+            return listingDraftRepository.insertDraft(draft);
+        } catch (DuplicateKeyException exception) {
+            throw duplicateBusinessSku(context.businessId(), sku);
+        }
+    }
+
+    // Reads the new aggregate version and publishes its immutable AI source transition inside the caller transaction.
+    private ListingDraftResponse reconcileListingKnowledge(ListingDraftResponse before, Instant occurredAt) {
+        ListingDraftResponse after = listingDraftRepository.findOptionalById(before.id())
+                .orElseThrow(ListingNotFoundException::new);
+        listingKnowledgePublicationService.reconcile(before, after, occurredAt);
+        return after;
+    }
+
+    private BusinessSkuConflictException duplicateBusinessSku(String businessId, String sku) {
+        log.warn("Rejected duplicate business SKU businessId={} sku={}", businessId, sku);
+        return new BusinessSkuConflictException();
     }
 
     private ListingDraftUpdate individualUpdate(ListingOwnerSnapshot listing, CreateListingDraftRequest request) {
@@ -1404,13 +1777,38 @@ public class ListingService {
 
     private ListingOwnerSnapshot draftListingForMedia(String listingId) {
         ListingOwnerSnapshot listing = ownedListing(listingId);
-        if (!canSellerEdit(listing.status())) {
-            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, active, or closed.");
+        if (listing.sellerType() == ListingSellerType.BUSINESS && !canBusinessSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Pause an active store item before changing its images.");
+        }
+        if (!canSellerChangeMedia(listing.status())) {
+            throw new IllegalArgumentException(
+                    "Listing media can be changed only while the listing is draft, pending review, active, paused, or closed.");
+        }
+        return listing;
+    }
+
+    private ListingDraftResponse activePublicListing(String listingId) {
+        ListingDraftResponse listing = listingDraftRepository.findOptionalById(listingId)
+                .orElseThrow(ListingNotFoundException::new);
+        boolean individualApproved = "INDIVIDUAL".equals(listing.sellerType())
+                && "APPROVED".equals(listing.moderationStatus());
+        boolean businessSelfPublished = "BUSINESS".equals(listing.sellerType())
+                && "BUSINESS_SELF_PUBLISHED".equals(listing.publicationSource());
+        if (!"ACTIVE".equals(listing.status()) || (!individualApproved && !businessSelfPublished)) {
+            throw new IllegalArgumentException("Only active public listings can use this admin action.");
         }
         return listing;
     }
 
     private ListingDraftResponse requireBusinessStoreItemMediaAccess(String businessId, String listingId) {
+        ListingDraftResponse listing = requireBusinessStoreItemAccess(businessId, listingId, true);
+        if (!canBusinessSellerEdit(listing.status())) {
+            throw new IllegalArgumentException("Pause an active store item before changing its images.");
+        }
+        return listing;
+    }
+
+    private ListingDraftResponse requireBusinessStoreItemAccess(String businessId, String listingId, boolean allowPaused) {
         String normalizedBusinessId = normalizedRequiredId("Business ID", businessId);
         String normalizedListingId = normalizedRequiredId("Listing ID", listingId);
         CurrentActor actor = currentActorProvider.currentActor();
@@ -1427,17 +1825,51 @@ public class ListingService {
                     normalizedListingId, normalizedBusinessId, listing.businessId());
             throw new ListingAuthorizationException("Listing belongs to another business store.");
         }
-        if (!canSellerEdit(listing.status())) {
-            throw new IllegalArgumentException("Listing media can be changed only while the listing is draft, pending review, active, or closed.");
+        if (!allowPaused && "PAUSED".equals(listing.status())) {
+            throw new IllegalArgumentException("Paused store items must be relisted before editing media.");
         }
         return listing;
     }
 
+    private void requirePublishableBusinessStoreItem(ListingDraftResponse listing) {
+        if (!"BUSINESS".equals(listing.sellerType())) {
+            throw new IllegalArgumentException("Only business store items can be published.");
+        }
+        if (!categoryRepository.activeCategoryExists(listing.categoryId())) {
+            throw new CategoryNotFoundException();
+        }
+        if (listing.title() == null || listing.title().isBlank()) {
+            throw new IllegalArgumentException("Title is required before publishing.");
+        }
+        if (listing.description() == null || listing.description().isBlank()) {
+            throw new IllegalArgumentException("Description is required before publishing.");
+        }
+        if (listing.sku() == null || listing.sku().isBlank()) {
+            throw new IllegalArgumentException("SKU is required before publishing.");
+        }
+        if (listing.quantity() < 1) {
+            throw new IllegalArgumentException("Quantity must be at least 1 before publishing.");
+        }
+        if (!listingMediaRepository.hasAttachedUploadedImage(listing.id())) {
+            throw new IllegalArgumentException("At least one attached image is required before publishing.");
+        }
+    }
+
+    // A requested-changes decision reopens the owner workflow without exposing the listing publicly.
     private boolean canSellerEdit(String status) {
         return "DRAFT".equals(status)
                 || "PENDING_REVIEW".equals(status)
                 || "ACTIVE".equals(status)
-                || "CLOSED".equals(status);
+                || "CLOSED".equals(status)
+                || "CHANGES_REQUESTED".equals(status);
+    }
+
+    private boolean canBusinessSellerEdit(String status) {
+        return "DRAFT".equals(status) || "PAUSED".equals(status);
+    }
+
+    private boolean canSellerChangeMedia(String status) {
+        return canSellerEdit(status) || "PAUSED".equals(status);
     }
 
     private boolean canSellerClose(String status) {
@@ -1583,6 +2015,10 @@ public class ListingService {
             return "Payment and delivery are arranged directly by participants. The platform does not verify or protect off-platform payment.";
         }
         return null;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private CreateListingDraftRequest businessStoreItemRequest(String businessId, CreateListingDraftRequest request) {

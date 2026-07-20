@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -55,5 +56,9 @@ public class ListingModerationDecisionRepository {
                         rs.getLong("listing_version"),
                         rs.getTimestamp("created_at").toInstant()),
                 listingId);
+    }
+
+    public Optional<ListingModerationDecisionResponse> findLatestByListingId(String listingId) {
+        return findByListingId(listingId).stream().findFirst();
     }
 }

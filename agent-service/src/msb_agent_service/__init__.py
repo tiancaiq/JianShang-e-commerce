@@ -1,0 +1,2 @@
+"""MSB isolated agent service."""
+

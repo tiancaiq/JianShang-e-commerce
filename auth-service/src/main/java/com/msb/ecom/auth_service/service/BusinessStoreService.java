@@ -38,6 +38,8 @@ public class BusinessStoreService {
             rs.getString("banner_url"),
             rs.getString("support_email"),
             rs.getString("support_phone"),
+            rs.getString("public_city"),
+            rs.getString("public_region"),
             rs.getString("status"),
             rs.getLong("version"),
             rs.getTimestamp("created_at").toInstant(),
@@ -71,6 +73,8 @@ public class BusinessStoreService {
                                s.banner_url,
                                s.support_email,
                                s.support_phone,
+                               a.public_city,
+                               a.public_region,
                                s.status,
                                s.version,
                                s.created_at,
@@ -78,6 +82,7 @@ public class BusinessStoreService {
                         from business_memberships m
                         join businesses b on b.id = m.business_id
                         join stores s on s.business_id = b.id
+                        join business_applications a on a.approved_business_id = b.id
                         where m.user_id = ?
                           and m.status = 'ACTIVE'
                           and b.status = 'ACTIVE'
@@ -97,6 +102,8 @@ public class BusinessStoreService {
                             rs.getString("banner_url"),
                             rs.getString("support_email"),
                             rs.getString("support_phone"),
+                            rs.getString("public_city"),
+                            rs.getString("public_region"),
                             rs.getString("status"),
                             rs.getLong("version"),
                             rs.getTimestamp("created_at").toInstant(),
@@ -173,9 +180,10 @@ public class BusinessStoreService {
     public BusinessStoreResponse getPublicStore(String slug) {
         String normalized = normalizedSlug(slug);
         return jdbcTemplate.query("""
-                        select s.*
+                        select s.*, a.public_city, a.public_region
                         from stores s
                         join businesses b on b.id = s.business_id
+                        join business_applications a on a.approved_business_id = b.id
                         where s.slug = ?
                           and s.status = 'ACTIVE'
                           and b.status = 'ACTIVE'
@@ -187,9 +195,10 @@ public class BusinessStoreService {
 
     private BusinessStoreResponse findByBusinessId(String businessId) {
         return jdbcTemplate.query("""
-                        select *
-                        from stores
-                        where business_id = ?
+                        select s.*, a.public_city, a.public_region
+                        from stores s
+                        join business_applications a on a.approved_business_id = s.business_id
+                        where s.business_id = ?
                         """, STORE_ROW_MAPPER, businessId)
                 .stream()
                 .findFirst()
@@ -237,10 +246,7 @@ public class BusinessStoreService {
     }
 
     private List<String> permissionsFor(String role) {
-        return switch (role) {
-            case OWNER, MANAGER -> List.of(BusinessMembershipService.LISTING_DRAFT_CREATE);
-            default -> List.of();
-        };
+        return BusinessMembershipService.permissionsFor(role);
     }
 
     private String requiredText(String fieldName, String value, int maxLength) {

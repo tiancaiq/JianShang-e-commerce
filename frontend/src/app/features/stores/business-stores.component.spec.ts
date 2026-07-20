@@ -1,12 +1,12 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { ListingService } from '../../core/services/listing.service';
 import { publicListing } from '../../testing/listing-test-fixtures';
 import { BusinessStoresComponent } from './business-stores.component';
 
-describe('BusinessStoresComponent public storefront regression', () => {
+describe('BusinessStoresComponent public business item regression', () => {
   let fixture: ComponentFixture<BusinessStoresComponent>;
   let listingService: jasmine.SpyObj<ListingService>;
 
@@ -18,9 +18,14 @@ describe('BusinessStoresComponent public storefront regression', () => {
     id: '01L00000000000000000000002',
     sellerType: 'BUSINESS',
     sellerDisplayName: 'Mochi Store',
+    storeId: '01S00000000000000000000001',
+    storeSlug: 'mochi-store',
+    storeName: 'Mochi Store',
+    businessVerified: true,
     title: 'Business plush',
     publicCity: 'Irvine',
     publicRegion: 'Orange County',
+    quantity: 4,
   });
   const category = {
     id: businessListing.categoryId,
@@ -53,10 +58,11 @@ describe('BusinessStoresComponent public storefront regression', () => {
     fixture = TestBed.createComponent(BusinessStoresComponent);
   });
 
-  it('presents verified business storefronts instead of individual listings', () => {
+  it('presents approved business listing items instead of storefront cards', () => {
     fixture.detectChanges();
 
-    const text = fixture.nativeElement.textContent as string;
+    const host = fixture.nativeElement as HTMLElement;
+    const text = host.textContent || '';
 
     expect(listingService.getCategories).toHaveBeenCalled();
     expect(listingService.searchBusinessStoreListings).toHaveBeenCalledWith({
@@ -70,43 +76,46 @@ describe('BusinessStoresComponent public storefront regression', () => {
       sort: null,
       cursor: null,
     });
-    expect(text).toContain('Browse verified stores');
-    expect(text).toContain('Shop from approved business sellers and discover local storefronts.');
-    expect(text).toContain('Business Storefronts');
-    expect(text).toContain('1 store found');
-    expect(text).toContain('Mochi Store');
+    expect(text).toContain('Shop verified business items');
+    expect(text).toContain('Browse catalog items published by approved business sellers.');
+    expect(text).toContain('Business Items');
+    expect(text).toContain('1 item found');
+    expect(text).toContain('Business plush');
+    expect(text).toContain('Sold by Mochi Store');
     expect(text).toContain('Verified');
     expect(text).toContain('Irvine, Orange County');
-    expect(text).toContain('1 active listing');
+    expect(text).toContain('Business item');
+    expect(text).not.toContain('4 available');
     expect(text).toContain(businessListing.categoryName);
-    expect(text).toContain('Visit store');
-    expect(text).toContain('Create store');
+    expect(text).toContain('View item');
+    expect(text).toContain('Become a business seller');
     expect(text).not.toContain('Individual bike');
-    expect(text).not.toContain('Condition');
-    expect(text).not.toContain('Min price');
-    expect(text).not.toContain('Max price');
-    expect(text).not.toContain('No approved business storefront listings yet');
-    expect(text).not.toContain('Cart');
+    expect(text).not.toContain('Business Storefronts');
+    expect(text).not.toContain('Visit store');
+    expect(text).not.toContain('store found');
     expect(text).not.toContain('Checkout');
 
-    const createStoreLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
-      .find(link => link.textContent?.trim() === 'Create store');
-    expect(createStoreLink?.getAttribute('href')).toBe('/business/apply');
+    const applicationLink = Array.from(host.querySelectorAll('a'))
+      .find(link => link.textContent?.trim() === 'Become a business seller');
+    expect(applicationLink?.getAttribute('href')).toBe('/business/apply');
 
-    const visitStoreLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
-      .find(link => link.textContent?.trim() === 'Visit store');
-    expect(visitStoreLink?.getAttribute('href')).toBe('/stores');
+    const publicStoreLink = host.querySelector('a[href="/stores/mochi-store"]');
+    expect(publicStoreLink).not.toBeNull();
+
+    const detailLinks = Array.from(host.querySelectorAll('a'))
+      .filter(link => link.getAttribute('href') === `/listings/${businessListing.id}`);
+    expect(detailLinks.length).toBeGreaterThan(0);
   });
 
-  it('shows the requested empty state when there are no business stores', () => {
+  it('shows the item empty state when there are no business listings', () => {
     listingService.searchBusinessStoreListings.and.returnValue(of(searchPage([individualListing])));
 
     fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
-    expect(text).toContain('0 stores found');
-    expect(text).toContain('No verified stores found');
-    expect(text).toContain('Try changing your filters or search another city.');
+    expect(text).toContain('0 items found');
+    expect(text).toContain('No business items found');
+    expect(text).toContain('Approved business items will appear here once stores publish them.');
     expect(text).toContain('Clear filters');
     expect(text).not.toContain('No approved business storefront listings yet');
   });
@@ -116,16 +125,21 @@ describe('BusinessStoresComponent public storefront regression', () => {
 
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('Business stores could not be loaded. HTTP 503.');
+    expect(fixture.nativeElement.textContent).toContain('Business items could not be loaded. HTTP 503.');
   });
 
-  it('sends store-relevant filters to backend search', () => {
+  it('sends item-relevant filters to backend search and stores them in the URL', async () => {
     fixture.detectChanges();
     listingService.searchBusinessStoreListings.calls.reset();
 
     const component = fixture.componentInstance;
+    const router = TestBed.inject(Router);
     component.searchTerm = 'plush';
     component.selectedCategoryId = category.id;
+    component.selectedCondition = 'NEW';
+    component.minPrice = 10;
+    component.maxPrice = 50;
+    component.sort = 'price_asc';
     component.city = 'Irvine';
     component.county = 'Orange County';
     component.runSearch();
@@ -133,41 +147,51 @@ describe('BusinessStoresComponent public storefront regression', () => {
     expect(listingService.searchBusinessStoreListings).toHaveBeenCalledWith({
       q: 'plush',
       categoryId: category.id,
-      condition: null,
-      minPrice: null,
-      maxPrice: null,
+      condition: 'NEW',
+      minPrice: 10,
+      maxPrice: 50,
       city: 'Irvine',
       county: 'Orange County',
-      sort: null,
+      sort: 'price_asc',
       cursor: null,
     });
     expect(component.hasActiveSearch()).toBeTrue();
+    await fixture.whenStable();
+    expect(router.url).toContain('q=plush');
+    expect(router.url).toContain(`categoryId=${category.id}`);
+    expect(router.url).toContain('condition=NEW');
+    expect(router.url).toContain('sort=price_asc');
+    expect(router.url).toContain('city=Irvine');
   });
 
-  it('clears storefront filters back to the verified active default', () => {
+  it('clears item filters back to the default active business item search', () => {
     fixture.detectChanges();
     listingService.searchBusinessStoreListings.calls.reset();
 
     const component = fixture.componentInstance;
     component.searchTerm = 'plush';
     component.selectedCategoryId = category.id;
+    component.selectedCondition = 'GOOD';
+    component.sort = 'newest';
+    component.minPrice = 5;
+    component.maxPrice = 45;
     component.city = 'Irvine';
     component.county = 'Orange County';
-    component.verifiedOnly = false;
-    component.hasActiveListingsOnly = false;
     component.clearFilters();
 
     expect(component.searchTerm).toBe('');
     expect(component.selectedCategoryId).toBe('ALL');
+    expect(component.selectedCondition).toBe('ALL');
+    expect(component.sort).toBe('none');
+    expect(component.minPrice).toBeNull();
+    expect(component.maxPrice).toBeNull();
     expect(component.city).toBe('');
     expect(component.county).toBe('');
-    expect(component.verifiedOnly).toBeTrue();
-    expect(component.hasActiveListingsOnly).toBeTrue();
     expect(component.hasActiveSearch()).toBeFalse();
     expect(listingService.searchBusinessStoreListings).toHaveBeenCalled();
   });
 
-  it('loads the next business store page with the returned cursor', () => {
+  it('loads the next business item page with the returned cursor', () => {
     const secondBusinessListing = publicListing({
       id: '01L00000000000000000000003',
       sellerType: 'BUSINESS',
@@ -188,6 +212,5 @@ describe('BusinessStoresComponent public storefront regression', () => {
       cursor: 'cursor-2',
     }));
     expect(fixture.componentInstance.listings()).toEqual([businessListing, secondBusinessListing]);
-    expect(fixture.componentInstance.stores()[0].activeListings).toBe(2);
   });
 });

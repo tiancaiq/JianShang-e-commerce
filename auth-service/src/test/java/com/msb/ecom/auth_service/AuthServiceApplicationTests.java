@@ -59,6 +59,7 @@ class AuthServiceApplicationTests {
         registry.add("spring.flyway.locations", () -> "classpath:db/migration/identity");
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> "http://localhost:8181/realms/msb-local");
         registry.add("business.verification.webhook-secret", () -> "test-webhook-secret");
+        registry.add("commerce.internal-service-token", () -> "test-commerce-token");
         registry.add("user.avatar.storage", () -> "local-demo");
         registry.add("user.avatar.storage-dir", () -> "target/test-auth-avatars");
     }
@@ -78,7 +79,7 @@ class AuthServiceApplicationTests {
     @Test
     void cleanMysqlDatabaseMigratesSuccessfully() {
         assertThat(flyway.info().current().getScript())
-                .isEqualTo("V202607081000__enforce_one_active_business_application.sql");
+                .isEqualTo("V202607192000__add_public_handles_and_trade_demo_users.sql");
         Integer tableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'users'",
                 Integer.class);
@@ -115,6 +116,305 @@ class AuthServiceApplicationTests {
                   and index_name = 'uk_business_applications_one_active_account'
                 """, Integer.class);
         assertThat(activeBusinessAccountIndexCount).isEqualTo(1);
+        Integer addressTableCount = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables where table_schema = database() and table_name = 'addresses'",
+                Integer.class);
+        assertThat(addressTableCount).isEqualTo(1);
+        Integer defaultAddressConstraintCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.table_constraints
+                where constraint_schema = database()
+                  and table_name = 'addresses'
+                  and constraint_name = 'uk_addresses_one_default_per_user'
+                  and constraint_type = 'UNIQUE'
+                """, Integer.class);
+        assertThat(defaultAddressConstraintCount).isEqualTo(1);
+        Integer publicHandleColumnCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.columns
+                where table_schema = database()
+                  and table_name = 'users'
+                  and column_name = 'public_handle'
+                  and is_nullable = 'NO'
+                """, Integer.class);
+        assertThat(publicHandleColumnCount).isEqualTo(1);
+        Integer tradeDemoUserCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from users
+                where public_handle in ('mira-trades', 'jon-buys')
+                """, Integer.class);
+        assertThat(tradeDemoUserCount).isEqualTo(2);
+        String addressDeleteRule = jdbcTemplate.queryForObject("""
+                select delete_rule
+                from information_schema.referential_constraints
+                where constraint_schema = database()
+                  and constraint_name = 'fk_addresses_user'
+                """, String.class);
+        assertThat(addressDeleteRule).isEqualTo("CASCADE");
+    }
+
+    @Test
+    void buyerCanManageAddressLifecycleAndDefaultPromotion() throws Exception {
+        String subject = "keycloak-sub-address-lifecycle";
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Home", "100 Main Street", "Irvine", "us")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.label").value("Home"))
+                .andExpect(jsonPath("$.data.countryCode").value("US"))
+                .andExpect(jsonPath("$.data.isDefault").value(true))
+                .andExpect(jsonPath("$.data.version").value(0));
+
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                subject);
+        String homeId = jdbcTemplate.queryForObject(
+                "select id from addresses where user_id = ? and label = 'Home'",
+                String.class,
+                userId);
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Office", "200 Market Street", "Tustin", "US")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.isDefault").value(false));
+
+        String officeId = jdbcTemplate.queryForObject(
+                "select id from addresses where user_id = ? and label = 'Office'",
+                String.class,
+                userId);
+
+        mockMvc.perform(get("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].id").value(homeId))
+                .andExpect(jsonPath("$.data[0].isDefault").value(true));
+
+        mockMvc.perform(patch("/api/v1/users/me/addresses/{addressId}", officeId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "label": null,
+                                  "city": "  Costa Mesa  "
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.label").isEmpty())
+                .andExpect(jsonPath("$.data.city").value("Costa Mesa"))
+                .andExpect(jsonPath("$.data.version").value(1));
+
+        mockMvc.perform(post("/api/v1/users/me/addresses/{addressId}/default", officeId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isDefault").value(true))
+                .andExpect(jsonPath("$.data.version").value(2));
+
+        Integer defaultCount = jdbcTemplate.queryForObject(
+                "select count(*) from addresses where user_id = ? and is_default = true",
+                Integer.class,
+                userId);
+        assertThat(defaultCount).isEqualTo(1);
+
+        mockMvc.perform(delete("/api/v1/users/me/addresses/{addressId}", officeId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 2))
+                .andExpect(status().isNoContent());
+
+        Boolean homeDefault = jdbcTemplate.queryForObject(
+                "select is_default from addresses where id = ?",
+                Boolean.class,
+                homeId);
+        assertThat(homeDefault).isTrue();
+        Integer remainingCount = jdbcTemplate.queryForObject(
+                "select count(*) from addresses where user_id = ?",
+                Integer.class,
+                userId);
+        assertThat(remainingCount).isEqualTo(1);
+    }
+
+    @Test
+    void buyerAddressMutationsEnforceOwnershipAndVersion() throws Exception {
+        String ownerSubject = "keycloak-sub-address-owner";
+        String otherSubject = "keycloak-sub-address-other";
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(ownerSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Home", "10 Owner Way", "Irvine", "US")))
+                .andExpect(status().isCreated());
+        String addressId = jdbcTemplate.queryForObject("""
+                select a.id
+                from addresses a
+                join users u on u.id = a.user_id
+                where u.keycloak_sub = ?
+                """, String.class, ownerSubject);
+
+        mockMvc.perform(patch("/api/v1/users/me/addresses/{addressId}", addressId)
+                        .with(jwt().jwt(token -> token.subject(otherSubject)))
+                        .header(HttpHeaders.IF_MATCH, 0)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Tustin\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADDRESS_NOT_FOUND"));
+
+        mockMvc.perform(patch("/api/v1/users/me/addresses/{addressId}", addressId)
+                        .with(jwt().jwt(token -> token.subject(ownerSubject)))
+                        .header(HttpHeaders.IF_MATCH, 99)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Tustin\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADDRESS_VERSION_CONFLICT"));
+    }
+
+    @Test
+    void buyerAddressValidationRejectsUnsafeOrMissingFields() throws Exception {
+        String subject = "keycloak-sub-address-validation";
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Home", "100 Main\\nStreet", "Irvine", "US")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADDRESS_INVALID"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("line1"));
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "label": "Home",
+                                  "recipientName": "Alex Buyer",
+                                  "phone": "9495550123",
+                                  "line1": "100 Main Street",
+                                  "city": "Irvine",
+                                  "region": "CA",
+                                  "postalCode": "92618",
+                                  "countryCode": "US"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADDRESS_INVALID"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("phone"));
+    }
+
+    @Test
+    void buyerAddressBookEnforcesTwentyAddressLimit() throws Exception {
+        String subject = "keycloak-sub-address-limit";
+        mockMvc.perform(get("/api/v1/users/me")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk());
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                subject);
+        for (int index = 0; index < 20; index++) {
+            jdbcTemplate.update("""
+                    insert into addresses (
+                        id, user_id, label, recipient_name, phone, line1, line2,
+                        city, region, postal_code, country_code, is_default,
+                        version, created_at, updated_at
+                    )
+                    values (?, ?, ?, 'Limit Buyer', '+19495550123', ?, null,
+                            'Irvine', 'CA', '92618', 'US', ?,
+                            0, current_timestamp(6), current_timestamp(6))
+                    """,
+                    "01ADDRLIMIT%015d".formatted(index),
+                    userId,
+                    "Address " + index,
+                    (index + 1) + " Limit Street",
+                    index == 0);
+        }
+
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Overflow", "999 Limit Street", "Irvine", "US")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADDRESS_BOOK_LIMIT_REACHED"));
+    }
+
+    @Test
+    void internalCheckoutResolverRequiresTokenAndBuyerOwnership() throws Exception {
+        String subject = "keycloak-sub-address-internal";
+        mockMvc.perform(post("/api/v1/users/me/addresses")
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addressRequest("Home", "500 Checkout Road", "Irvine", "US")))
+                .andExpect(status().isCreated());
+        String buyerId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?",
+                String.class,
+                subject);
+        String addressId = jdbcTemplate.queryForObject(
+                "select id from addresses where user_id = ?",
+                String.class,
+                buyerId);
+
+        mockMvc.perform(get("/api/v1/internal/users/{buyerId}/addresses/{addressId}", buyerId, addressId))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("INTERNAL_COMMERCE_AUTH_REQUIRED"));
+
+        mockMvc.perform(get("/api/v1/internal/users/{buyerId}/addresses/{addressId}", buyerId, addressId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buyerId").value(buyerId))
+                .andExpect(jsonPath("$.id").value(addressId))
+                .andExpect(jsonPath("$.line1").value("500 Checkout Road"))
+                .andExpect(jsonPath("$.email").doesNotExist());
+
+        mockMvc.perform(post("/api/v1/internal/users/checkout-address-resolution")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"subject":"%s","addressId":"%s"}
+                                """.formatted(subject, addressId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buyerId").value(buyerId))
+                .andExpect(jsonPath("$.id").value(addressId))
+                .andExpect(jsonPath("$.line1").value("500 Checkout Road"));
+
+        mockMvc.perform(post("/api/v1/internal/users/checkout-buyer-resolution")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"subject":"%s"}
+                                """.formatted(subject)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buyerId").value(buyerId));
+
+        mockMvc.perform(post("/api/v1/internal/users/checkout-address-resolution")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"subject":"unknown-subject","addressId":"%s"}
+                                """.formatted(addressId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("BUYER_ADDRESS_NOT_FOUND"));
+
+        mockMvc.perform(get(
+                                "/api/v1/internal/users/{buyerId}/addresses/{addressId}",
+                                "01WRONGBUYER00000000000000",
+                                addressId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("BUYER_ADDRESS_NOT_FOUND"));
+
+        mockMvc.perform(get(
+                                "/api/v1/internal/users/{buyerId}/addresses/{addressId}",
+                                "bad-buyer-id",
+                                "bad-address-id")
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("BUYER_ADDRESS_NOT_FOUND"));
     }
 
     @Test
@@ -130,6 +430,8 @@ class AuthServiceApplicationTests {
                 .andExpect(jsonPath("$.data.email").value("alex@example.com"))
                 .andExpect(jsonPath("$.data.emailVerified").value(true))
                 .andExpect(jsonPath("$.data.displayName").value("Alex Buyer"))
+                .andExpect(jsonPath("$.data.publicHandle",
+                        matchesPattern("member-[0-7][0-9a-hjkmnp-tv-z]{25}")))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.password").doesNotExist())
                 .andExpect(jsonPath("$.data.accessToken").doesNotExist())
@@ -913,7 +1215,9 @@ class AuthServiceApplicationTests {
         mockMvc.perform(get("/api/v1/stores/store-owner-trading"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.businessId").value(businessId))
-                .andExpect(jsonPath("$.data.name").value("Store Owner Trading"));
+                .andExpect(jsonPath("$.data.name").value("Store Owner Trading"))
+                .andExpect(jsonPath("$.data.publicCity").value("Irvine"))
+                .andExpect(jsonPath("$.data.publicRegion").value("CA"));
     }
 
     @Test
@@ -931,9 +1235,80 @@ class AuthServiceApplicationTests {
                 .andExpect(jsonPath("$.data.businessStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.membershipRole").value("OWNER"))
                 .andExpect(jsonPath("$.data.permissions[0]").value("LISTING_DRAFT_CREATE"))
+                .andExpect(jsonPath("$.data.permissions[1]").value("INVENTORY_VIEW"))
+                .andExpect(jsonPath("$.data.permissions[2]").value("INVENTORY_MANAGE"))
+                .andExpect(jsonPath("$.data.permissions[3]").value("ORDER_VIEW"))
+                .andExpect(jsonPath("$.data.permissions[4]").value("ORDER_FINANCE_VIEW"))
                 .andExpect(jsonPath("$.data.store.businessId").value(businessId))
                 .andExpect(jsonPath("$.data.store.slug").value("business-" + businessId.toLowerCase()))
                 .andExpect(jsonPath("$.data.store.name").value("Store Context LLC"));
+    }
+
+    @Test
+    void internalCommerceEligibilityRequiresServiceTokenAndReturnsCurrentStatuses() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-commerce-eligibility-owner",
+                "Commerce Eligibility LLC",
+                "keycloak-sub-commerce-eligibility-admin");
+        String storeId = jdbcTemplate.queryForObject(
+                "select id from stores where business_id = ?",
+                String.class,
+                businessId);
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/stores/{storeId}/commerce-eligibility",
+                        businessId,
+                        storeId))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("INTERNAL_COMMERCE_AUTH_REQUIRED"));
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/stores/{storeId}/commerce-eligibility",
+                        businessId,
+                        storeId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.businessId").value(businessId))
+                .andExpect(jsonPath("$.storeId").value(storeId))
+                .andExpect(jsonPath("$.eligible").value(true))
+                .andExpect(jsonPath("$.businessStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.storeStatus").value("ACTIVE"));
+
+        jdbcTemplate.update("update stores set status = 'SUSPENDED' where id = ?", storeId);
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/stores/{storeId}/commerce-eligibility",
+                        businessId,
+                        storeId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eligible").value(false))
+                .andExpect(jsonPath("$.businessStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.storeStatus").value("SUSPENDED"));
+    }
+
+    @Test
+    void internalCommerceEligibilityRejectsCrossBusinessStorePair() throws Exception {
+        String firstBusinessId = approveBusinessApplication(
+                "keycloak-sub-commerce-pair-first-owner",
+                "Commerce Pair First LLC",
+                "keycloak-sub-commerce-pair-first-admin");
+        String secondBusinessId = approveBusinessApplication(
+                "keycloak-sub-commerce-pair-second-owner",
+                "Commerce Pair Second LLC",
+                "keycloak-sub-commerce-pair-second-admin");
+        String secondStoreId = jdbcTemplate.queryForObject(
+                "select id from stores where business_id = ?",
+                String.class,
+                secondBusinessId);
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/businesses/{businessId}/stores/{storeId}/commerce-eligibility",
+                        firstBusinessId,
+                        secondStoreId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("BUSINESS_STORE_NOT_FOUND"));
     }
 
     @Test
@@ -1399,6 +1774,77 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void guestCanReadPublicBusinessStoreIdentityLabels() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-public-business-label-owner",
+                "Public Label Business LLC",
+                "keycloak-sub-public-business-label-admin");
+        jdbcTemplate.update(
+                "update stores set name = ?, slug = ? where business_id = ?",
+                "Public Label Store",
+                "public-label-store",
+                businessId);
+
+        mockMvc.perform(get("/api/v1/public/seller-labels").queryParam("businessIds", businessId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businesses[0].id").value(businessId))
+                .andExpect(jsonPath("$.data.businesses[0].legalName").value("Public Label Business LLC"))
+                .andExpect(jsonPath("$.data.businesses[0].storeName").value("Public Label Store"))
+                .andExpect(jsonPath("$.data.businesses[0].storeSlug").value("public-label-store"))
+                .andExpect(jsonPath("$.data.businesses[0].publicCity").value("Irvine"))
+                .andExpect(jsonPath("$.data.businesses[0].publicRegion").value("CA"))
+                .andExpect(jsonPath("$.data.businesses[0].verified").value(true));
+    }
+
+    @Test
+    void guestCanSearchPublicActiveBusinessStoresByStoreOrLegalName() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-public-store-search-owner",
+                "Moon Ribbon LLC",
+                "keycloak-sub-public-store-search-admin");
+        String storeId = jdbcTemplate.queryForObject(
+                "select id from stores where business_id = ?",
+                String.class,
+                businessId);
+        jdbcTemplate.update("update stores set name = ? where id = ?", "Mochi Ribbon Store", storeId);
+
+        mockMvc.perform(get("/api/v1/public/business-stores/search").queryParam("q", "Mochi Ribbon"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].businessId").value(businessId))
+                .andExpect(jsonPath("$.data[0].storeId").value(storeId))
+                .andExpect(jsonPath("$.data[0].storeName").value("Mochi Ribbon Store"));
+
+        mockMvc.perform(get("/api/v1/public/business-stores/search").queryParam("q", "Moon Ribbon"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].businessLegalName").value("Moon Ribbon LLC"));
+    }
+
+    @Test
+    void publicBusinessStoreSearchHidesSuspendedStoresAndBusinesses() throws Exception {
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-public-store-hidden-owner",
+                "Hidden Ribbon LLC",
+                "keycloak-sub-public-store-hidden-admin");
+        String storeId = jdbcTemplate.queryForObject(
+                "select id from stores where business_id = ?",
+                String.class,
+                businessId);
+        jdbcTemplate.update("update stores set name = ? where id = ?", "Hidden Ribbon Store", storeId);
+
+        jdbcTemplate.update("update stores set status = 'SUSPENDED' where id = ?", storeId);
+        mockMvc.perform(get("/api/v1/public/business-stores/search").queryParam("q", "Hidden Ribbon"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+
+        jdbcTemplate.update("update stores set status = 'ACTIVE' where id = ?", storeId);
+        jdbcTemplate.update("update businesses set status = 'SUSPENDED' where id = ?", businessId);
+        mockMvc.perform(get("/api/v1/public/business-stores/search").queryParam("businessIds", businessId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
     void publicSellerIdentityLabelsHideUnavailableUsers() throws Exception {
         mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
                         .subject("keycloak-sub-public-label-suspended")
@@ -1527,11 +1973,11 @@ class AuthServiceApplicationTests {
         assertThatThrownBy(() -> jdbcTemplate.update("""
                         insert into users (
                             id, keycloak_sub, email, email_verified, display_name,
-                            phone_verified, status, version, created_at, updated_at
+                            public_handle, phone_verified, status, version, created_at, updated_at
                         )
                         values (
                             '01J00000000000000000000001', 'keycloak-sub-duplicate',
-                            'other@example.com', false, 'Other', false, 'ACTIVE', 0,
+                            'other@example.com', false, 'Other', 'other-user', false, 'ACTIVE', 0,
                             current_timestamp(6), current_timestamp(6)
                         )
                         """))
@@ -1655,5 +2101,25 @@ class AuthServiceApplicationTests {
                   "description": "Local seller"
                 }
                 """.formatted(legalName);
+    }
+
+    private String addressRequest(
+            String label,
+            String line1,
+            String city,
+            String countryCode) {
+        return """
+                {
+                  "label": "%s",
+                  "recipientName": "Alex Buyer",
+                  "phone": "+19495550123",
+                  "line1": "%s",
+                  "line2": null,
+                  "city": "%s",
+                  "region": "CA",
+                  "postalCode": "92618",
+                  "countryCode": "%s"
+                }
+                """.formatted(label, line1, city, countryCode);
     }
 }

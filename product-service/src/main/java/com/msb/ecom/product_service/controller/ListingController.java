@@ -10,6 +10,8 @@ import com.msb.ecom.product_service.service.ListingService;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
 import com.msb.ecom.product_service.dto.ChatTradeCompletionRequest;
+import com.msb.ecom.product_service.dto.BusinessStoreItemSearchPageResponse;
+import com.msb.ecom.product_service.dto.BusinessStoreItemSearchRequest;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
 import com.msb.ecom.product_service.dto.ListingEngagementResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
@@ -194,6 +196,18 @@ public class ListingController {
         return listingService.getBusinessListings(businessId);
     }
 
+    @GetMapping("/businesses/{businessId}/store/items/search")
+    public BusinessStoreItemSearchPageResponse businessStoreItemsSearch(
+            @PathVariable String businessId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+        return listingService.searchBusinessStoreItems(
+                businessId,
+                new BusinessStoreItemSearchRequest(q, status, cursor, limit));
+    }
+
     @PostMapping("/businesses/{businessId}/store/items")
     @ResponseStatus(HttpStatus.CREATED)
     public ListingDraftResponse createBusinessStoreItem(
@@ -220,6 +234,39 @@ public class ListingController {
                 listingId,
                 IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED),
                 request);
+    }
+
+    @PostMapping("/businesses/{businessId}/store/items/{listingId}/publish")
+    public ListingDraftResponse publishBusinessStoreItem(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.publishBusinessStoreItem(
+                businessId,
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
+    }
+
+    @PostMapping("/businesses/{businessId}/store/items/{listingId}/pause")
+    public ListingDraftResponse pauseBusinessStoreItem(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.pauseBusinessStoreItem(
+                businessId,
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
+    }
+
+    @PostMapping("/businesses/{businessId}/store/items/{listingId}/relist")
+    public ListingDraftResponse relistBusinessStoreItem(
+            @PathVariable String businessId,
+            @PathVariable String listingId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        return listingService.relistBusinessStoreItem(
+                businessId,
+                listingId,
+                IfMatchVersion.parseRequired(ifMatch, LISTING_VERSION_REQUIRED));
     }
 
     @GetMapping("/admin/listings/moderation")

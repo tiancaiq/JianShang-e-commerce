@@ -30,6 +30,9 @@ public class User {
     @Column(name = "display_name", length = 200)
     private String displayName;
 
+    @Column(name = "public_handle", length = 64, nullable = false, unique = true, updatable = false)
+    private String publicHandle;
+
     @Column(length = 32)
     private String phone;
 
@@ -55,18 +58,31 @@ public class User {
     protected User() {
     }
 
-    private User(String id, String keycloakSub, String email, boolean emailVerified, String displayName) {
+    private User(
+            String id,
+            String keycloakSub,
+            String email,
+            boolean emailVerified,
+            String displayName,
+            String publicHandle) {
         this.id = id;
         this.keycloakSub = keycloakSub;
         this.email = email;
         this.emailVerified = emailVerified;
         this.displayName = displayName;
+        this.publicHandle = publicHandle;
         this.phoneVerified = false;
         this.status = "ACTIVE";
     }
 
-    public static User create(String id, String keycloakSub, String email, boolean emailVerified, String displayName) {
-        return new User(id, keycloakSub, email, emailVerified, displayName);
+    public static User create(
+            String id,
+            String keycloakSub,
+            String email,
+            boolean emailVerified,
+            String displayName,
+            String publicHandle) {
+        return new User(id, keycloakSub, email, emailVerified, displayName, publicHandle);
     }
 
     public void applyKeycloakProjection(String email, boolean emailVerified, String displayName) {
@@ -113,6 +129,10 @@ public class User {
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    public String getPublicHandle() {
+        return publicHandle;
     }
 
     public String getPhone() {

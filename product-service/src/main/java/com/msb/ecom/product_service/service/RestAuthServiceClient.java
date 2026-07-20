@@ -192,6 +192,36 @@ public class RestAuthServiceClient implements AuthServiceClient {
         return response.data();
     }
 
+    @Override
+    public List<PublicBusinessStoreSearchResult> searchPublicBusinessStores(
+            String query,
+            Set<String> businessIds,
+            Set<String> storeIds) {
+        PublicBusinessStoreSearchEnvelope response = restClient.get()
+                .uri(uriBuilder -> {
+                    var builder = uriBuilder
+                            .path("/api/v1/public/business-stores/search")
+                            .queryParam("businessIds", businessIds.toArray())
+                            .queryParam("storeIds", storeIds.toArray());
+                    if (query != null && !query.isBlank()) {
+                        builder.queryParam("q", query);
+                    }
+                    return builder.build();
+                })
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                    log.warn("Auth-service denied public business store search status={}",
+                            clientResponse.getStatusCode().value());
+                    throw new ListingAuthorizationException("Business store visibility could not be verified.");
+                })
+                .body(PublicBusinessStoreSearchEnvelope.class);
+
+        if (response == null || response.data() == null) {
+            return List.of();
+        }
+        return response.data();
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record IndividualSellerEnvelope(IndividualSellerAuthorization data) {
     }
@@ -214,5 +244,9 @@ public class RestAuthServiceClient implements AuthServiceClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record AdminIdentityLabelsEnvelope(AdminIdentityLabels data) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PublicBusinessStoreSearchEnvelope(List<PublicBusinessStoreSearchResult> data) {
     }
 }

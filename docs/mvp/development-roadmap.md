@@ -50,13 +50,13 @@ The current repository contains implementation work for:
 - User profile roadmap: USER-00 complete as a planning slice
 - Individual seller profile: IND-01 and IND-02
 - Business onboarding/admin decision: BUS-01 through BUS-04
-- Business store item self-publishing: BUS-LIST-00 planned and BUS-LIST-01
-  through BUS-LIST-03 complete
+- Business store item self-publishing and management: BUS-LIST-00 through
+  BUS-LIST-06 complete
 - Listing foundation, drafts, media, submit, admin decision, public detail, and
   planned engagement metrics: LIST-00 through LIST-08
 - Public UI surface split: SITE-01
 - Search and storefront: SEARCH-00, SEARCH-01, SEARCH-01A, SEARCH-01B,
-  SEARCH-03, and SEARCH-04
+  SEARCH-03, SEARCH-04, and SEARCH-05
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -192,6 +192,7 @@ Login/session stabilization:
 | --- | --- | --- |
 | LOGIN-01 Login and session UX | Complete | `docs/mvp/iam/login/login-01-login-session-ux-plan.md` |
 | LOGIN-02 Backend password login bridge | Complete | `docs/mvp/iam/login/login-02-backend-password-login-bridge.md` |
+| LOGIN-STAB-03 Multi-surface login/logout stabilization | Complete | `docs/mvp/iam/login/login-stab-03-multi-surface-login-logout.md` |
 
 Sign-up and external identity providers:
 
@@ -257,16 +258,16 @@ Completed slices:
 | BUS-02 Submit business application | Complete | `docs/mvp/bus/bus-02-submit-business-application.md` |
 | BUS-03/BUS-04 Verification callback and admin decision | Complete | `docs/mvp/bus/bus-03-04-business-verification-and-admin-decision.md` |
 | BUS-05 Basic store profile management | Complete | `docs/mvp/bus/bus-05-basic-store-profile-management.md` |
-| BUS-LIST-00 Store item self-publishing plan | Planned | `docs/mvp/bus/bus-list-00-store-item-self-publishing-plan.md` |
+| BUS-LIST-00 Store item self-publishing plan | Complete | `docs/mvp/bus/bus-list-00-store-item-self-publishing-plan.md` |
 | BUS-LIST-01 Current business/store context | Complete | `docs/mvp/bus/bus-list-01-current-business-store-context.md` |
 | BUS-LIST-02 Store item draft and edit | Complete | `docs/mvp/bus/bus-list-02-store-item-draft-edit.md` |
 | BUS-LIST-03 Store item media | Complete | `docs/mvp/bus/bus-list-03-store-item-media.md` |
+| BUS-LIST-04 Self-publish to `/stores` | Complete | `docs/mvp/bus/bus-list-04-self-publish-to-stores.md` |
+| BUS-LIST-05 Reactive admin removal | Complete | `docs/mvp/bus/bus-list-05-reactive-admin-removal.md` |
+| BUS-LIST-06 Business item management list | Complete | `docs/mvp/bus/bus-list-06-business-item-management-list.md` |
 
 Remaining MVP work:
 
-- Store item self-publishing to `/stores` and reactive admin removal after
-  store item draft/edit/media. Store items are business self-published to
-  `/stores` without item-level admin approval.
 - Stronger admin review queue UX beyond entering an application ID manually.
 - Inventory, orders, fulfillment, and payment management remain V2.
 
@@ -301,7 +302,9 @@ as part of listing work.
 
 Status: split marketplace/storefront search, shared cursor pagination, and the
 OpenSearch-derived projection are implemented. The public UI is split into
-individual marketplace and business store surfaces.
+individual marketplace and business store surfaces. Search state is URL-based,
+and business storefront search revalidates active public business/store
+visibility before returning results.
 
 MVP goal:
 
@@ -315,9 +318,9 @@ MVP goal:
 - Individual marketplace search and business storefront browse are separate
   public experiences. They may reuse listing tables and response primitives,
   but should not share checkout language, calls to action, or page layout.
-- Planned business store item publishing changes the business storefront path:
-  `/stores` should show active business self-published store items without
-  requiring item-level admin approval. Payment transactions remain V2.
+- Business store item publishing changes the business storefront path:
+  `/stores` shows active business self-published store items without requiring
+  item-level admin approval. Payment transactions remain V2.
 
 Recommended slices:
 
@@ -360,10 +363,17 @@ Recommended slices:
    - Status: complete.
    - Reference:
      `docs/mvp/search/search-04-opensearch-projection.md`
+7. SEARCH-05 search state and visibility hardening.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/search/search-05-search-state-and-visibility-hardening.md`
+   - Scope: URL-based frontend search state, business store-name/SKU keyword
+     matching, active business/store visibility revalidation, and improved
+     empty result states.
 
 ### 5.6 Basic Buyer/Seller Chat
 
-Status: CHAT-00 through CHAT-06 and CHAT-STAB-P0-01 complete.
+Status: CHAT-00 through CHAT-07 and CHAT-STAB-P0-01 complete.
 
 Recommended slices:
 
@@ -397,7 +407,15 @@ Recommended slices:
 8. CHAT-STAB-P0-01 chat verification and contract audit.
    - Status: complete.
    - Reference: `docs/mvp/chat/chat-stab-p0-01-chat-verification-and-contract-audit.md`
-9. MVP-READINESS-01 public marketplace smoke pass.
+9. CHAT-07 repeatable trade completion demo hardening.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/chat/chat-07-repeatable-trade-completion-demo-hardening.md`
+   - Scope: stable local buyer/seller demo identities, one approved individual
+     demo listing, public participant handles, four-stage completion status,
+     buyer confirmation review, completed-thread locking, and browser E2E
+     coverage for account switching and public listing removal.
+10. MVP-READINESS-01 public marketplace smoke pass.
    - Status: complete.
    - Reference:
      `docs/mvp/fix/stabilization/post-search/mvp-readiness-01-public-marketplace-smoke-pass.md`
@@ -440,6 +458,274 @@ Reports, starting with ADM-REP-01 user-reported listing queue,
 suspensions/restores, support cases, chat evidence review, payment/order/finance
 operations, advanced trust/disputes, and AI moderation assistance are admin
 roadmap scope but deferred until after the MVP admin foundation is stable.
+
+### 5.8 V3 AI And Automated Operations Planning
+
+Status: AI-00, AI-CS-01, and AI-RAG-00 planning contracts are complete.
+AI-LLM-01 provider foundation is implemented and its replacement runtime
+credential passed a live synthetic embedding check. AI-RAG-00 reconciles the
+top-level and detailed AI documents with the approved hybrid-RAG direction. AI-RAG-01
+implements the vector storage foundation. AI-RAG-02A source publication,
+AI-RAG-02B durable Agent Service intake, AI-RAG-02C listing indexing, and
+AI-RAG-02D rebuild/deletion operations are implemented. AI-RAG-02C remains
+activated against the full local listing backlog. No 02D paid rebuild or
+promotion has been run. AI-KNOW-01 Product Service category-guidance ownership
+and `AI-RAG-02E-CATEGORY` Agent Service intake, processing, source-complete
+rebuild, and scoped retrieval are implemented, verified, and deployed locally
+with category flags disabled. Policy, safety, and FAQ sources remain deferred
+until their source-owner contracts exist. AI-RAG-03 listing retrieval remains
+implemented and verified. `AI-CS-01A` Agent Service persistence is implemented,
+verified, migrated locally, and deployed with its independent gate disabled.
+`AI-CS-01B` authenticated Agent Service APIs are implemented and verified with
+their capability gate disabled. `AI-CS-01C` listing-only hybrid-RAG
+orchestration source behavior is implemented and verified offline with mocked
+model execution. `AI-CS-01C-2` binds that interface to the existing provider
+abstraction and is verified with fake transports only; runtime construction,
+external activation, and UI remain disabled and deferred.
+
+Reference:
+
+- `docs/mvp/ai/ai-00-agent-and-automated-operations-plan.md`
+- `docs/mvp/ai/ai-rag-00-hybrid-rag-contract-reconciliation.md`
+- `docs/mvp/ai/ai-rag-01-opensearch-vector-foundation-plan.md`
+- `docs/mvp/ai/ai-rag-02-ingestion-embedding-pipeline-plan.md`
+- `docs/mvp/ai/ai-rag-03-listing-knowledge-retriever.md`
+- `docs/mvp/ai/ai-know-01-category-guidance-owner-plan.md`
+- `docs/mvp/ai/ai-rag-02e-category-guidance-adapter-plan.md`
+- `docs/mvp/ai/ai-cs-01-listing-customer-service-assistant.md`
+- `docs/mvp/ai/ai-llm-01-openai-provider-foundation.md`
+- `docs/mvp/ai/ai-list-01-seller-image-to-listing-proposal.md`
+- `docs/mvp/ai/ai-list-02-seller-proposal-review-and-apply-plan.md`
+- `docs/mvp/ai/general-ai-agent-implementation-roadmap.md`
+
+AI-00 defines the proposed contract for a listing-bound customer-service
+assistant, seller-confirmed image-to-listing content suggestions, and
+AI-assisted listing-report classification with narrowly allowlisted reversible
+operations. It does not authorize V3 implementation during active MVP work.
+
+Approved slice order:
+
+1. AI-00 agent and automated-operations plan.
+   - Status: complete as a documentation-only planning slice.
+   - Reference:
+     `docs/mvp/ai/ai-00-agent-and-automated-operations-plan.md`
+2. AI-LLM-01 OpenAI provider foundation.
+   - Status: implemented; a replacement project credential passed the live
+     synthetic embedding check on 2026-07-19.
+   - Reference:
+     `docs/mvp/ai/ai-llm-01-openai-provider-foundation.md`
+   - Adds the isolated Python/FastAPI runtime, direct Responses API adapter,
+     strict text/image/tool smoke paths, safe provider errors, and mocked CI
+     verification without exposing a product endpoint.
+3. AI-RAG-00 hybrid-RAG knowledge and contract reconciliation.
+   - Status: complete as a documentation-only contract slice.
+   - Reference:
+     `docs/mvp/ai/ai-rag-00-hybrid-rag-contract-reconciliation.md`
+   - Reconciles authoritative listing facts with filtered, source-attributed
+     OpenSearch knowledge retrieval.
+   - Defines source ownership and precedence, chunk metadata and visibility,
+     citations and answer actions, staleness and deletion behavior, Flyway
+     ownership, and retention/privacy rules.
+4. AI-RAG-01 OpenSearch vector foundation.
+   - Status: implemented and verified on 2026-07-18.
+   - Reference:
+     `docs/mvp/ai/ai-rag-01-opensearch-vector-foundation-plan.md`
+   - Adds the separate agent-owned vector index family, strict mapping,
+     validated embedding identity/dimensions, atomic read/write aliases,
+     readiness, safe observability, and real OpenSearch integration tests.
+5. AI-RAG-02 ingestion and embedding pipeline.
+   - Status: implementation plan complete. `AI-RAG-02A` was implemented and
+     verified on 2026-07-18. `AI-RAG-02B` was implemented and verified on
+     2026-07-19. `AI-RAG-02C` was implemented and verified on 2026-07-19;
+     the full local backlog was activated successfully. `AI-RAG-02D` was
+     implemented and deployed on 2026-07-19. `AI-RAG-02E-CATEGORY` was
+     implemented, verified, and deployed locally on 2026-07-19 with all
+     category flags disabled; the other `02E` sources remain deferred until
+     their authoritative source-owner contracts are implemented.
+   - Reference:
+     `docs/mvp/ai/ai-rag-02-ingestion-embedding-pipeline-plan.md`
+   - `AI-RAG-02A` reference:
+     `docs/mvp/ai/ai-rag-02a-product-listing-source-publication.md`
+   - `AI-RAG-02B` reference:
+     `docs/mvp/ai/ai-rag-02b-agent-durable-ingestion-intake.md`
+   - `AI-RAG-02C` reference:
+     `docs/mvp/ai/ai-rag-02c-listing-embedding-indexing.md`
+   - `AI-RAG-02D` reference:
+     `docs/mvp/ai/ai-rag-02d-rebuild-deletion-and-promotion.md`
+   - Implement in order as `AI-RAG-02A` source publication, `02B` durable
+     intake, `02C` listing embeddings/indexing, `02D` rebuild/deletion, and
+     `02E` remaining authoritative sources.
+6. AI-RAG-03 filtered knowledge retriever.
+   - Status: listing-only implementation verified on 2026-07-19.
+   - Reference:
+     `docs/mvp/ai/ai-rag-03-listing-knowledge-retriever.md`
+   - Adds replaceable listing and category-guidance retrieval paths, exact
+     current-version and isolation filters, bounded context, strict result
+     validation, safe failure behavior, metrics, and real OpenSearch isolation
+     tests. Category retrieval remains disabled pending explicit rollout.
+7. AI-KNOW-01 Product Service category-guidance owner.
+   - Status: implemented, verified, and deployed locally on 2026-07-19.
+   - Reference:
+     `docs/mvp/ai/ai-know-01-category-guidance-owner-plan.md`
+   - Adds human-controlled immutable category-guidance versions, admin
+     publication/retirement, exact/export reads, and reference-only outbox
+     events. It does not add Agent Service ingestion or generated content.
+8. AI-RAG-02E-CATEGORY Agent Service category-guidance adapter.
+   - Status: implemented, verified, and locally deployed on 2026-07-19 with
+     intake, processing, and retrieval disabled.
+   - Reference:
+     `docs/mvp/ai/ai-rag-02e-category-guidance-adapter-plan.md`
+9. AI-CS-01A agent persistence.
+   - Status: implemented, verified, migrated locally, and deployed on
+     2026-07-19 with `AGENT_PERSISTENCE_ENABLED=false`.
+   - Adds Agent-owned sessions, messages, invocations, tool-call audit,
+     database-enforced open-session uniqueness, retry deduplication, actor
+     isolation, keyset pagination, and split 90/365-day retention behavior.
+10. AI-CS-01B authenticated agent APIs.
+    - Status: implemented, verified, and migrated locally on 2026-07-19 with
+      `AGENT_CUSTOMER_SERVICE_API_ENABLED=false`.
+    - Adds BFF authentication/CSRF routing, Auth Service actor resolution,
+      Product Service listing context validation, strict Agent API schemas,
+      actor-hidden reads, standard errors/correlation, cursor pagination,
+      idempotent replay, Flyway V5 correlation alignment, and disabled-safe
+      readiness.
+11. AI-CS-01C listing customer-service hybrid-RAG orchestration.
+   - Status: source implementation and mocked/offline verification complete on
+     2026-07-19. `AI-CS-01C-2` provider answerer adapter binding is also
+     source-complete and verified offline; activation remains disabled.
+   - Reference:
+     `docs/mvp/ai/ai-cs-01-listing-customer-service-assistant.md`
+   - Adds deterministic `getListing` and listing-only `retrieveKnowledge`
+     execution, trusted actor/listing injection, strict schemas, retry-safe
+     hashed tool audits, bounded model context/time/tokens, grounded
+     source/action validation, privacy/injection guardrails, safe outage
+     behavior, low-cardinality metrics, and offline eval fixtures.
+   - `AI-CS-01C-2` adds a strict redacted request schema, the existing
+     Responses provider binding, bounded output/time behavior, typed
+     rate-limit/timeout/malformed-output mapping, cancellation-safe invocation
+     failure, token/latency propagation, hashed safe adapter logs, and
+     low-cardinality adapter metrics. It is not constructed by default.
+12. AI-CS-01D existing chat UI activation.
+    - Status: `AI-CS-01D-A` disabled-by-default gateway/UI source integration
+      implemented and verified on 2026-07-20. External activation remains
+      disabled pending the evaluation and rollout gate.
+      `AI-CS-CLEAN-P0-01` completed the required orchestration/provider/
+      gateway/UI cleanup checkpoint on 2026-07-20 and reset the AI lane to
+      0/3 without activating the capability.
+    - Reuses the existing floating chat and `/account/messages` agent UI while
+      keeping agent sessions, DTOs, routes, and persistence outside
+      buyer/seller chat.
+    - Adds authenticated token relay with browser identity-header stripping,
+      strict Angular response validation, reserved agent routes, grounded
+      source/action rendering, deterministic listing selection, retry-safe
+      outage behavior, seller handoff, and default-hidden/network-silent
+      entry points.
+13. AI-CS-01E evaluation and rollout.
+    - Status: `AI-CS-01E-A` deterministic offline evaluation baseline and
+      provisional release-threshold contract implemented and verified on
+      2026-07-20. AI lane is 1/3.
+    - Adds a strict versioned fixture/report schema and a zero-network runner
+      over the real listing retriever/orchestrator boundaries with local
+      embedding, OpenSearch-style, and provider fakes.
+    - Offline thresholds cover retrieval relevance/recall, annotated-claim
+      faithfulness, citation validity/completeness, stale/deleted/cross-listing
+      rejection, actor/tool isolation, safe dependency failures, and simulated
+      latency. Passing the baseline does not authorize release.
+    - Live semantic quality, production latency, pricing/cost, dashboards,
+      runtime activation, cohorts, and rollout remain deferred. Capability,
+      provider, retrieval, gateway, and frontend release gates remain off.
+    - `AI-CS-01E-B` release-gate evaluator and offline observability contract
+      implemented and verified on 2026-07-20. AI lane is 2/3.
+    - Reference:
+      `docs/mvp/ai/ai-cs-01e-release-gate-and-observability-contract.md`
+    - Adds strict readiness input/decision/dashboard schemas, report
+      freshness/integrity/version enforcement, default-off and kill-switch
+      precedence, externally evidenced production approval gates, sequential
+      rollout approvals, and fixed rollback triggers. It creates no runtime
+      flags, dashboards, cohorts, evidence, or activation.
+    - `AI-CS-01E-C` default-off listing context picker and listing-detail
+      contextual launch implemented and verified on 2026-07-20. AI lane is
+      3/3.
+    - Reuses only the approved public individual-listing search/detail
+      projections, passes listing ID plus bounded title-safe display context,
+      and starts the existing authenticated Agent create flow only after an
+      explicit user choice. Default false capability behavior remains hidden
+      and network-silent.
+    - `AI-CS-CLEAN-P0-02` evaluation/release-gate/listing-context cleanup
+      completed and verified on 2026-07-20. It tightened fixed-schema
+      consistency, kept offline evidence distinct from unknown production
+      latency/cost, consolidated ID/title-only listing context, and preserved
+      default-off network silence and no automatic action. AI lane reset from
+      3/3 to 0/3; pause before `AI-LC-01` or rollout pending a separate PM
+      assignment.
+14. AI-LC-01 LangChain integration after the measurable baseline RAG path.
+    - `AI-LC-01A` stopped cleanly on 2026-07-20 because `langchain` and
+      `langchain-core` were absent from the Agent environment, declaration,
+      lock state, and local cache. No dependency or source change was made;
+      AI lane remained 0/3.
+15. AI-LIST-01 seller image-to-listing content proposal.
+    - `AI-LIST-01A` default-off proposal contract and offline orchestration
+      implemented and verified on 2026-07-20. The Agent-owned strict schema,
+      actor-scoped owned-draft media protocol, injected fake vision transport,
+      privacy/injection guardrails, idempotent replay, safe audits/metrics, and
+      offline evaluation tests perform no Product write or runtime activation.
+    - `AI-LIST-01B` offline multimodal provider adapter binding implemented and
+      verified on 2026-07-20. It reuses the existing typed Responses operation
+      with separated trusted instructions/untrusted images, strict provider
+      context/output/deadline limits, no tools, `store=false`, safe error and
+      cancellation mapping, replay/audit/metric safety, and exact 01A baseline
+      parity. It remains default-off and unwired.
+    - `AI-LIST-01C` authorized Product listing-media tool adapter implemented
+      and verified on 2026-07-20. Product now owns a service-authenticated,
+      default-disabled read contract that rechecks individual listing
+      ownership/editable-draft state and selected media state, verifies actual
+      JPEG/PNG/WebP bytes/size/hash, and returns no storage URL/key or seller
+      data. The Agent HTTP adapter is independently default-off/unwired,
+      redirect-free, bounded, cancellation-safe, and strictly revalidates the
+      response. Focused Product unit/API/MySQL and Agent fake-HTTP suites pass
+      with no external request or write. AI lane reached 3/3 and triggered the
+      mandatory AI-LIST cleanup recorded below.
+    - `AI-LIST-CLEAN-P0-01` listing proposal and media boundary cleanup
+      completed and verified on 2026-07-20. It rejects contradictory
+      suggestion/unknown output, centralizes image magic checks, audits
+      media-tool cancellation with retry-safe replay cleanup, and ends the
+      Product authorization transaction before storage reads. Default-off,
+      no-call, ownership/state, privacy, proposal-only, and release-blocked
+      behavior remain intact. AI lane reset from 3/3 to 0/3; pause for a
+      separate PM assignment.
+    - Reference:
+      `docs/mvp/ai/ai-list-01-seller-image-to-listing-proposal.md`
+16. AI-LIST-02 seller proposal review and confirmed application.
+    - Status: approved implementation plan; implementation has not started.
+    - Reference:
+      `docs/mvp/ai/ai-list-02-seller-proposal-review-and-apply-plan.md`
+    - `AI-LIST-02A` adds a default-disabled authenticated proposal
+      create/resume/dismiss boundary with bounded durable review state,
+      actor/listing/media isolation, and no Product write.
+    - `AI-LIST-02B` adds the marketplace-account seller review UI, explicit
+      selected-field confirmation, ordinary-editor fallback, and
+      disabled/network-silent behavior.
+    - `AI-LIST-02C` applies only seller-selected final values through the
+      existing Product PATCH plus `If-Match`; Agent Service remains outside
+      the authoritative write and no automatic submit/publish is allowed.
+    - The AI lane begins this sequence at `0/3`. Green 02A/02B/02C reaches
+      `3/3` and triggers mandatory AI-only cleanup before any rollout or report
+      successor.
+17. REP-00 listing report domain and policy taxonomy.
+18. REP-01 listing report intake, evidence, and persistence.
+19. ADM-REP-01 user-reported listing queue and admin override paths.
+20. AI-REP-01 report classification in shadow mode.
+21. OPS-REP-01 allowlisted reversible report operations.
+22. OPS-REP-02 measured policy expansion after rollout gates pass.
+
+Python/FastAPI, a direct OpenAI Responses API provider adapter, Agents SDK
+orchestration, OpenSearch-backed hybrid RAG, later LangChain integration,
+authenticated-only initial access, and reuse of the existing marketplace chat
+UI are approved planning decisions.
+Initial report classification remains shadow-only. Autonomous temporary
+listing restriction remains deferred until shadow-mode results receive
+explicit approval. Core marketplace flows must remain available when AI is
+disabled or unavailable.
 
 ## 6. Immediate Next Work
 
@@ -629,6 +915,52 @@ P0 cleanup slices:
 5. POSTSEARCH-STAB-P0-05 OpenSearch projection operational safety.
    - Status: planned.
 
+P1 cleanup slices:
+
+1. CLEAN-P1 Staging and quarantine plan.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-staging-and-quarantine-plan.md`
+2. CLEAN-P1-01A MVP stage dry run.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-01a-mvp-stage-dry-run.md`
+3. CLEAN-P1-02 V2 quarantine checklist.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-02-v2-quarantine-checklist.md`
+4. CLEAN-P1-03 AI quarantine checklist.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-03-ai-quarantine-checklist.md`
+5. CLEAN-P1-04 Environment cleanup review.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-04-env-cleanup-review.md`
+6. CLEAN-P1-05 Teammate-ready PR scope.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/cleanup-p1-05-teammate-ready-pr-scope.md`
+
+P2 cleanup slices:
+
+1. POSTSEARCH-STAB-P2-01 Docs folder structure cleanup.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/fix-05-post-search-profile-stabilization-sprint.md`
+2. POSTSEARCH-STAB-P2-02 Manual browser smoke checklist refresh.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p2-02-manual-browser-smoke-checklist-refresh.md`
+3. POSTSEARCH-STAB-P2-03 Historical demo and deferred module cleanup.
+   - Status: complete.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/postsearch-stab-p2-03-historical-demo-deferred-module-cleanup.md`
+4. POSTSEARCH-STAB-P2-04 Observability and demo diagnostics notes.
+   - Status: planned.
+   - Reference:
+     `docs/mvp/fix/stabilization/post-search/fix-05-post-search-profile-stabilization-sprint.md`
+
 ### Next Implementation Sequence
 
 1. FIX-01: Restore verification baseline.
@@ -755,11 +1087,115 @@ P0 cleanup slices:
 
 Business commerce:
 
-- Cart
-- Inventory
-- Checkout/payment
-- Orders/shipping
-- Notifications
+- Status: V2-COM-00 complete as a documentation-only planning slice.
+- Reference: `docs/v2/commerce/v2-com-00-commerce-domain-plan.md`.
+- Implementation remains behind the MVP validation entry gate.
+
+Approved slice order:
+
+1. V2-INV-01 inventory initialization, adjustment ledger, and seller UI.
+   - Status: complete and browser verified on 2026-07-17.
+   - Reference:
+     `docs/v2/commerce/v2-inv-01-business-inventory-foundation-plan.md`.
+2. V2-CART-01 cart storage/API/UI.
+   - Status: complete and browser verified on 2026-07-17.
+   - Reference:
+     `docs/v2/commerce/v2-cart-01-redis-cart-plan.md`.
+3. V2-CART-02 cart validation.
+   - Status: complete and browser verified on 2026-07-18.
+   - Reference:
+     `docs/v2/commerce/v2-cart-02-cart-validation-plan.md`.
+4. V2-INV-02 reservation, expiry, release, and commit.
+   - Status: complete; live lifecycle and browser cart-boundary verified on
+     2026-07-18. Seller-page balance observation remains pending cleanup of
+     duplicate local identity fixtures.
+   - Reference:
+     `docs/v2/commerce/v2-inv-02-inventory-reservation-lifecycle-plan.md`.
+5. V2-IAM-01 buyer address book.
+   - Status: complete and browser verified on 2026-07-19.
+   - Requirement: `IAM-05 Manage addresses`. This is separate from the older
+     completed MVP slice named `IAM-05 Protected route test`.
+   - Delivered: user-scoped address CRUD/default management, optimistic
+     versioning, the internal checkout resolver, gateway routes, account UI,
+     metrics, and forward-only persistence migrations.
+   - Reference:
+     `docs/v2/commerce/v2-iam-01-buyer-address-book-plan.md`.
+6. V2-CHK-01 checkout snapshots, totals, and orchestration.
+   - Status: implemented with automated verification complete on 2026-07-19.
+     The control center approved the local-demo-only tax
+     `ZERO_LOCAL_DEMO_V1`, shipping `FREE_LOCAL_DEMO_V1`, policy
+     `LOCAL_DEMO_V1`, and `PT15M` lifetime defaults. Production use remains
+     prohibited. The coordinated live demo rebuild and browser walkthrough
+     remain pending to avoid interrupting concurrent browser stabilization.
+   - Delivered: durable checkout/item/address/policy/quote snapshots,
+     authoritative local-demo totals, exact cart/address validation,
+     all-or-nothing inventory reservation and recovery, one-active-checkout
+     enforcement, expiry/cancel/release reconciliation, idempotent commands,
+     gateway contracts, and feature-gated buyer review/detail UI.
+   - Reference:
+     `docs/v2/commerce/v2-chk-01-checkout-snapshots-totals-orchestration-plan.md`.
+7. V2-PAY-01 provider intent and verified webhook.
+   - Status: payment-service domain foundation, verified HMAC fake-provider
+     callback, immutable provider events, terminal history, attempts, and
+     transactional `payment.succeeded`/`payment.failed` outbox records are
+     implemented and independently verified on 2026-07-20. `V2-PAY-01C` adds
+     the default-disabled order-service checkout-to-payment adapter with
+     authoritative snapshot mapping, buyer isolation, exact idempotency-key
+     forwarding, bounded correlation propagation, and safe downstream failure
+     mapping. `V2-PAY-01D` adds the payment-service default-disabled bounded
+     outbox dispatcher contract, deterministic payment-intent partitioning,
+     concurrent lease claims, acknowledgement-before-publication marking,
+     bounded retry/backoff, restart recovery, and safe terminal metadata.
+   - Boundary: payment intents and webhooks remain default-off, payment-service
+     remains outside the active root reactor, and no gateway, browser, real
+     provider, money movement, transfer, payout, refund, Kafka adapter, broker,
+     or publication runtime is activated.
+8. V2-ORD-01 idempotent order confirmation and reconciliation.
+   - Status: `V2-ORD-01A` payment-succeeded order confirmation foundation is
+     implemented and independently verified on 2026-07-20.
+   - Delivered: default-disabled strict version-1 event handler, authoritative
+     local payment binding, durable consumer/event deduplication and payload
+     conflict detection, bounded concurrent processing lease, idempotent
+     inventory commit, multi-business immutable order snapshots, checkout
+     `PAYMENT_PROCESSING -> COMPLETED`, history, and transactional
+     `order.confirmed` outbox.
+   - Cleanup: `V2-PAY-ORD-CLEAN-P0-01` verified the payment producer/order
+     consumer boundary, disabled transport gates, strict non-coercing envelope,
+     bounded money and response metadata, provider-event causation identity,
+     replay/concurrency/restart behavior, migration immutability, and package
+     isolation on 2026-07-20.
+   - Boundary: no live transport, Kafka/broker activation, API/UI exposure,
+     payment-failed transition, expired-reservation recovery reservation,
+     reconciliation queue, refund, transfer, payout, fulfillment, or shipping
+     behavior is included.
+9. V2-ORD-02 buyer and business order views.
+   - `V2-ORD-02A` complete and verified on 2026-07-20: default-off
+     authenticated buyer history and detail reads use stored order/group
+     statuses, immutable buyer-facing group/item/address/policy snapshots, and
+     stable opaque pagination over `(created_at DESC, id DESC)`. Cross-buyer
+     and missing detail reads are indistinguishable. Payment internals,
+     shipments, and aggregate version are omitted; shipment/version fields may
+     be added later without changing existing meanings. The existing buyer
+     pagination index is sufficient, so no migration was required.
+   - `V2-ORD-02B` complete and verified on 2026-07-20: Auth maps owners to
+     `ORDER_VIEW` plus `ORDER_FINANCE_VIEW` and managers to `ORDER_VIEW`;
+     default-off business-group queue/detail reads use stable
+     business/status pagination, SQL tenant isolation, immutable fulfillment
+     snapshots, non-enumerating denial, finance redaction, and the
+     query-plan-verified V4 unfiltered queue index.
+   - `V2-ORD-02C` complete and source-verified on 2026-07-20: the
+     management-style business portal queue/detail UI uses only the green 02B
+     read contract. Independent Angular and gateway flags remain default-off;
+     disabled routes/navigation make zero Order requests, while the enabled
+     authenticated BFF route relays the trusted token and strips spoofed
+     identity headers. It adds no fulfillment mutation.
+   - Reference:
+     `docs/v2/commerce/v2-ord-02c-business-fulfillment-ui.md`.
+   - Business lane is `3/3` and paused for mandatory business-only cleanup
+     before shipping.
+10. V2-ORD-03 cancellation, refund, and inventory compensation.
+11. V2-SHP-01 fulfillment and shipping.
+12. V2-NOT-01 notifications.
 
 ### V3
 
@@ -770,3 +1206,77 @@ Trust, intelligence, and growth:
 - Advanced admin/trust operations
 - AI assistant
 - Advanced analytics
+
+## 8. Approved Near-Term Product Delivery Sequence
+
+Status: approved on 2026-07-20 after reviewing the implemented commerce and AI
+boundaries against established open-source multi-vendor workflow patterns.
+
+The objective is to finish seller- and buyer-visible workflows rather than add
+another provider, framework, or infrastructure foundation. All incomplete
+paths remain default-off.
+
+### 8.1 Current checkpoint
+
+| Lane | Counter | Completed checkpoint | Next approved slice |
+|---|---:|---|---|
+| Business | `3/3` | `V2-ORD-02C` business fulfillment queue/detail UI | Mandatory ORD-02 business cleanup |
+| AI | `1/3` | Paused while business owned shared Angular/gateway surfaces | Resume only after Control Center releases shared ownership |
+
+Payment/provider activation, real money movement, live Kafka transport,
+LangChain installation, and autonomous AI actions remain outside this
+sequence.
+
+### 8.2 Execution waves
+
+| Wave | Business lane | AI lane | Coordination rule |
+|---|---|---|---|
+| 1 | `V2-ORD-02B` backend business queue/detail and permissions | `AI-LIST-02A` backend proposal session/review API | May run in parallel; Order/Auth and Agent/Product ownership are isolated |
+| 2A | `V2-ORD-02C` business portal queue/detail UI | Paused | Own shared Angular/gateway/browser surfaces |
+| 2B | Paused at business `3/3` | `AI-LIST-02B` marketplace seller proposal review UI | Starts only after 02C releases shared frontend/browser ownership |
+| 3A | Mandatory business cleanup across ORD-02A/B/C | AI remains source-isolated or paused if cleanup touches shared UI | No business successor before cleanup resets `3/3 -> 0/3` |
+| 3B | Begin Order-only `V2-SHP-01A` only after cleanup | `AI-LIST-02C` confirmed Product PATCH application | May overlap only when neither task owns the same frontend/gateway/Product files |
+| 4 | Continue `V2-SHP-01B/C`, then shipping cleanup | Mandatory AI-LIST-02 cleanup after AI reaches `3/3` | Preserve one bounded slice per lane and serialize browser/runtime work |
+
+### 8.3 Business continuation after ORD-02
+
+1. `V2-SHP-01A`: accept a paid business fulfillment group.
+2. `V2-SHP-01B`: create partial shipments with item quantities.
+3. `V2-SHP-01C`: mark shipped, expose buyer shipment snapshots, and derive
+   aggregate order status.
+4. Mandatory shipping cleanup.
+5. `V2-ORD-03A`: cancellation request and eligibility state.
+6. `V2-ORD-03B`: idempotent refund orchestration.
+7. `V2-ORD-03C`: idempotent inventory compensation.
+8. `V2-PAY-02A`: payment/order reconciliation and admin operations queue.
+9. `V2-NOT-01`: event-driven buyer/business notifications.
+
+No real payment provider is activated until reconciliation, recovery,
+production legal/provider decisions, and explicit rollout approval are green.
+
+### 8.4 AI continuation after AI-LIST-02
+
+1. Complete mandatory AI-LIST-02 cleanup.
+2. Collect real multimodal quality, latency, token, cost, and privacy evidence
+   through an explicitly approved limited cohort.
+3. Keep proposal application seller-confirmed and Product-versioned in every
+   cohort.
+4. Reconsider `AI-LC-01` only through a separate dependency decision; absence
+   of LangChain does not block the current application-owned workflow.
+5. Resume `REP-00`, `REP-01`, and `ADM-REP-01` before any `AI-REP-01` shadow
+   classification.
+6. Keep all automated report/listing operations disabled until shadow-mode
+   quality, appeal, restoration, and explicit approval gates pass.
+
+### 8.5 Release-oriented acceptance
+
+The next checkpoint is not measured only by test totals. It requires:
+
+- a buyer can read their immutable business order;
+- authorized business staff can read only their fulfillment group;
+- a seller can generate, review, edit, and explicitly apply an AI proposal
+  without automatic submission or publication;
+- disabled AI/commerce flags preserve the existing marketplace;
+- each state-changing command has an actor, precondition, idempotency key,
+  immutable history/outbox effect, and explicit compensation boundary; and
+- shared frontend, browser, gateway, and runtime ownership remains serialized.

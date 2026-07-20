@@ -270,6 +270,27 @@ Invalidates the gateway browser session and delegates OIDC logout/revocation
 to Keycloak when supported. Logout is idempotent and requires CSRF protection
 for browser callers.
 
+Form/query parameters:
+
+- `client=marketplace|seller-portal|admin-portal` optional logout surface
+  hint.
+
+Rules:
+
+- The gateway clears the BFF HTTP session and server-side OAuth authorized
+  client regardless of which first-party client created the session.
+- Unknown logout client hints are ignored and fall back to the authenticated
+  OIDC client registration or marketplace.
+- Marketplace logout returns to the configured marketplace logout URI with
+  `signedOut=1`.
+- Seller portal logout returns to
+  `/login?client=seller-portal&signedOut=1`.
+- Admin portal logout returns to
+  `/login?client=admin-portal&signedOut=1`.
+- Login pages and marketplace shell may display "Signed out successfully"
+  when `signedOut=1` is present, then remove the confirmation query from the
+  active browser URL where possible.
+
 ### `GET /users/me` (`IAM-03`)
 
 Creates or returns the application-owned identity user mapped to the
@@ -502,6 +523,74 @@ PATCH  /users/me/addresses/{addressId}
 DELETE /users/me/addresses/{addressId}
 POST   /users/me/addresses/{addressId}/default
 ```
+
+These routes derive ownership from the authenticated user. Request bodies
+contain recipient and address fields only; they cannot replace user ID,
+default state, version, timestamps, or internal IDs.
+
+The collection is capped at 20 and returns default first. The first address
+becomes default automatically. PATCH, DELETE, and set-default require
+`If-Match` with the current address version. PATCH uses presence-aware merge
+semantics: omitted fields remain unchanged, while nullable `label` and `line2`
+can be cleared with explicit null.
+
+Create request:
+
+```json
+{
+  "label": "Home",
+  "recipientName": "Alex Buyer",
+  "phone": "+19495550123",
+  "line1": "100 Main Street",
+  "line2": "Apt 4",
+  "city": "Irvine",
+  "region": "CA",
+  "postalCode": "92618",
+  "countryCode": "US"
+}
+```
+
+Address response:
+
+```json
+{
+  "id": "01...",
+  "label": "Home",
+  "recipientName": "Alex Buyer",
+  "phone": "+19495550123",
+  "line1": "100 Main Street",
+  "line2": "Apt 4",
+  "city": "Irvine",
+  "region": "CA",
+  "postalCode": "92618",
+  "countryCode": "US",
+  "isDefault": true,
+  "version": 0,
+  "createdAt": "2026-07-18T10:00:00Z",
+  "updatedAt": "2026-07-18T10:00:00Z"
+}
+```
+
+Deleting the default promotes the oldest remaining address in the same
+transaction. Deleting the last address leaves the book empty. Address-book
+rows are hard-deleted because checkout and orders retain immutable snapshots
+instead of foreign keys.
+
+Trusted checkout resolution:
+
+```text
+GET /internal/users/{buyerId}/addresses/{addressId}
+```
+
+The internal route requires `X-Internal-Service-Token`, is not gateway-routed,
+and returns the address only when the address belongs to the supplied active
+buyer. Missing, wrong-owner, and inactive-buyer cases return the same
+`404 BUYER_ADDRESS_NOT_FOUND`. V2-CHK-01 derives `buyerId` from its
+authenticated actor and copies the response into a checkout snapshot.
+
+Detailed validation, default, privacy, concurrency, and error rules are
+defined in
+`docs/v2/commerce/v2-iam-01-buyer-address-book-plan.md`.
 
 ## 4. Individual Seller
 
@@ -1008,12 +1097,13 @@ LIST-01 uses the unified draft endpoint above with `sellerType` set to
 quantity; they omit negotiation and meeting fields. Publishing, image
 attachment, moderation submission, and public browsing remain separate slices.
 
-### Business store item self-publishing (`BUS-LIST-00`, `BUS-LIST-02`, `BUS-LIST-03`, `LST-05A`)
+### Business store item self-publishing (`BUS-LIST-00` through `BUS-LIST-06`, `LST-05A`)
 
-Implemented seller portal draft/edit/media commands:
+Implemented seller portal draft/edit/media/publication commands:
 
 ```text
 GET    /businesses/{businessId}/store/items
+GET    /businesses/{businessId}/store/items/search
 POST   /businesses/{businessId}/store/items
 GET    /businesses/{businessId}/store/items/{listingId}
 PATCH  /businesses/{businessId}/store/items/{listingId}
@@ -1021,11 +1111,6 @@ POST   /businesses/{businessId}/store/items/{listingId}/media/upload-request
 PUT    /businesses/{businessId}/store/items/{listingId}/media/{mediaId}/content
 POST   /businesses/{businessId}/store/items/{listingId}/media/{mediaId}/confirm
 PUT    /businesses/{businessId}/store/items/{listingId}/images
-```
-
-Planned seller portal publication commands:
-
-```text
 POST   /businesses/{businessId}/store/items/{listingId}/publish
 POST   /businesses/{businessId}/store/items/{listingId}/pause
 POST   /businesses/{businessId}/store/items/{listingId}/relist
@@ -1039,15 +1124,32 @@ Rules:
   the current active `storeId` from `GET /businesses/me/store-context`.
 - Media routes reuse listing media validation and storage, but first verify
   the item belongs to the active business store context.
+- BUS-LIST-06 management search accepts optional `q`, `status`, `cursor`, and
+  `limit`. Search matches title or SKU, status accepts `DRAFT`, `ACTIVE`,
+  `PAUSED`, or `REMOVED_BY_ADMIN`, and results sort by
+  `updatedAt DESC, id DESC`.
+- Management search returns `{ data, page, summary }`. `page` contains the
+  opaque `nextCursor` and `hasMore`; `summary` contains catalog-wide `total`,
+  `draft`, `active`, `paused`, and `removed` counts.
+- A SKU is unique within one business. A create or seller edit that would
+  duplicate another item SKU returns `409 BUSINESS_SKU_CONFLICT`; the existing
+  item is not changed.
 - Publish moves a complete business store item to public `/stores` visibility
-  without item-level admin approval.
+  without item-level admin approval by setting
+  `publicationSource=BUSINESS_SELF_PUBLISHED`.
 - Draft, paused, removed, and inactive-business items are not public.
 - Patch and state commands require `If-Match`.
+- Business item fields and media are editable only in `DRAFT` or `PAUSED`.
+  Active items must be paused before editing; paused edits preserve `PAUSED`
+  until the seller explicitly relists.
 - Clients cannot set owner IDs, business membership, status, publication
   source, moderation/admin fields, payment status, inventory, order, shipping,
   or transaction fields.
 - Business item quantity is catalog/display quantity in MVP. It is not an
   authoritative inventory balance and cannot reserve stock.
+- A removed business item response includes the latest `moderationAction`,
+  `moderationReason`, and `moderationActionAt` so the seller can see why the
+  item was removed.
 - Payment transaction, cart, checkout, inventory reservation, order, shipping,
   fulfillment, and notifications remain V2 APIs.
 
@@ -1079,6 +1181,14 @@ the response body. A valid `DRAFT` listing can be submitted again after a
 previous non-approved review; if an active listing review case already exists,
 submission reopens it as `OPEN` and clears any admin assignment. Pause, relist,
 close, and public read paths remain later slices.
+
+An owner read of a `CHANGES_REQUESTED` individual listing includes the latest
+`moderationAction`, exact `moderationReason`, and `moderationActionAt`.
+The owner may edit its fields and media. The first successful field or attached
+image update returns the listing to `DRAFT` with moderation status
+`NOT_SUBMITTED`; the owner then resubmits through the normal submit command
+using the new version. Ownership checks remain mandatory for every recovery
+read and mutation.
 
 ### Listing moderation (`LIST-06`, `LST-09`)
 
@@ -1153,8 +1263,9 @@ ADM-LIST-04 adds active listing admin maintenance. `GET
 with image metadata for platform admins. `PATCH /admin/listings/{listingId}`
 edits active approved listing content fields only and requires `If-Match` with
 the current listing version plus a required `reason`. `POST
-/admin/listings/{listingId}/remove` removes an active approved listing from
-public marketplace visibility and requires `If-Match` plus a required `reason`.
+/admin/listings/{listingId}/remove` removes either an active approved
+individual listing or an active business self-published listing from public
+visibility and requires `If-Match` plus a required `reason`.
 Removal sets listing status `REMOVED_BY_ADMIN`; it is not a physical delete.
 Both commands append moderation history decisions `ADMIN_EDIT` or
 `ADMIN_REMOVE`. Non-active listings return `400 LISTING_INVALID_REQUEST`; stale
@@ -1202,13 +1313,18 @@ LIST-07 implements a guest-readable direct listing detail endpoint.
 Rules:
 
 - Login is not required.
-- Only listings with `status=ACTIVE` and `moderationStatus=APPROVED` are
-  visible.
+- Individual listings are visible only with `status=ACTIVE` and
+  `moderationStatus=APPROVED`. Business listings are visible only with
+  `status=ACTIVE` and `publicationSource=BUSINESS_SELF_PUBLISHED`.
 - Non-public listing states return `404 LISTING_NOT_FOUND`.
 - The response includes a safe owner display label and omits owner user IDs,
-  business internal IDs, internal status, moderation status, versions, media
+  business membership IDs, internal status, moderation status, versions, media
   object IDs, object bucket, and object key.
 - Individual listings include an off-platform payment and delivery notice.
+- Business listings include public store identity (`storeId`, `storeSlug`,
+  `storeName`, `businessVerified`) and public store location. Their quantity is
+  informational catalog quantity only; MVP pages do not expose cart or
+  authoritative inventory controls.
 
 Response:
 
@@ -1315,8 +1431,8 @@ Rules:
 
 - Login is not required.
 - Each requested ID set is capped at 50 IDs.
-- Public labels include only user ID, display name, optional avatar URL,
-  business ID, and business legal name.
+- Public labels include only user ID, display name, unique public handle,
+  optional avatar URL, business ID, and business legal name.
 - Email, phone, Keycloak subject, roles, account status, verification flags,
   and internal profile/contact metadata are never returned.
 - Suspended, closed, or missing identities are omitted from the response.
@@ -1332,6 +1448,7 @@ Response:
       {
         "id": "01J...",
         "displayName": "Alex Seller",
+        "publicHandle": "alex-sells",
         "avatarUrl": "https://example.com/avatar.png"
       }
     ],
@@ -1385,9 +1502,14 @@ Remaining search/storefront work is split by product experience:
   `condition`, `minPrice`, `maxPrice`, `city`, `county`, and
   optional `sort=newest|price_asc|price_desc`. When `sort` is absent, the
   service uses its default stable result order without treating sorting as an
-  active user filter. After `BUS-LIST-00`, it returns active published
-  `BUSINESS` store items without item-level admin approval and does not
-  introduce cart, inventory, checkout, payment, orders, or shipping.
+  active user filter. Keyword search matches public item fields, SKU,
+  category, active public store name, and active public business legal name.
+  After `BUS-LIST-00`, it returns active published `BUSINESS` store items
+  without item-level admin approval and does not introduce cart, inventory,
+  checkout, payment, orders, or shipping. Business results are revalidated
+  against auth-service public business/store visibility; inactive,
+  suspended, closed, draft, paused, removed, and cross-business items must not
+  leak through search.
 - SEARCH-03 is the implemented shared cursor pagination path. Both split
   public search endpoints accept `cursor` and `limit` and return
   `{"data":[],"page":{"nextCursor":null,"hasMore":false}}`. Cursors are
@@ -1396,6 +1518,10 @@ Remaining search/storefront work is split by product experience:
   contracts are stable. It does not change this public response shape. When
   enabled, OpenSearch returns candidate listing IDs and product-service
   revalidates those IDs against MySQL before returning safe public cards.
+- SEARCH-05 makes marketplace and business store search state URL-based in the
+  frontend. Query, category, condition, price, city, county, and sorting are
+  encoded as URL parameters so refresh, back navigation, and shared links
+  preserve the active search.
 
 Internal/admin operation:
 
@@ -1452,8 +1578,9 @@ and realtime delivery are not part of the initial chat API behavior.
 
 Chat participant display must use safe identity labels from `USER-02` or a
 chat-owned display snapshot selected by `CHAT-00`. Chat APIs and UI surfaces
-may show display name, app-owned public avatar URL, neutral fallback text, and
-conversation-derived participant role such as buyer or seller.
+may show display name, unique app-owned public handle, app-owned public avatar
+URL, neutral fallback text, and conversation-derived participant role such as
+buyer or seller.
 
 Chat participant display must not expose email, phone, Keycloak subject, role
 lists, account status internals, verification flags, private profile metadata,
@@ -1508,6 +1635,7 @@ The same user may be buyer in one conversation and seller in another.
     {
       "participantId": "01J...",
       "displayName": "You",
+      "publicHandle": "jon-buys",
       "avatarUrl": null,
       "initials": "Y",
       "roleInConversation": "BUYER",
@@ -1516,6 +1644,7 @@ The same user may be buyer in one conversation and seller in another.
     {
       "participantId": "01J...",
       "displayName": "Alex Seller",
+      "publicHandle": "alex-sells",
       "avatarUrl": "/api/v1/public/user-avatars/01J...?v=4",
       "initials": "AS",
       "roleInConversation": "SELLER",
@@ -1597,10 +1726,11 @@ only from the buyer participant in that same conversation. Repeated seller
 mark-done and buyer confirmation requests are idempotent.
 
 On buyer confirmation, chat-service asks product-service to close the active
-approved individual listing. The listing no longer appears in public
-marketplace/search results, but remains visible in the seller's own listing
-history. This does not increment public completed-sales reputation and does
-not add payment, shipping, order, review, or protection claims.
+approved individual listing and locks the conversation. The listing no longer
+appears in public marketplace/search results, but remains visible in the
+seller's own listing history. A locked completed conversation is read-only for
+both participants. This does not increment public completed-sales reputation
+and does not add payment, shipping, order, review, or protection claims.
 
 Realtime delivery, attachments, reports, and blocking are future slices.
 
@@ -1731,7 +1861,12 @@ buyer must sign in before the API accepts it.
 
 ## 9. Cart and Inventory (V2)
 
-### Cart (`CRT-01` through `CRT-04`)
+V2-COM-00 ownership, orchestration, state, and idempotency decisions are
+defined in `docs/v2/commerce/v2-com-00-commerce-domain-plan.md`. Cart
+management and inventory foundation routes are active; later route families
+remain contract sketches until their named implementation slice.
+
+### Cart management (`CRT-01` through `CRT-03`)
 
 ```text
 GET    /cart
@@ -1739,25 +1874,161 @@ POST   /cart/items
 PATCH  /cart/items/{listingId}
 DELETE /cart/items/{listingId}
 DELETE /cart
+```
+
+All routes require authentication and derive the cart owner from the JWT
+subject. Add and quantity replacement accept:
+
+```json
+{"listingId": "01JY...", "quantity": 1}
+```
+
+The add request includes both fields. The patch request includes only
+`quantity`. Quantity must be from `1` through `999`.
+
+Response:
+
+```json
+{
+  "version": 3,
+  "expiresAt": "2026-08-16T12:00:00Z",
+  "itemCount": 1,
+  "totalQuantity": 2,
+  "totals": [{"currency": "USD", "amount": 39.98}],
+  "items": [{
+    "listingId": "01JY...",
+    "title": "Store item",
+    "thumbnailUrl": "/api/v1/public/listing-media/01JY...",
+    "quantity": 2,
+    "observedPrice": 19.99,
+    "currency": "USD",
+    "addedAt": "2026-07-17T12:00:00Z"
+  }]
+}
+```
+
+Only active business listings with initialized, sufficient available
+inventory can be added or have quantity replaced. Add on an existing listing
+replaces quantity and refreshes observed price. Patch preserves the previously
+observed price. Successful mutations refresh the 30-day inactivity expiry.
+
+V2-CART-02 implements full-cart validation for `CRT-04`:
+
+```text
 POST   /cart/validate
 ```
 
-Add request: `{"listingId": "id", "quantity": 1}`.
+The request has no body. Validation derives the buyer from authentication,
+reads the current cart version, and does not mutate the cart, refresh its TTL,
+or reserve inventory.
 
-Cart validation response returns current item status, authoritative price,
-availability, and warnings.
+Response:
+
+```json
+{
+  "cartVersion": 3,
+  "validatedAt": "2026-07-18T12:00:00Z",
+  "checkoutReady": false,
+  "itemCount": 1,
+  "totalQuantity": 2,
+  "validatedTotals": [],
+  "cartIssues": [],
+  "items": [{
+    "listingId": "01JY...",
+    "title": "Store item",
+    "thumbnailUrl": "/api/v1/public/listing-media/01JY...",
+    "requestedQuantity": 2,
+    "availableQuantity": 1,
+    "observedPrice": 19.99,
+    "currentPrice": 21.99,
+    "observedCurrency": "USD",
+    "currentCurrency": "USD",
+    "status": "QUANTITY_REDUCED",
+    "issues": [{
+      "code": "CART_QUANTITY_REDUCED",
+      "message": "Only 1 is currently available.",
+      "action": "SET_AVAILABLE_QUANTITY"
+    }, {
+      "code": "CART_PRICE_CHANGED",
+      "message": "The price changed from 19.99 USD to 21.99 USD.",
+      "action": "ACCEPT_CURRENT_PRICE"
+    }]
+  }]
+}
+```
+
+Item statuses are `READY`, `PRICE_CHANGED`, `QUANTITY_REDUCED`,
+`OUT_OF_STOCK`, `LISTING_UNAVAILABLE`, `SELLER_UNAVAILABLE`, and
+`CURRENCY_CONFLICT`. Multiple issues may be returned for one line. Repair
+actions use the existing cart mutation routes; validation never repairs the
+cart automatically.
+
+`checkoutReady=true` requires a nonempty cart, current active product and
+seller/store eligibility, sufficient initialized inventory, unchanged
+observed price and currency, and one current currency across all lines.
+`validatedTotals` is populated from current server prices only when the cart
+is ready and uses the cart total shape
+`{"currency": "USD", "amount": 43.98}`. A dependency timeout or `5xx` fails
+the whole operation with `503 CART_DEPENDENCY_UNAVAILABLE`.
+
+Seller/store eligibility is resolved through the internal auth-service route:
+
+```text
+GET /internal/businesses/{businessId}/stores/{storeId}/commerce-eligibility
+```
+
+It requires `X-Internal-Service-Token`, confirms that the store belongs to the
+business, and returns eligible only when both are active. It is not routed
+through the public gateway. The detailed contract and slice boundary are in
+`docs/v2/commerce/v2-cart-02-cart-validation-plan.md`.
+
+Internal CART-01 composition reads:
+
+```text
+GET /internal/store/items/{listingId}/commerce-context
+GET /internal/inventory/{listingId}/availability
+```
+
+Both require `X-Internal-Service-Token` and are not gateway browser routes.
+The detailed contract and slice boundary are in
+`docs/v2/commerce/v2-cart-01-redis-cart-plan.md`.
 
 ### Business inventory (`INV-01`)
 
 ```text
-GET  /businesses/{businessId}/inventory?cursor=&limit=
+GET  /businesses/{businessId}/inventory?q=&listingStatus=&cursor=&limit=
+POST /businesses/{businessId}/inventory/{listingId}/initialize
 GET  /businesses/{businessId}/inventory/{listingId}
 POST /businesses/{businessId}/inventory/{listingId}/adjustments
-GET  /businesses/{businessId}/inventory/{listingId}/movements
+GET  /businesses/{businessId}/inventory/{listingId}/movements?cursor=&limit=
 ```
 
-Adjustment request contains signed quantity delta, reason, and expected
-version.
+The list composes the current product-service business item page with nullable
+inventory balances so initialized and uninitialized catalog items can share
+one seller workflow. Product-service ordering and cursor remain authoritative
+for this composed list.
+
+Initialization explicitly sets non-negative on-hand stock and requires
+`Idempotency-Key`. The existing business listing quantity is a suggestion only
+and is never copied automatically.
+
+Adjustment request selects `SET` with an absolute non-negative quantity or
+`ADJUST` with a nonzero signed delta and includes a required reason.
+`If-Match` contains the expected inventory version and `Idempotency-Key`
+deduplicates retries.
+
+Inventory is keyed by listing ID, not client-supplied SKU. Seller routes
+require scoped `INVENTORY_VIEW` or `INVENTORY_MANAGE` permission.
+
+Product service provides a service-authenticated validation read:
+
+```text
+GET /internal/businesses/{businessId}/store/items/commerce-context?q=&status=&cursor=&limit=
+GET /internal/businesses/{businessId}/store/items/{listingId}/commerce-context
+```
+
+The detailed V2-INV-01 contract and error cases are defined in
+`docs/v2/commerce/v2-inv-01-business-inventory-foundation-plan.md`.
 
 ### Internal reservation APIs (`INV-02` through `INV-04`)
 
@@ -1768,7 +2039,16 @@ POST /internal/inventory/reservations/{id}/release
 GET  /internal/inventory/reservations/{id}
 ```
 
-Service authentication and `Idempotency-Key` are mandatory.
+V2-INV-02 implements one checkout-scoped, multi-line reservation aggregate so all
+requested inventory is reserved or none is. The reserve request contains
+`checkoutId`, `purpose`, an absolute `expiresAt`, and one through 50 distinct
+`{listingId, quantity}` lines. It never accepts business identity, prices,
+totals, or inventory balances.
+
+Service authentication is mandatory for every route. `Idempotency-Key` is
+mandatory for the three POST commands and is not required for GET. Exact
+states, replay behavior, errors, expiry, and concurrency rules are defined in
+`docs/v2/commerce/v2-inv-02-inventory-reservation-lifecycle-plan.md`.
 
 ## 10. Checkout, Payment, and Orders (V2)
 
@@ -1783,6 +2063,11 @@ POST /checkouts/{checkoutId}/cancel
 Create request references cart and address ID. Response contains authoritative
 snapshots, totals, expiry, and reservation state.
 
+The approved local-demo implementation uses `ZERO_LOCAL_DEMO_V1` tax,
+`FREE_LOCAL_DEMO_V1` shipping, immutable platform policy
+`LOCAL_DEMO_V1`, and one shared `PT15M` checkout/reservation lifetime.
+These adapter modes are invalid in a production profile.
+
 ### Payment (`PAY-01`, `PAY-02`)
 
 ```text
@@ -1794,6 +2079,98 @@ GET  /payments/{paymentId}
 Payment-intent command requires `Idempotency-Key`. Response exposes only the
 provider client data intended for the browser.
 
+`V2-PAY-01C` implements the order-owned form of the command at
+`POST /api/v1/checkouts/{checkoutId}/payment-intent`. It accepts no request
+body. Order service derives the opaque buyer ID, checkout version, persisted
+cart snapshot hash, authoritative total/currency, expiry, and sorted distinct
+business IDs from the authenticated buyer's immutable checkout. Only
+`PENDING_PAYMENT` checkouts with an active, unreleased reservation and a future
+expiry are payable.
+
+The order response contains only payment intent ID, checkout ID, stable status
+and version, amount/currency, expiry, bounded provider action, and safe error.
+It excludes buyer ID, business IDs, the internal service token, provider
+reference, and provider payload. Order service forwards the caller's original
+`Idempotency-Key` once, forwards a bounded correlation ID, and does not
+automatically retry the side-effecting payment command.
+
+The order adapter is unavailable unless both `checkout.enabled=true` and
+`checkout.payment-integration.enabled=true`. Payment service remains
+independently gated by `payment.intents.enabled=true`. Disabled or
+misconfigured boundaries fail closed and remain absent from gateway/frontend
+navigation in this slice.
+
+The current default-off payment-service boundary is narrower than the future
+gateway-facing routes above:
+
+```text
+POST /api/v1/internal/payment-intents
+GET  /api/v1/internal/payment-intents/{paymentIntentId}?buyerId={buyerId}
+POST /api/v1/webhooks/payments
+```
+
+- Intent routes require the constant-time checked internal service token and
+  are unavailable unless `payment.intents.enabled=true`.
+- The webhook does not use browser/session or internal-service-token
+  authentication. It requires
+  `X-MSB-Signature: t=<epoch-seconds>,v1=<lowercase HMAC-SHA256>` over
+  `<timestamp>.<raw-body>`, enforces a five-minute default tolerance, and is
+  unavailable unless `payment.webhooks.enabled=true` with a configured fake
+  webhook secret.
+- The deterministic fake event body is limited to 16 KiB and contains exactly
+  `eventId`, `type`, `occurredAt`, and `data`. Supported types are
+  `payment_intent.succeeded` and `payment_intent.failed`; data contains the
+  fake provider intent reference and, for failure only, a bounded failure code.
+- Verified callbacks deduplicate by provider event ID and exact payload hash.
+  Only `REQUIRES_ACTION` or `PROCESSING` may become `SUCCEEDED` or `FAILED`.
+  Provider event, status history, attempt, and version-1 payment outbox writes
+  commit atomically.
+- `V2-PAY-01D` adds a default-disabled dispatcher contract for those outbox
+  rows. Its version-1 transport envelope contains only stable `eventId`,
+  `eventType`, `schemaVersion`, `occurredAt`, `correlationId`,
+  `paymentIntentId`, `checkoutId`, deterministic `partitionKey`, and the
+  bounded status/amount/currency/provider-event payload. The partition key is
+  the payment-intent ID. Amount is a positive, non-coerced JSON number within
+  `DECIMAL(19,4)` bounds; the stored provider-event causation ID must match the
+  payload provider-event ID before dispatch.
+- Dispatch is at-least-once: transport acknowledgement precedes
+  `published_at`, an expired claim can be replayed after a crash, and consumers
+  must deduplicate by event ID. Bounded concurrent claims, retry backoff, and
+  terminal safe error metadata are internal payment-service behavior.
+  Dispatch and its scheduled worker are both disabled by default. No Kafka
+  adapter, broker activation, or gateway exposure is included.
+
+### Order confirmation event (`ORD-01`)
+
+`V2-ORD-01A` adds a default-disabled Order Service application handler for the
+version-1 `payment.succeeded` envelope above. There is no HTTP, gateway,
+browser, Kafka, or broker consumer surface in this slice.
+
+Order Service persists the exact payment-intent ID, checkout version/snapshot
+hash, buyer ID, sorted business IDs, amount, currency, and expiry that it
+already validated while creating the payment intent. The event handler then:
+
+- requires the exact version-1 envelope, `payment.succeeded`, `SUCCEEDED`
+  payload, payment-intent partition key, bounded correlation/provider-event
+  identity, positive USD amount, and canonical identifiers;
+- matches event payment/checkout/amount/currency to the local payment binding
+  and matches its buyer/business scope to immutable checkout snapshots;
+- deduplicates durably by `(consumerName, eventId)` and rejects event-ID reuse
+  with a different canonical payload hash;
+- uses only `PENDING_PAYMENT -> PAYMENT_PROCESSING -> COMPLETED` for normal
+  confirmation;
+- commits inventory with a deterministic idempotency key before the local
+  order transaction; and
+- atomically creates one order per checkout/payment, one business group per
+  business, immutable item/address/history snapshots, checkout completion,
+  processed-event completion, and version-1 `order.confirmed` outbox row.
+
+Concurrent duplicates observe the active bounded lease, completed replay
+returns the existing order, and abandoned/retryable work can resume safely.
+Late or non-committable paid events fail closed for later recovery.
+`payment.failed` is durably rejected as unsupported because no order-side
+transition is approved yet.
+
 ### Buyer orders (`ORD-02`, `ORD-04`)
 
 ```text
@@ -1802,12 +2179,178 @@ GET  /orders/{orderId}
 POST /orders/{orderId}/cancellation-requests
 ```
 
+`V2-ORD-02A` exposes the first two routes as authenticated, default-disabled
+Order Service reads under `/api/v1`. The feature flag is checked before actor
+or repository resolution. While disabled, both reads return
+`404 ORDERS_NOT_AVAILABLE` and perform no order repository access.
+
+`GET /api/v1/orders` accepts an optional opaque, versioned cursor of at most
+512 characters and an optional `limit` from 1 through 50, defaulting to 20.
+Rows are ordered by `(created_at DESC, id DESC)`. The cursor binds both values
+from the last returned row, so inserts newer than that position do not shift a
+continued traversal. Malformed, unsupported-version, or overlong cursors
+return `400 ORDER_CURSOR_INVALID`; invalid limits return
+`400 ORDER_LIMIT_INVALID`.
+
+The list response is:
+
+```json
+{
+  "items": [
+    {
+      "orderId": "01...",
+      "status": "CONFIRMED",
+      "paymentStatus": "SUCCEEDED",
+      "totalAmount": 25.0000,
+      "currency": "USD",
+      "createdAt": "2026-07-20T01:00:00Z",
+      "updatedAt": "2026-07-20T01:00:00Z",
+      "groups": [
+        {
+          "businessOrderId": "01...",
+          "businessId": "01...",
+          "status": "PENDING_ACCEPTANCE",
+          "totalAmount": 25.0000,
+          "currency": "USD"
+        }
+      ]
+    }
+  ],
+  "page": {
+    "nextCursor": null,
+    "hasMore": false
+  }
+}
+```
+
+`GET /api/v1/orders/{orderId}` returns the same approved header fields and
+immutable group summaries, with each group additionally containing its
+persisted buyer-facing `storeId` and `items`:
+
+```json
+{
+  "orderId": "01...",
+  "status": "CONFIRMED",
+  "paymentStatus": "SUCCEEDED",
+  "totalAmount": 25.0000,
+  "currency": "USD",
+  "createdAt": "2026-07-20T01:00:00Z",
+  "updatedAt": "2026-07-20T01:00:00Z",
+  "groups": [
+    {
+      "businessOrderId": "01...",
+      "businessId": "01...",
+      "storeId": "01...",
+      "status": "PENDING_ACCEPTANCE",
+      "totalAmount": 25.0000,
+      "currency": "USD",
+      "items": [
+        {
+          "listingId": "01...",
+          "title": "Snapshot title",
+          "businessId": "01...",
+          "storeId": "01...",
+          "unitPrice": 25.0000,
+          "currency": "USD",
+          "quantity": 1,
+          "lineTotal": 25.0000,
+          "policyVersion": "LOCAL_DEMO_V1"
+        }
+      ]
+    }
+  ],
+  "shippingAddress": {
+    "label": "Home",
+    "recipientName": "Buyer",
+    "phone": "+15550123456",
+    "line1": "1 Main St",
+    "line2": null,
+    "city": "Irvine",
+    "region": "CA",
+    "postalCode": "92618",
+    "countryCode": "US"
+  }
+}
+```
+
+The service derives the buyer from the authenticated subject and reads only
+rows owned by that buyer. A missing order and an order owned by another buyer
+both return the same `404 ORDER_NOT_FOUND` response. The payload never exposes
+payment intent or provider references, event IDs, payload hashes, claims,
+leases, outbox or history data, internal service fields, seller PII, or
+business/admin-private data.
+
+`status` is the stored `orders.status`; aggregate derivation from fulfillment
+groups begins only when a future fulfillment transition contract defines the
+mapping. `groups[].status` is stored `business_orders.fulfillment_status`.
+Shipment snapshots are omitted until `V2-SHP-01` and may be added later
+without changing existing meanings. No aggregate `version` is returned because
+none is persisted or approved; future shipment or version fields must be
+additive.
+
 ### Business orders (`ORD-03`)
 
 ```text
 GET /businesses/{businessId}/orders?status=&cursor=&limit=
 GET /businesses/{businessId}/orders/{businessOrderId}
 ```
+
+`V2-ORD-02B` exposes both routes as authenticated and default disabled through
+`order.business-views.enabled=false`. The feature gate runs before validation,
+Auth membership resolution, or Order repository access. Disabled calls return
+`404 BUSINESS_ORDERS_NOT_AVAILABLE` with zero downstream work.
+
+Auth Service maps `OWNER` to `ORDER_VIEW` plus `ORDER_FINANCE_VIEW` and maps
+`MANAGER` to `ORDER_VIEW` only. Order Service forwards the authenticated actor
+credential to the active-membership endpoint and also predicates every queue,
+detail, item, and address query by the path `businessId`. Missing membership,
+missing `ORDER_VIEW`, missing group, and cross-business group all return the
+same `404 BUSINESS_ORDER_NOT_FOUND` response.
+
+Queue `limit` defaults to `20` and is bounded to `1..50`. Its opaque,
+versioned cursor is bounded to 512 characters and binds
+`(business_orders.created_at, business_orders.id)` for descending stable
+pagination. `status` is optional and accepts exactly:
+
+```text
+PENDING_ACCEPTANCE
+ACCEPTED
+PARTIALLY_SHIPPED
+SHIPPED
+DELIVERED
+CANCELLATION_PENDING
+CANCELLED
+```
+
+Queue items contain only business order ID and seller-visible number,
+business/store IDs, stored fulfillment and cancellation statuses, buyer order
+ID and number, item count and total quantity, group subtotal/total/currency,
+confirmed/created/updated timestamps, and a platform fee projection only when
+both persisted and authorized by `ORDER_FINANCE_VIEW`. They contain no item or
+address detail.
+
+Detail adds stored payment status, immutable item snapshots for that business
+group only (`listingId`, title, SKU, condition, thumbnail, unit
+price/currency, quantity, line total, and policy version), and the minimum
+immutable shipping snapshot (`recipientName`, phone, address lines, city,
+region, postal code, and country code).
+
+Neither response exposes buyer identity or email, address-book source
+identifiers, payment intent/provider/event data, hashes, leases, idempotency
+records, outbox/history internals, sibling business groups, shipments, or an
+invented aggregate version. Malformed IDs, status, cursor, and limit return
+their bounded `BUSINESS_ORDER_*_INVALID` errors. Auth or Order dependency
+failure returns `503 BUSINESS_ORDERS_DEPENDENCY_UNAVAILABLE`.
+
+`V2-ORD-02C` adds the matching read-only seller portal routes
+`/seller/orders` and `/seller/orders/{businessOrderId}`. Angular
+`features.businessOrders` and gateway
+`msb.gateway.features.business-orders` remain independently default-off.
+Disabled Angular routes redirect without loading the feature or issuing Order
+requests. The disabled gateway owns the business-order namespace locally.
+When enabled, the gateway requires authentication, relays the trusted token,
+preserves bounded correlation IDs, and removes browser-supplied identity and
+role headers before forwarding.
 
 ### Admin payment/order operations (`PAY-03`, `ADM-06`)
 
@@ -1907,19 +2450,342 @@ queue.
 
 ## 15. Agent APIs and Tools (V3)
 
-User-facing agent endpoint:
+`AI-LLM-01` adds only internal agent-service liveness and configuration
+readiness endpoints:
 
 ```text
-POST /agent/sessions
-POST /agent/sessions/{sessionId}/messages
-GET  /agent/sessions/{sessionId}
+GET /health
+GET /ready
 ```
 
-MVP tool allowlist:
+They are not exposed through the gateway or `/api/v1`, and neither endpoint
+makes a paid provider request. Customer-facing agent routes remain deferred to
+their product slice.
+
+`AI-RAG-02B` extends the readiness response with
+`knowledgeIngestion=DISABLED|READY|UNAVAILABLE`. Enabled intake is `READY` only
+while the schema-validated Kafka task is running. The overall response may
+remain `503 NOT_READY` when provider configuration is absent even though
+durable intake is ready; this does not stop ingestion or make a provider call.
+
+`AI-RAG-02D` adds no HTTP route. Its local/deployment operator CLI accepts
+only exact run/job IDs, a bounded operator identity, and the fixed listing
+rebuild operation. Rebuild validation and promotion cannot accept arbitrary
+URLs, index names, raw OpenSearch queries, or wildcards. Direct low-level
+index promotion/rollback is rejected; promotion and rollback are bound to a
+durable rebuild run and its recorded generations.
+
+### Internal listing knowledge sources (`AI-RAG-02A`)
+
+Product Service exposes immutable approved public listing-source versions only
+to the agent service:
+
+```text
+GET /api/v1/internal/agent/knowledge/listings/{listingId}/versions/{sourceVersion}
+GET /api/v1/internal/agent/knowledge/listings/export?cursor=&limit=
+```
+
+Both routes require `X-Agent-Internal-Service-Token`. This credential is
+distinct from browser authentication and commerce service credentials and is
+compared in constant time. Missing or invalid credentials return `403`.
+
+The exact route accepts one listing ID and non-negative version and never
+falls back to a newer version. Unknown exact versions return
+`404 LISTING_KNOWLEDGE_SOURCE_NOT_FOUND`.
+
+Active response:
+
+```json
+{
+  "sourceType": "LISTING",
+  "sourceId": "01L00000000000000000000001",
+  "sourceVersion": "12",
+  "supersedesVersion": "11",
+  "lifecycle": "ACTIVE",
+  "visibility": "PUBLIC",
+  "language": "und",
+  "effectiveFrom": "2026-07-18T12:00:00Z",
+  "sourcePublishedAt": "2026-07-18T10:00:00Z",
+  "contentHash": "lowercase-sha256",
+  "content": {
+    "title": "Used bicycle",
+    "description": "Seller-provided approved public description.",
+    "price": {
+      "amount": "250.0000",
+      "currency": "USD"
+    },
+    "publicLocation": {
+      "city": "Irvine",
+      "region": "CA"
+    }
+  }
+}
+```
+
+An `INVALIDATED` source omits `content`, `contentHash`, `effectiveFrom`, and
+`sourcePublishedAt`; it includes `invalidatedAt` and the exact
+`supersedesVersion`.
+
+Export uses `limit=1..200`, defaults to `100`, and returns:
+
+```json
+{
+  "items": [],
+  "nextCursor": null,
+  "hasMore": false,
+  "exportWatermark": "2026-07-18T12:00:00Z"
+}
+```
+
+The cursor is opaque and carries the fixed watermark. Each listing contributes
+only its latest version at that watermark, and only when that version is
+`ACTIVE`. Draft, pending, rejected, paused, sold, closed, removed, business,
+and invalidated sources are excluded.
+
+Only title, approved description, decimal price/currency, and public
+city/region may appear in an active source. Seller identity, contact data,
+exact address or coordinates, media, moderation evidence, internal notes,
+payment/delivery preferences, storage fields, and credentials are forbidden.
+
+### Internal owned-draft listing media tool (`AI-LIST-01C`)
+
+Product Service exposes one default-disabled, read-only Agent tool route:
+
+```text
+POST /api/v1/internal/agent/listings/{listingId}/draft-media
+```
+
+The route is not gateway/browser-routed. It requires
+`X-Agent-Internal-Service-Token`, compared in constant time, plus a bounded
+correlation ID. The request is strict:
+
+```json
+{
+  "schemaVersion": "ai-list-owned-draft-media-v1",
+  "actorUserId": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  "mediaIds": ["01ARZ3NDEKTSV4RRFFQ69G5FAE"]
+}
+```
+
+`actorUserId`, path listing ID, selected media IDs, and correlation context
+come from authenticated application orchestration and are never model output.
+Product still independently proves that the actor owns the individual listing,
+that its state is `DRAFT` or `CHANGES_REQUESTED`, and that every selected media
+object belongs to the same actor/listing and is uploaded and not
+pending/rejected. Product captures that authorization and metadata in one
+read-only catalog transaction, closes the transaction, and only then reads the
+selected object bytes from storage.
+
+At most four JPEG, PNG, or WebP images are returned, limited to 10 MiB each and
+20 MiB total. Product checks stored metadata against actual byte length, MIME
+signature, and SHA-256 before returning request-order content:
+
+```json
+{
+  "schemaVersion": "ai-list-owned-draft-media-v1",
+  "listingId": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+  "listingVersion": "12",
+  "eligibility": "OWNED_DRAFT",
+  "media": [
+    {
+      "mediaId": "01ARZ3NDEKTSV4RRFFQ69G5FAE",
+      "contentType": "image/png",
+      "byteSize": 1024,
+      "sha256": "lowercase-sha256",
+      "sourceVersion": "7",
+      "contentBase64": "bounded-base64"
+    }
+  ]
+}
+```
+
+The response never contains seller identity/PII, moderation data, filenames,
+object buckets/keys, signed/public URLs, credentials, or unrelated listing
+fields. Cross-actor, cross-listing, missing/deleted, and ineligible state use
+hidden `404 AGENT_LISTING_MEDIA_NOT_FOUND`. Unsupported or integrity-invalid
+media uses `422 AGENT_LISTING_MEDIA_REJECTED`; disabled/storage-unavailable
+behavior uses `503 AGENT_LISTING_MEDIA_UNAVAILABLE`; invalid service
+authentication uses `403 AGENT_LISTING_MEDIA_FORBIDDEN`.
+
+`agent.listing-media-tool-enabled` defaults to `false`. Agent Service has a
+second default-false, unwired adapter gate and makes no Product request while
+disabled. Agent revalidates base64, byte length, SHA-256, MIME magic,
+listing/media identity, and deterministic order before the bytes can enter the
+proposal boundary. No Product mutation or proposal application exists on this
+route.
+
+### Category guidance ownership (`AI-KNOW-01`)
+
+Product Service owns one public guidance source per category and language.
+Platform-admin routes are:
+
+```text
+GET  /api/v1/admin/categories/{categoryId}/guidance/{language}
+GET  /api/v1/admin/categories/{categoryId}/guidance/{language}/versions?cursor=&limit=
+POST /api/v1/admin/categories/{categoryId}/guidance/{language}/versions
+POST /api/v1/admin/categories/{categoryId}/guidance/{language}/retire
+```
+
+Publish and retire require platform-admin authorization and `If-Match`.
+`If-Match: "0"` means the caller expects no existing source; otherwise it
+contains the latest source version. Stale or missing versions return
+`409 CATEGORY_GUIDANCE_VERSION_CONFLICT`.
+
+Publish accepts only:
+
+```json
+{
+  "title": "Buying used electronics",
+  "body": "Check the model, included accessories, and visible condition."
+}
+```
+
+Title is 1 through 180 characters and body is 1 through 12,000 characters
+after trimming. Both are plain text; unsupported controls and HTML/script
+payloads are rejected. Path language is normalized and validated. The server
+derives admin identity, correlation ID, category snapshots, next version,
+visibility, effective time, and content hash.
+
+Publication requires an active category and inserts a new immutable `ACTIVE`
+version. Retirement inserts a newer `INVALIDATED` version. Both return the new
+source shape and an `ETag` containing its version. Historical versions are not
+edited.
+
+Agent-only reads are:
+
+```text
+GET /api/v1/internal/agent/knowledge/category-guidance/{categoryId}/languages/{language}/versions/{sourceVersion}
+GET /api/v1/internal/agent/knowledge/category-guidance/export?cursor=&limit=
+```
+
+Both require `X-Agent-Internal-Service-Token`, use constant-time credential
+comparison, and never accept browser authorization as a substitute. The exact
+route never falls back to latest.
+
+Active response direction:
+
+```json
+{
+  "sourceType": "CATEGORY_GUIDANCE",
+  "sourceId": "01K00000000000000000000002",
+  "sourceVersion": "1",
+  "supersedesVersion": null,
+  "lifecycle": "ACTIVE",
+  "visibility": "PUBLIC",
+  "language": "en",
+  "effectiveFrom": "2026-07-19T08:00:00Z",
+  "contentHash": "lowercase-sha256",
+  "content": {
+    "categorySlug": "electronics",
+    "categoryName": "Electronics",
+    "title": "Buying used electronics",
+    "body": "Check the model, included accessories, and visible condition."
+  }
+}
+```
+
+An invalidated response omits content, content hash, and effective time and
+includes `invalidatedAt` plus exact `supersedesVersion`.
+
+Export uses `limit=1..200`, defaults to `100`, and carries a fixed watermark
+in its opaque cursor. It returns only the greatest version per
+category/language when that version is active and the category remains active.
+
+Planned user-facing agent routes use the authenticated BFF and external
+`/api/v1` prefix:
+
+```text
+POST /api/v1/agent/sessions
+POST /api/v1/agent/sessions/{sessionId}/messages
+GET  /api/v1/agent/sessions/{sessionId}
+GET  /api/v1/agent/sessions/{sessionId}/messages?cursor=&limit=
+```
+
+`AI-CS-01A` implements the Agent Service persistence underneath these routes.
+`AI-CS-01B` implements their authenticated BFF/service boundary,
+authorization, validation, listing eligibility, cursor, correlation, and
+standard error contracts. The capability remains disabled by default pending
+AI-CS-01C answer orchestration.
+
+### Seller listing proposal review (`AI-LIST-02A`)
+
+The existing default-off Agent gateway family exposes:
+
+```text
+POST /api/v1/agent/listing-proposals
+GET  /api/v1/agent/listing-proposals/{proposalId}
+POST /api/v1/agent/listing-proposals/{proposalId}/dismiss
+```
+
+The gateway relays the authenticated bearer token, strips spoofed identity
+headers, applies its existing session CSRF rule to both POST routes, and exempts
+GET. Agent Service resolves the actor through Auth Service. The request never
+accepts actor, user, role, prompt, provider, model, or generated-output fields.
+The JSON body is limited to 8 KiB and rejects unknown fields.
+
+Exact create request:
+
+```json
+{
+  "schemaVersion": "LISTING_PROPOSAL_V1",
+  "listingId": "01L00000000000000000000001",
+  "expectedListingVersion": 12,
+  "mediaIds": ["01M00000000000000000000001"],
+  "clientRequestId": "seller-review-0001"
+}
+```
+
+IDs are canonical ULIDs. `expectedListingVersion` is `1..2147483647`;
+`mediaIds` contains one through four unique IDs; and `clientRequestId` is
+16–64 ASCII characters matching `[A-Za-z0-9._:-]+`. Media IDs are sorted only
+for canonical hashing.
+
+A new create returns `201`; an exact replay returns `200` and never reruns
+Product or provider work. The response includes `proposalId`, `status`,
+`proposalVersion`, external and AI-LIST schema versions, listing/source
+version, bounded verified media evidence, the strict AI-LIST-01 proposal,
+seller-confirmation flags, timestamps, and bounded result metadata. Evidence
+contains only media ID, evidence ID, SHA-256, verified MIME, and byte size.
+Result metadata contains only instruction/schema version, `FAKE` or `LIVE`,
+safe result code, latency, and token counts.
+
+Statuses are `READY`, `DISMISSED`, and `EXPIRED`. Only `READY` contains
+proposal, evidence, and result metadata. Dismissed or expired representations
+contain only status, IDs, versions, and timestamps. `READY` transitions only
+to `DISMISSED` or `EXPIRED`; terminal state never reopens.
+
+Create is unique by `(actorUserId, clientRequestId)` for 90 days. Its canonical
+hash covers schema version, listing ID, expected listing version, and sorted
+media IDs. Same key plus a different hash returns
+`409 AI_PROPOSAL_IDEMPOTENCY_CONFLICT` before Product/provider execution.
+Dismiss requires `Idempotency-Key`, 8–128 visible ASCII characters, and is
+idempotent by `(actorUserId, proposalId, key)`.
+
+Stable errors are:
+
+- `400 INVALID_REQUEST`;
+- `401 AUTHENTICATION_REQUIRED`;
+- hidden `404 AGENT_LISTING_PROPOSAL_NOT_FOUND` for missing/cross-actor rows;
+- `404 FEATURE_DISABLED` when the direct API is off;
+- `409 AI_PROPOSAL_IDEMPOTENCY_CONFLICT`,
+  `AI_PROPOSAL_SOURCE_VERSION_CONFLICT`, or
+  `AI_PROPOSAL_STATE_CONFLICT`;
+- `410 AI_PROPOSAL_EXPIRED`;
+- `413 PAYLOAD_TOO_LARGE`; and
+- `503 AI_PROPOSAL_UNAVAILABLE`.
+
+The gateway-off state produces its existing 404 with zero Agent request. The
+direct API gate is checked before actor resolution or persistence. GET and
+dismiss need only API, persistence, and actor resolution. Exact replay is
+resolved before generation gates. A new create requires, in order, a clear
+kill switch, enabled orchestration, enabled/configured Product media tool, and
+enabled/configured multimodal provider. All committed/default flags are false.
+No route writes Product data, applies a proposal, submits, or publishes.
+
+Approved V3 tool direction outside the listing customer-service session:
 
 ```text
 searchListings
-getListing
 compareListings
 getMyOrder
 draftTradeMessage
@@ -1936,6 +2802,179 @@ Tool rules:
 - Every tool call records session, actor, arguments hash, result status,
   latency, token usage, and correlation ID.
 
+### Listing customer-service sessions (`AI-RAG-00`, `AI-05`)
+
+The existing `Marketplace agent` entry in the floating chat launcher and
+`/account/messages` uses agent APIs, not buyer/seller conversation APIs.
+
+```text
+POST /api/v1/agent/sessions
+POST /api/v1/agent/sessions/{sessionId}/messages
+GET  /api/v1/agent/sessions/{sessionId}
+GET  /api/v1/agent/sessions/{sessionId}/messages?cursor=&limit=
+```
+
+Create/resume request:
+
+```json
+{
+  "sessionType": "LISTING_CUSTOMER_SERVICE",
+  "subject": {
+    "type": "LISTING",
+    "id": "01L00000000000000000000001"
+  }
+}
+```
+
+The current actor is derived from the authenticated BFF session. The subject
+must be an active, approved individual listing. The command creates or returns
+the one open session for the actor/listing pair atomically. Client-supplied
+actor, seller, business, role, visibility, or permission fields are rejected.
+
+The BFF relays the authenticated access token. Agent Service resolves the
+app-owned actor through Auth Service rather than trusting browser identity
+headers. Product Service eligibility is read through:
+
+```text
+GET /api/v1/internal/agent/listings/{listingId}/customer-service-context
+```
+
+This internal route requires `X-Agent-Internal-Service-Token`, compares it in
+constant time, and returns only the current active public individual listing
+ID, source version, title, safe thumbnail URL, seller type, eligibility, and
+transaction notice. Missing, inactive, unapproved, removed, or non-individual
+listings return the hidden not-found behavior.
+
+Create/resume response:
+
+```json
+{
+  "id": "01A00000000000000000000001",
+  "sessionType": "LISTING_CUSTOMER_SERVICE",
+  "status": "OPEN",
+  "subjectListing": {
+    "id": "01L00000000000000000000001",
+    "version": "12",
+    "title": "Used bicycle",
+    "thumbnailUrl": "/api/v1/public/listing-media/01I...",
+    "transactionNotice": "Payment and delivery are arranged directly by participants."
+  },
+  "createdAt": "2026-07-18T12:00:00Z",
+  "updatedAt": "2026-07-18T12:00:00Z"
+}
+```
+
+Message request:
+
+```json
+{
+  "clientMessageId": "01C00000000000000000000001",
+  "body": "Is the price negotiable?"
+}
+```
+
+`clientMessageId` deduplicates retries for the session owner. The first
+implementation returns the stored user and assistant messages synchronously.
+Only the session owner may read or send. Messages use cursor pagination. Agent
+sessions do not appear in `GET /conversations`, do not affect buyer/seller
+unread state, and cannot invoke trade-completion actions.
+
+Message response:
+
+```json
+{
+  "userMessage": {
+    "id": "01M00000000000000000000001",
+    "role": "USER",
+    "body": "Can this item be held for me?",
+    "createdAt": "2026-07-18T12:01:00Z"
+  },
+  "assistantMessage": {
+    "id": "01M00000000000000000000002",
+    "role": "ASSISTANT",
+    "body": "Only the seller can confirm whether the item can be held.",
+    "resolutionType": "CONTACT_SELLER",
+    "sources": [
+      {
+        "sourceType": "LISTING",
+        "sourceId": "01L00000000000000000000001",
+        "sourceVersion": "12",
+        "label": "Current listing"
+      }
+    ],
+    "actions": [
+      {
+        "type": "MESSAGE_SELLER",
+        "listingId": "01L00000000000000000000001"
+      }
+    ],
+    "createdAt": "2026-07-18T12:01:01Z"
+  }
+}
+```
+
+`resolutionType` is one of `ANSWERED`, `PARTIAL`, `UNKNOWN`,
+`CONTACT_SELLER`, or `REFUSED`.
+
+Initial validated action types are `MESSAGE_SELLER`, `VIEW_LISTING`, and
+`BROWSE_MARKETPLACE`. They represent application route semantics, never
+arbitrary URLs or model commands. The frontend does not parse message text to
+infer actions. `MESSAGE_SELLER` opens the existing user-controlled listing
+conversation flow and never sends a message automatically.
+
+`MESSAGE_SELLER` and `VIEW_LISTING` contain only the session subject
+`listingId`. `BROWSE_MARKETPLACE` contains only its `type`; it cannot carry a
+model-supplied route, query, or identifier.
+
+Factual answers identify their supporting sources. `sources[].sourceType` is
+one of `LISTING`, `MARKETPLACE_POLICY`, `SAFETY_GUIDANCE`,
+`MARKETPLACE_FAQ`, or `CATEGORY_GUIDANCE`. A source ID and version must match a
+result returned during the invocation. Invalid citations or actions fail
+closed.
+
+The initial tool allowlist for this session type is:
+
+| Tool | Trusted context | Model arguments | Effect |
+| --- | --- | --- | --- |
+| `getListing` | actor, session, subject listing | none | Reads current eligible public listing facts from Product Service |
+| `retrieveKnowledge` | actor, session, subject listing, visibility, policy time, limits | bounded query, optional allowlisted source types and language | Reads filtered approved passages from the agent-owned OpenSearch projection |
+
+Neither tool returns private contact, exact location, identity-provider,
+storage, or moderation fields. The model cannot choose actor identity, listing
+identity, visibility, effective policy time, or unrestricted OpenSearch
+filters. No general HTTP, database, OpenSearch query, browser, web-search,
+file-search, MCP, shell, or sandbox tool is available.
+
+Source precedence:
+
+1. `getListing` is authoritative for listing eligibility and changing
+   structured facts.
+2. Effective marketplace policy and safety guidance are authoritative for
+   normative guidance.
+3. Approved listing description and public attributes may add seller-provided
+   detail but cannot override structured fields.
+4. FAQs and category guidance are explanatory only.
+5. Same-precedence conflict, missing evidence, or stale content produces
+   uncertainty.
+
+Listing eligibility is checked at session creation and before every answer
+that relies on listing data. A listing-version mismatch causes listing-specific
+vector passages to be discarded. When the listing becomes ineligible, the
+session becomes read-only.
+
+The service stores the user message and a `PENDING` invocation before external
+calls. It calls Product Service, OpenSearch, and OpenAI outside that database
+transaction, then stores one assistant message and marks the invocation
+`SUCCEEDED`. Failure marks it `FAILED` without creating an assistant message.
+A retry returns the prior successful response or performs one bounded retry of
+a failed invocation without duplicating messages.
+
+Product Service or OpenAI failure returns the standard temporary dependency
+error. OpenSearch failure may degrade to a listing-facts-only answer only when
+`getListing` fully supports the answer; otherwise it fails temporarily or
+returns explicit uncertainty under the approved orchestration policy. Core
+listing, search, and chat routes never depend on agent readiness.
+
 ## 16. Event Contract
 
 Envelope:
@@ -1946,7 +2985,7 @@ Envelope:
   "eventType": "listing.activated",
   "eventVersion": 1,
   "occurredAt": "2026-06-13T12:00:00Z",
-  "producer": "marketplace-service",
+  "producer": "product-service",
   "aggregateType": "listing",
   "aggregateId": "id",
   "correlationId": "id",
@@ -1964,6 +3003,9 @@ listing.submitted
 listing.activated
 listing.updated
 listing.deactivated
+category-guidance.activated
+category-guidance.updated
+category-guidance.invalidated
 message.created
 trade.created
 trade.cancelled
@@ -1985,3 +3027,46 @@ Compatibility:
 - Additive optional fields may remain in the same event version.
 - Removing, renaming, or changing meaning requires a new version.
 - Consumers ignore unknown fields and deduplicate by event ID.
+
+For Product Service listing-knowledge events, the version-1 payload is
+reference-only:
+
+```json
+{
+  "listingId": "01L00000000000000000000001",
+  "listingVersion": "12",
+  "knowledgeLifecycle": "ACTIVE",
+  "supersedesVersion": "11",
+  "language": "und"
+}
+```
+
+`listing.activated`, `listing.updated`, and `listing.deactivated` use the
+listing ID as aggregate ID and Kafka message key. Payloads never include the
+source body or private fields.
+
+The `AI-RAG-02B` consumer accepts only its configured allowlisted topic and
+event version `1`, ignores unknown additive fields, and validates the
+event/lifecycle relationship. It inserts durable deduplication and job records
+in one Agent Service MySQL transaction, then manually commits the next Kafka
+offset. Validation, persistence, or commit failure does not advance the
+partition. Duplicate deliveries with the same contracted payload are safe;
+event-ID reuse with a different contracted payload hash fails closed.
+
+For Product Service category-guidance events, topic
+`category-guidance-v1` uses `{categoryId}:{language}` as its message key.
+Version-1 payload is reference-only:
+
+```json
+{
+  "sourceType": "CATEGORY_GUIDANCE",
+  "sourceId": "01K00000000000000000000002",
+  "sourceVersion": "2",
+  "knowledgeLifecycle": "ACTIVE",
+  "supersedesVersion": "1",
+  "language": "en"
+}
+```
+
+Source bodies, category snapshots, admin identity, and credentials never
+appear in the event.

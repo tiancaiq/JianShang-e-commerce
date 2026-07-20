@@ -1,7 +1,10 @@
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { CurrentUser } from '../../../core/models/user.model';
 import { environment } from '../../../../environments/environment';
+import { AuthService } from '../../../core/services/auth.service';
+import { CartService } from '../../../core/services/cart.service';
+import { ToastService } from '../../../core/services/toast.service';
 
 @Component({
   selector: 'app-marketplace-navbar',
@@ -26,6 +29,15 @@ import { environment } from '../../../../environments/environment';
           Stores
         </a>
         @if (authenticated) {
+          @if (cartEnabled) {
+            <a routerLink="/cart" routerLinkActive="active" class="cart-link">
+              <svg viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20.5 8H7.1l-.4-2H3V4zm6.5 13.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></svg>
+              Cart
+              @if (cartCount > 0) {
+                <span class="cart-count">{{ cartCount > 99 ? '99+' : cartCount }}</span>
+              }
+            </a>
+          }
           <a routerLink="/account/listings" routerLinkActive="active">
             <svg viewBox="0 0 24 24"><path d="M8 7h8l-2.2-2.2L15 3.6 19.4 8 15 12.4l-1.2-1.2L16 9H8V7zm8 10H8l2.2 2.2L9 20.4 4.6 16 9 11.6l1.2 1.2L8 15h8v2z"/></svg>
             Trades
@@ -33,6 +45,10 @@ import { environment } from '../../../../environments/environment';
           <a routerLink="/account/liked" routerLinkActive="active">
             <svg viewBox="0 0 24 24"><path d="M12 20.4 5.4 14C2 10.8 3.8 5 8.4 5c1.5 0 2.8.7 3.6 1.8C12.8 5.7 14.1 5 15.6 5 20.2 5 22 10.8 18.6 14L12 20.4z"/></svg>
             Favorites
+          </a>
+          <a routerLink="/account/messages" routerLinkActive="active">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H8.8L5 18.5V5zm2 2v7.2l1.1-1H17V7H7z"/></svg>
+            Inbox
           </a>
         } @else {
           <button type="button" (click)="loginRequested.emit()">
@@ -59,18 +75,16 @@ import { environment } from '../../../../environments/environment';
               </span>
             </span>
             <strong>{{ displayName() }}</strong>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="m7 9 5 5 5-5H7z"/></svg>
           </a>
-          <div class="account-menu" aria-label="Account actions">
-            <a routerLink="/account/messages">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H8.8L5 18.5V5zm2 2v7.2l1.1-1H17V7H7z"/></svg>
-              Inbox
-            </a>
-            <button type="button" (click)="logoutRequested.emit()">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8v2H7v12h6v2H5V4zm10.6 4.4L20.2 13l-4.6 4.6-1.4-1.4 2.2-2.2H10v-2h6.4l-2.2-2.2 1.4-1.4z"/></svg>
-              Logout
-            </button>
-          </div>
+          <button
+            type="button"
+            class="logout-link"
+            aria-label="Logout"
+            title="Logout"
+            (pointerdown)="logout()"
+            (click)="logout()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8v2H7v12h6v2H5V4zm10.6 4.4L20.2 13l-4.6 4.6-1.4-1.4 2.2-2.2H10v-2h6.4l-2.2-2.2 1.4-1.4z"/></svg>
+          </button>
         } @else {
           <button type="button" class="login-link" (click)="loginRequested.emit()">Login</button>
         }
@@ -171,6 +185,24 @@ import { environment } from '../../../../environments/environment';
       box-shadow: 0 10px 22px rgba(244, 114, 182, 0.12);
     }
 
+    .cart-link {
+      gap: 0.2rem;
+    }
+
+    .cart-count {
+      min-width: 1.25rem;
+      height: 1.25rem;
+      display: inline-grid;
+      place-items: center;
+      margin-left: 0.2rem;
+      padding: 0 0.25rem;
+      border-radius: 999px;
+      background: var(--market-accent);
+      color: #fff;
+      font-size: 0.7rem;
+      line-height: 1;
+    }
+
     .login-link {
       background: linear-gradient(135deg, #f472b6, #8b6fe8);
       color: #fff;
@@ -252,68 +284,30 @@ import { environment } from '../../../../environments/environment';
       line-height: 1;
     }
 
-    .chevron {
-      width: 0.9rem;
-      height: 0.9rem;
-      fill: #8f7aa4;
-      margin-left: 0.05rem;
-    }
-
-    .account-menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 8px);
-      min-width: 150px;
-      padding: 6px;
+    .logout-link {
+      width: 42px;
+      height: 42px;
+      display: inline-grid;
+      place-items: center;
+      margin-left: 0.5rem;
       border: 1px solid rgba(234, 215, 242, 0.88);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.96);
-      box-shadow: 0 18px 34px rgba(159, 91, 144, 0.16);
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-4px);
-      transition: opacity 160ms ease, transform 160ms ease;
-      z-index: 30;
-    }
-
-    .nav-account:hover .account-menu,
-    .nav-account:focus-within .account-menu {
-      opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0);
-    }
-
-    .account-menu a,
-    .account-menu button {
-      width: 100%;
-      min-height: 38px;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      border: 0;
-      border-radius: 12px;
       background: #fff7fb;
       color: var(--market-accent-dark);
+      border-radius: 50%;
       cursor: pointer;
-      font: inherit;
-      font-size: 0.86rem;
-      font-weight: 900;
-      padding: 0 0.75rem;
-      text-align: left;
-      text-decoration: none;
+      transition: transform 160ms ease, background 160ms ease;
     }
 
-    .account-menu a:hover,
-    .account-menu a:focus-visible,
-    .account-menu button:hover,
-    .account-menu button:focus-visible {
+    .logout-link:hover,
+    .logout-link:focus-visible {
       background: linear-gradient(135deg, #ffe6f1, #f2ecff);
+      transform: translateY(-1px);
       outline: none;
     }
 
-    .account-menu svg {
-      width: 1rem;
-      height: 1rem;
+    .logout-link svg {
+      width: 1.1rem;
+      height: 1.1rem;
       fill: currentColor;
     }
 
@@ -333,10 +327,6 @@ import { environment } from '../../../../environments/environment';
         justify-content: flex-start;
       }
 
-      .account-menu {
-        left: 0;
-        right: auto;
-      }
     }
 
     @media (max-width: 640px) {
@@ -352,12 +342,17 @@ import { environment } from '../../../../environments/environment';
   `],
 })
 export class MarketplaceNavbarComponent {
+  private authService = inject(AuthService);
+  private cartService = inject(CartService);
+  private toastService = inject(ToastService);
+  readonly cartEnabled = environment.features.cart;
   @Input() authenticated = false;
+  @Input() cartCount = 0;
   @Input() currentUser: CurrentUser | null = null;
   @Output() loginRequested = new EventEmitter<void>();
-  @Output() logoutRequested = new EventEmitter<void>();
   @Output() searchRequested = new EventEmitter<string>();
   avatarLoadFailed = signal(false);
+  private logoutStarting = false;
 
   displayName(): string {
     return this.currentUser?.displayName?.trim() || this.currentUser?.email?.split('@')[0] || 'Account';
@@ -381,6 +376,21 @@ export class MarketplaceNavbarComponent {
       return null;
     }
     return value.startsWith('/api/') ? `${environment.apiGatewayUrl}${value}` : value;
+  }
+
+  logout(): void {
+    if (this.logoutStarting) {
+      return;
+    }
+    this.logoutStarting = true;
+    if (this.authService.logout('marketplace')) {
+      if (this.cartEnabled) {
+        this.cartService.reset();
+      }
+      return;
+    }
+    this.logoutStarting = false;
+    this.toastService.error('Logout could not start. Try again.');
   }
 
   submitSearch(): void {

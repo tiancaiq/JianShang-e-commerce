@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Subject, of } from 'rxjs';
 import { ConversationPage, ConversationSummary } from '../../core/models/chat.model';
 import { ChatService } from '../../core/services/chat.service';
 import { ConversationShellComponent } from './conversation-shell.component';
@@ -11,6 +11,7 @@ describe('ConversationShellComponent', () => {
   let component: ConversationShellComponent;
   let chatService: jasmine.SpyObj<ChatService>;
   let paramMap: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
+  let conversationRead: Subject<string>;
   let router: Router;
 
   const conversationId = '01C00000000000000000000001';
@@ -40,6 +41,7 @@ describe('ConversationShellComponent', () => {
       {
         participantId: '01U00000000000000000000022',
         displayName: 'Alex Seller',
+        publicHandle: 'alex-sells',
         avatarUrl: 'http://localhost:9000/api/v1/public/user-avatars/01U00000000000000000000022?v=4',
         initials: 'AS',
         roleInConversation: 'SELLER',
@@ -92,10 +94,14 @@ describe('ConversationShellComponent', () => {
   };
 
   beforeEach(async () => {
+    conversationRead = new Subject<string>();
     chatService = jasmine.createSpyObj<ChatService>(
       'ChatService',
-      ['getConversations', 'getConversation', 'getMessages', 'sendMessage', 'markRead', 'markDone', 'confirmCompletion'],
+      ['getConversations', 'getConversation', 'getMessages', 'sendMessage', 'markRead', 'markDone', 'confirmCompletion', 'notifyConversationRead'],
     );
+    Object.defineProperty(chatService, 'conversationRead$', {
+      value: conversationRead.asObservable(),
+    });
     chatService.getConversations.and.returnValue(of(conversationPage));
     chatService.getConversation.and.returnValue(of(conversation));
     chatService.getMessages.and.returnValue(of({
@@ -162,16 +168,44 @@ describe('ConversationShellComponent', () => {
     expect(chatService.getConversation).toHaveBeenCalledOnceWith(conversationId);
     expect(chatService.getMessages).toHaveBeenCalledOnceWith(conversationId);
     expect(chatService.markRead).toHaveBeenCalledOnceWith(conversationId);
+    expect(chatService.notifyConversationRead).toHaveBeenCalledWith(conversationId);
     expect(fixture.nativeElement.textContent).toContain('Used bicycle');
     expect(fixture.nativeElement.textContent).toContain('Still available.');
     expect(fixture.nativeElement.querySelector('.conversation-row img')?.getAttribute('src'))
       .toBe('http://localhost:9000/api/v1/public/user-avatars/01U00000000000000000000022?v=4');
-    expect(fixture.nativeElement.textContent).toContain('Marketplace agent');
-    expect(fixture.nativeElement.textContent).toContain('Coming soon');
+    expect(fixture.nativeElement.textContent).not.toContain('Marketplace agent');
+    expect(fixture.nativeElement.querySelector('.agent-row')).toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Safety note: Payment and delivery are arranged directly between users. Meet in public.');
+    expect(fixture.nativeElement.textContent).toContain('@alex-sells');
+    expect(fixture.nativeElement.textContent).toContain('Discussing');
+    expect(fixture.nativeElement.textContent).toContain('Awaiting buyer');
     expect(fixture.nativeElement.querySelector('.listing-header a')?.getAttribute('href'))
       .toBe('/listings/01L00000000000000000000001');
     expect(component.conversations()[0].unread).toBeFalse();
+  });
+
+  it('clears unread state when the inbox auto-opens a conversation before mark-read returns', () => {
+    const markReadResult = new Subject<{
+      conversationId: string;
+      lastReadMessageId: string;
+      lastReadAt: string;
+      unread: boolean;
+    }>();
+    chatService.markRead.and.returnValue(markReadResult.asObservable());
+
+    fixture.detectChanges();
+
+    expect(chatService.markRead).toHaveBeenCalledOnceWith(conversationId);
+    expect(component.conversations()[0].unread).toBeFalse();
+    expect(fixture.nativeElement.querySelector('.unread-dot')).toBeNull();
+
+    markReadResult.next({
+      conversationId,
+      lastReadMessageId: '01M00000000000000000000001',
+      lastReadAt: '2026-07-05T12:02:00Z',
+      unread: false,
+    });
+    markReadResult.complete();
   });
 
   it('shows an empty inbox state', () => {
@@ -180,6 +214,20 @@ describe('ConversationShellComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No conversations yet.');
+  });
+
+  it('navigates the enabled agent row to the reserved agent route without using ChatService as an agent client', () => {
+    Object.defineProperty(component, 'aiAssistantEnabled', { value: true });
+    fixture.detectChanges();
+    chatService.getConversation.calls.reset();
+    chatService.getMessages.calls.reset();
+
+    fixture.nativeElement.querySelector('.agent-row').click();
+    fixture.detectChanges();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(chatService.getConversation).not.toHaveBeenCalled();
+    expect(chatService.getMessages).not.toHaveBeenCalled();
   });
 
   it('opens a direct conversation route', () => {
@@ -201,6 +249,7 @@ describe('ConversationShellComponent', () => {
 
     expect(chatService.sendMessage).toHaveBeenCalledOnceWith(conversationId, 'Yes, I am interested.');
     expect(component.messages().some(message => message.body === 'Yes, I am interested.')).toBeTrue();
+    expect(component.conversations()[0].unread).toBeFalse();
   });
 
   it('lets the buyer confirm a seller-marked completion', () => {
@@ -218,9 +267,18 @@ describe('ConversationShellComponent', () => {
     fixture.detectChanges();
     fixture.nativeElement.querySelector('.completion-status button').click();
     fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Confirm this handoff');
+    expect(fixture.nativeElement.textContent).toContain('Used bicycle');
+    expect(fixture.nativeElement.textContent).toContain('Alex Seller');
+    expect(fixture.nativeElement.textContent).toContain('does not verify or protect that payment');
 
+    fixture.nativeElement.querySelector('.confirmation-review .review-actions button:last-child').click();
+    fixture.detectChanges();
     expect(chatService.confirmCompletion).toHaveBeenCalledOnceWith(conversationId);
     expect(component.selectedConversation()?.completion?.status).toBe('BUYER_CONFIRMED');
+    expect(fixture.nativeElement.querySelector('.composer')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('This conversation is now read-only.');
+    expect(fixture.nativeElement.querySelector('.completed-footer a')).toBeNull();
   });
 
   it('lets a seller mark the selected conversation done with quantity', () => {

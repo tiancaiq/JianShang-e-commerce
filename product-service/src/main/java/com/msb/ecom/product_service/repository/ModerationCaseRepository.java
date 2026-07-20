@@ -171,9 +171,10 @@ public class ModerationCaseRepository {
     }
 
     public ModerationCaseEnsureResult createOrReuseListingReviewCase(ModerationCaseInsert moderationCase) {
-        Optional<String> existingCaseId = findActiveListingReviewCaseId(moderationCase.listingId());
+        Optional<String> existingCaseId = findExistingListingReviewCaseId(moderationCase.listingId());
         if (existingCaseId.isPresent()) {
-            reopenListingReviewCaseForSubmission(existingCaseId.get(), moderationCase.now());
+            reopenListingReviewCaseForSubmission(existingCaseId.get(), moderationCase.submittedByUserId(),
+                    moderationCase.now());
             return new ModerationCaseEnsureResult(existingCaseId.get(), false);
         }
 
@@ -181,20 +182,24 @@ public class ModerationCaseRepository {
             insertListingReviewCase(moderationCase);
             return new ModerationCaseEnsureResult(moderationCase.id(), true);
         } catch (DuplicateKeyException exception) {
-            String existingId = findActiveListingReviewCaseId(moderationCase.listingId()).orElseThrow(() -> exception);
-            reopenListingReviewCaseForSubmission(existingId, moderationCase.now());
+            String existingId = findExistingListingReviewCaseId(moderationCase.listingId())
+                    .orElseThrow(() -> exception);
+            reopenListingReviewCaseForSubmission(existingId, moderationCase.submittedByUserId(),
+                    moderationCase.now());
             return new ModerationCaseEnsureResult(existingId, false);
         }
     }
 
-    private Optional<String> findActiveListingReviewCaseId(String listingId) {
+    private Optional<String> findExistingListingReviewCaseId(String listingId) {
         List<String> matches = jdbcTemplate.queryForList("""
                 select id
                 from moderation_cases
                 where case_type = 'LISTING_REVIEW'
                   and subject_listing_id = ?
-                  and status in ('OPEN', 'CLAIMED')
-                order by created_at asc, id asc
+                order by
+                  case when status in ('OPEN', 'CLAIMED') then 0 else 1 end,
+                  created_at asc,
+                  id asc
                 limit 1
                 """,
                 String.class,
@@ -202,18 +207,20 @@ public class ModerationCaseRepository {
         return matches.stream().findFirst();
     }
 
-    // Re-submitted drafts must re-enter review as open work, not remain under an old admin claim.
-    private void reopenListingReviewCaseForSubmission(String caseId, Instant now) {
+    // Re-submission reuses the prior workflow identity while resetting cycle-specific resolution and claim state.
+    private void reopenListingReviewCaseForSubmission(String caseId, String submittedByUserId, Instant now) {
         jdbcTemplate.update("""
                 update moderation_cases
                 set status = 'OPEN',
                     assigned_admin_user_id = null,
+                    submitted_by_user_id = ?,
+                    resolved_at = null,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
                   and case_type = 'LISTING_REVIEW'
-                  and status in ('OPEN', 'CLAIMED')
                 """,
+                submittedByUserId,
                 Timestamp.from(now),
                 caseId);
     }

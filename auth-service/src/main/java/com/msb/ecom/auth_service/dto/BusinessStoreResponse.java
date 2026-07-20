@@ -12,6 +12,8 @@ public record BusinessStoreResponse(
         String bannerUrl,
         String supportEmail,
         String supportPhone,
+        String publicCity,
+        String publicRegion,
         String status,
         long version,
         Instant createdAt,

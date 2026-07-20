@@ -53,6 +53,8 @@ describe('AccountComponent', () => {
     publicRegion: 'CA',
     status: 'ACTIVE',
     moderationStatus: 'APPROVED',
+    publicationSource: 'ADMIN_REVIEW',
+    publishedAt: '2026-01-02T00:00:00Z',
     version: 1,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-02T00:00:00Z',
@@ -179,9 +181,11 @@ describe('AccountComponent', () => {
     expect(text).toContain('Trade Overview');
     expect(text).toContain('Marketplace seller');
     expect(text).toContain('Rating');
+    expect(text).not.toContain('Addresses');
     expect(text).toContain('Liked Listings');
     expect(links).toContain(jasmine.objectContaining({ href: '/account/profile' }));
     expect(links).toContain(jasmine.objectContaining({ href: '/account/seller-profile' }));
+    expect(links).not.toContain(jasmine.objectContaining({ href: '/account/addresses' }));
     expect(links).toContain(jasmine.objectContaining({ href: '/account/liked' }));
     expect(links).toContain(jasmine.objectContaining({ href: '/account/messages' }));
     expect(links).toContain(jasmine.objectContaining({ href: '/account/listings' }));
@@ -202,6 +206,7 @@ describe('AccountComponent', () => {
     expect(links.some(href => href.includes('notifications'))).toBeFalse();
     expect(links.some(href => href.includes('orders'))).toBeFalse();
     expect(links.some(href => href.includes('cart'))).toBeFalse();
+    expect(links.some(href => href.includes('addresses'))).toBeFalse();
     expect(links.some(href => href.includes('reviews'))).toBeFalse();
   });
 });

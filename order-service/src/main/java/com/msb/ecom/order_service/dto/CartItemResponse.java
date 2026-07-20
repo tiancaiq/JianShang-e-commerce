@@ -1,0 +1,15 @@
+package com.msb.ecom.order_service.dto;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+public record CartItemResponse(
+        String listingId,
+        String title,
+        String thumbnailUrl,
+        int quantity,
+        BigDecimal observedPrice,
+        String currency,
+        Instant addedAt
+) {
+}

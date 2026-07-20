@@ -112,8 +112,30 @@ IAM-03.
 
 ### `addresses`
 
-User-owned address book. Do not reference this table from orders; copy address
-data into `order_addresses`.
+V2-IAM-01 user-owned address book. Stores recipient name, recipient phone,
+optional label, address lines, city, region, postal code, country code,
+default state, optimistic version, and UTC timestamps.
+
+Rules:
+
+- At most 20 addresses per user.
+- A nonempty address book has exactly one default after each committed
+  command.
+- A generated nullable owner column plus a unique index enforces at most one
+  default per user.
+- Create, delete-default, and set-default lock the owning `users` row to
+  serialize collection invariants.
+- `(user_id, is_default, updated_at, id)` supports the bounded account list.
+- `(user_id, created_at, id)` supports deterministic default promotion.
+- Address rows cascade on user deletion.
+- User-requested address deletion is a hard delete.
+
+Do not reference this table from checkout or orders. Copy normalized address
+data into immutable checkout and `order_addresses` snapshots. Editing or
+deleting an address-book row never changes an existing checkout or order.
+
+Detailed schema and concurrency rules are defined in
+`docs/v2/commerce/v2-iam-01-buyer-address-book-plan.md`.
 
 ## 3. Seller and Business Schema
 
@@ -323,13 +345,15 @@ Indexes:
 LIST-07 public detail reads only listings where `status=ACTIVE` and
 `moderation_status=APPROVED`.
 
-BUS-LIST-00 changes the planned business store item publication path:
-approved businesses can publish complete store items to `ACTIVE` without
-item-level admin approval, and public `/stores` reads should include those
-active business store items. Do not represent self-published business items as
-admin-approved unless the schema records the publication source clearly. Add a
-forward-safe publication marker if the current status/moderation columns
-cannot distinguish business self-publication from admin moderation.
+BUS-LIST-04 implements the business store item publication path: approved
+businesses can publish complete store items to `ACTIVE` without item-level
+admin approval, and public `/stores` reads include active business store items
+where `publication_source=BUSINESS_SELF_PUBLISHED`. Self-published business
+items are not represented as admin-approved items.
+
+BUS-LIST-06 uses `(business_id, status, updated_at)` for the seller management
+query and stable `updated_at, id` cursor ordering. No schema migration was
+required for the management list.
 
 ADM-LIST-04 adds `REMOVED_BY_ADMIN` as a stable listing status. Removed
 listings are not public, but their rows, versions, and moderation history stay
@@ -457,6 +481,10 @@ The same user may appear as buyer in one conversation and seller in another.
 Buyer/seller role is conversation-scoped and must not be inferred from global
 role lists.
 
+`CHAT-07` adds a unique immutable `users.public_handle` identity label. Chat
+resolves it through auth-service together with display name and avatar; it does
+not copy private identity fields into chat-service.
+
 ### `conversation_participants`
 
 Participant state including user, role in conversation, last-read message, and
@@ -515,6 +543,8 @@ Rules:
   quantity before seller mark-done.
 - Buyer confirmation closes the product listing through product-service APIs;
   chat-service never writes product-service tables.
+- Buyer confirmation also changes the conversation status to `LOCKED`.
+  Completed conversations reject new messages while preserving their history.
 
 ### `trades`
 
@@ -590,6 +620,18 @@ prevents duplicate increments when completion events are retried.
 
 ## 6. Cart, Inventory, Checkout, and Order Schema (V2)
 
+Ownership is defined by V2-COM-00:
+
+- `inventory-service` owns `inventory_items`, `inventory_movements`, and
+  `inventory_reservations`.
+- `order-service` owns the Redis cart namespace plus checkout, order,
+  fulfillment, shipment, history, outbox, and idempotency records.
+- `payment-service` owns the payment schema in section 7.
+
+There are no cross-service foreign keys. Product, auth, inventory, order, and
+payment identifiers stored outside their owning schema are immutable
+references validated through APIs or durable events.
+
 ### Redis cart
 
 Key: `cart:v1:{userId}`.
@@ -604,7 +646,7 @@ Value:
     {
       "listingId": "id",
       "quantity": 2,
-      "observedPrice": "19.99",
+      "observedPrice": 19.99,
       "currency": "USD",
       "addedAt": "timestamp"
     }
@@ -612,49 +654,82 @@ Value:
 }
 ```
 
-Redis cart data is revalidated from source services before checkout.
+The cart expires after 30 days of inactivity. Mutations atomically increment
+`version`, update `expiresAt`, write the document, and refresh Redis TTL.
+Reads do not refresh expiry. A missing or expired key is an empty version-zero
+cart. Redis cart data is revalidated from source services before checkout.
 
 ### `inventory_items`
 
-One row per business listing/SKU:
+One row per business store listing. SKU is retained as a catalog snapshot:
 
-- business and listing IDs
-- SKU
-- on-hand quantity
-- reserved quantity
-- version and timestamps
+- ULID primary key
+- business and globally stable listing IDs
+- SKU and catalog-version snapshots
+- on-hand and reserved quantities
+- initialized, created, and updated timestamps
+- optimistic version
 
 Constraint: quantities are non-negative and reserved does not exceed on-hand.
+Listing ID is unique and is the inventory identity. SKU is a nonunique catalog
+snapshot; current SKU uniqueness remains owned by product-service.
+
+Indexes:
+
+- Unique `listing_id`
+- `(business_id, updated_at, id)`
+- `(business_id, sku_snapshot)`
 
 ### `inventory_movements`
 
 Append-only ledger:
 
-- inventory item
-- movement type
-- quantity delta
-- reference type and ID
-- actor
-- idempotency key
+- inventory item, business, and listing references
+- `INITIALIZE`, `SET`, or `ADJUST` operation
+- stable reason code and optional bounded note
+- signed quantity delta
+- on-hand before/after and reserved snapshot
+- actor, command, and correlation IDs
 - created time
 
-Unique idempotency key within inventory service.
+Command ID is unique. Inventory-service `idempotency_records` deduplicate the
+caller/operation/key scope; reuse with a different request hash is rejected.
+The item, movement, idempotency result, and outbox event are committed in one
+transaction.
 
-### `inventory_reservations`
+### `inventory_reservations` and reservation lines
 
-Stores checkout, item, quantity, status, expiry, idempotency key, committed or
-released time.
+V2-INV-02 defines one checkout-scoped reservation aggregate containing one
+through 50 distinct listing lines. The whole aggregate reserves, releases,
+expires, or commits atomically.
 
-Indexes:
+The reservation header stores checkout reference, purpose, status, immutable
+expiry, transition version, and committed or released timestamps.
+`inventory_reservation_items` stores immutable inventory item, business,
+listing, and quantity references plus reserve and terminal balance snapshots.
+`inventory_reservation_history` is the append-only state-transition audit.
 
-- Unique idempotency key
-- `(status, expires_at)` for expiry worker
-- `(inventory_item_id, status)`
+Indexes and constraints:
+
+- Unique `(checkout_id, purpose)`
+- `(status, expires_at, id)` for the expiry worker
+- Unique reservation/item and reservation/listing line pairs
+- `(inventory_item_id, reservation_id)` for inventory history lookup
+- Unique transition command ID
+
+Inventory-service idempotency records deduplicate reserve, release, and commit
+commands by caller scope and request hash. Their result resource reference is
+nullable for retained reservation outcomes that create no aggregate, such as
+an insufficient-stock response.
 
 ### `checkout_sessions`
 
 Stores buyer, status, currency, totals, expiry, address input, and idempotency
 key.
+
+The first immutable platform policy row is `LOCAL_DEMO_V1`, approved only for
+the local demo. Checkout rows copy its shipping, cancellation, and return text
+into checkout-owned snapshots; they never reference mutable seller policy.
 
 ### `checkout_items`
 
@@ -695,6 +770,14 @@ One fulfillment group per business within an order:
 
 Unique `(order_id, business_id)`.
 
+`V2-ORD-02B` reads seller queues with SQL-enforced `business_id` scope and
+descending `(created_at, id)` cursors. The existing V3
+`idx_business_order_queue (business_id, fulfillment_status, created_at, id)`
+serves exact-status queues. MySQL 8.4 `EXPLAIN` showed an unfiltered queue
+filesort, so forward-only Order Service V4 adds
+`idx_business_order_all_queue (business_id, created_at, id)`. V1 through V3
+are unchanged.
+
 ### `order_items`
 
 Immutable listing snapshot tied to `business_order_id`.
@@ -706,6 +789,36 @@ Immutable shipping/billing snapshot. Never updated from user address book.
 ### `order_status_history`
 
 Append-only transition history with actor and reason.
+
+### Order confirmation foundation (`V2-ORD-01A`)
+
+Order Service Flyway V3 extends checkout status with the approved
+`PAYMENT_PROCESSING`, `PAYMENT_REVIEW`, `REFUND_REQUIRED`, and `COMPLETED`
+states and keeps the generated one-active-checkout constraint through payment
+processing/review.
+
+`checkout_payment_intents` stores the exact Order-owned payment command
+binding: payment/checkout IDs, checkout version and snapshot hash, buyer,
+ordered business scope, amount/currency, expiry, and creation time. It has one
+payment intent per checkout and does not query or reference Payment Service
+tables.
+
+`processed_payment_events` uses composite primary key
+`(consumer_name, event_id)`, stores the canonical payload hash, bounded claim
+lease, safe state/outcome/error, and optional confirmed order reference.
+Payload-hash reuse conflicts fail closed; retryable or expired claims can be
+recovered after restart.
+
+`orders`, `business_orders`, `order_items`, `order_addresses`, and
+`order_status_history` copy the immutable checkout totals, business/store
+scope, item fields, policy version, and shipping address. Unique checkout and
+payment-intent keys enforce one buyer order; unique `(order_id, business_id)`
+enforces one fulfillment group per business. Platform fee projection remains
+null until a later approved money-movement slice.
+
+After idempotent inventory commit, order header/groups/snapshots/history,
+checkout `COMPLETED`, processed-event completion, and version-1
+`order.confirmed` outbox insertion commit in one Order Service transaction.
 
 ### `shipments`
 
@@ -736,6 +849,29 @@ Stores each provider interaction result without sensitive card data.
 Append-only verified provider events.
 
 Unique: `(provider, provider_event_id)`.
+
+### `payment_outbox_events`
+
+The verified provider event, terminal payment status/history, payment attempt,
+and version-1 `payment.succeeded` or `payment.failed` outbox row commit in one
+payment-service transaction. Transport availability never participates in
+that transaction.
+
+The dispatcher extension stores the next and last attempt times, retry and
+attempt counts, a bounded claim token/lease, publication time, bounded safe
+error code/message, and terminal-failure time. Due rows are claimed in stable
+`(created_at, id)` order with row locking. Transport acknowledgement occurs
+before publication marking, so delivery is at-least-once and consumers
+deduplicate by event ID. Published and terminal-failed states are mutually
+exclusive, and claim fields are all present or all absent.
+
+Forward-only payment-service migrations:
+
+- V2 creates the provider-neutral payment-intent foundation.
+- V3 creates verified webhook, immutable provider-event/history/attempt, and
+  transactional outbox persistence.
+- V4 adds bounded outbox claim, retry, backoff, publication, and terminal-error
+  metadata plus due/lease indexes and state constraints.
 
 ### `refunds`
 
@@ -837,7 +973,316 @@ User preference by channel and notification class.
 Channel attempt, template version, provider reference, status, retry count, and
 last error code.
 
-## 9. Reliability and Audit Tables
+## 9. Agent Service Schema And Knowledge Projection (V3)
+
+The agent service owns a separate MySQL schema. It uses forward-only Flyway SQL
+migrations stored with `agent-service`; application startup does not create or
+update schema automatically. A dedicated migration job applies the schema
+before the matching service version is promoted.
+
+No agent table has a foreign key to another service schema. Actor and listing
+IDs are immutable references validated through authenticated application APIs.
+
+### Authoritative knowledge source records
+
+Knowledge remains in its owning service before it is projected:
+
+- Product Service listing tables own approved public listing description and
+  attribute versions.
+- Product Service owns future immutable `category_guidance_versions`.
+- The moderation/support module owns future immutable
+  `marketplace_knowledge_source_versions` for `MARKETPLACE_POLICY`,
+  `SAFETY_GUIDANCE`, and `MARKETPLACE_FAQ`.
+
+Versioned knowledge records include stable source key, source type, language,
+version, status, content hash, effective-from and optional effective-to time,
+body, created time, and activating actor or service. Unique
+`(source_type, source_key, language, version)` prevents version reuse.
+
+Publishing or retiring a source creates a new immutable version or explicit
+state transition with audit history and an outbox event. The agent service
+does not own or write these authoritative records. Exact source-authoring APIs
+and migrations belong to their later owning feature slices.
+
+#### Product Service `category_guidance_versions` (`AI-KNOW-01`)
+
+Product Service stores one immutable source stream per
+`(category_id, language)`. The primary key is
+`(category_id, language, source_version)`, where source versions are positive
+and strictly increasing within that stream.
+
+An `ACTIVE` row stores `PUBLIC` visibility, category slug/name snapshots,
+plain-text title/body, lowercase canonical content hash, effective time,
+activating admin user ID, correlation ID, and creation time. An
+`INVALIDATED` row is a newer tombstone with exact `supersedes_version`,
+invalidation time, invalidating admin user ID, correlation ID, and no content
+or content hash.
+
+Historical rows are never updated. Publication after an active or invalidated
+version inserts the next active version. Retirement and category deactivation
+insert the next invalidated version. Checks enforce active/tombstone shape and
+`supersedes_version < source_version`. A same-service foreign key references
+`categories`.
+
+Indexes support locked latest-version lookup, latest active export as of a
+fixed watermark, and creation-time audit scans. Only an active category may
+receive a new active guidance version. Category deactivation invalidates every
+active language in the same category-status transaction; reactivation does not
+restore historical guidance.
+
+The Product Service `outbox_events` table is reused. Source-version and outbox
+inserts are atomic. Events carry category/language/version/lifecycle
+references only and never carry source bodies or admin identity.
+
+Forward-only migration:
+
+```text
+V202607191600__create_category_guidance_publication.sql
+```
+
+#### Product Service `listing_knowledge_versions` (`AI-RAG-02A`)
+
+Product Service stores an immutable row keyed by
+`(listing_id, source_version)`. `source_version` equals the authoritative
+listing aggregate version.
+
+An `ACTIVE` row contains only seller type `INDIVIDUAL`, visibility `PUBLIC`,
+language `und`, title, approved description, decimal price/currency, public
+city/region, content hash, effective time, optional original listing
+publication time, and creation time.
+
+An `INVALIDATED` row contains the new source version, exact
+`supersedes_version`, invalidation time, and safe source metadata but no source
+body or content hash. Immutable old active rows may remain for exact-version
+replay; current export selects only the greatest version per listing and
+requires that version to be active.
+
+The table does not store seller identity, contact data, exact location, media,
+moderation evidence, payment/delivery preferences, storage fields, or
+credentials.
+
+Indexes support latest active export, exact listing lifecycle/version lookup,
+and operational creation-time scans. A bounded Product Service worker
+backfills current eligible listings that predate this table.
+
+#### Product Service `outbox_events` (`AI-RAG-02A`)
+
+The Product Service outbox stores event/topic/key, aggregate reference,
+event type/version, producer, occurred time, correlation ID, reference-only
+JSON payload, unique deduplication key, publication/retry times, bounded claim
+lease, safe error code, and creation time.
+
+The listing mutation, immutable knowledge version, and outbox insert commit in
+one transaction. Multiple publisher instances claim rows with row locking.
+Broker acknowledgement precedes `published_at`; failures clear the claim and
+schedule bounded retry. Duplicate broker delivery remains possible and
+consumers deduplicate by event ID.
+
+### Agent durable ingestion (`AI-RAG-02B`)
+
+Forward-only Agent Service Flyway `V1` creates the following tables. FastAPI
+startup checks their presence but never creates or changes them.
+
+#### `processed_events`
+
+Stores consumer name, event identity/type/version, aggregate reference,
+contracted payload hash, accepted time, and correlation ID. Composite primary
+key `(consumer_name, event_id)` provides durable replay deduplication. A replay
+with a different payload hash fails closed.
+
+#### `knowledge_ingestion_jobs`
+
+Stores one unique event-backed job with source type/ID/version, language,
+lifecycle, nullable superseded version, occurrence time, payload hash, status,
+attempt count, next attempt, expiring claim, safe error code, and lifecycle
+timestamps.
+
+Statuses are `PENDING`, `PROCESSING`, `RETRY_WAIT`, `SUCCEEDED`, and
+`DEAD_LETTER`. Claim and completion checks prevent contradictory row shapes.
+Indexes support bounded ordered claims, source/version lookup, and expired
+claim recovery.
+
+#### `knowledge_source_state`
+
+Reserves one row per `(source_type, source_id, language)` for the latest
+observed/indexed version, content hash, superseded version, active/tombstone/
+failure state, chunker and embedding identity, source/index/invalidation
+timestamps, last event/failure, and optimistic version.
+
+`AI-RAG-02B` creates but does not write this projection state. State advancement
+begins with `AI-RAG-02C` after content verification and OpenSearch writes.
+
+All three tables exclude source bodies, passages, embeddings, provider
+responses, credentials, seller identity, contact data, exact locations, media,
+and moderation evidence.
+
+### Agent rebuild and deletion operations (`AI-RAG-02D`)
+
+Forward-only Agent Service Flyway `V2` adds `knowledge_rebuild_runs` and
+`knowledge_deletion_jobs`.
+
+`knowledge_rebuild_runs` stores one operator-initiated listing rebuild with
+its exact target and prior read generations, embedding/chunker identity,
+opaque export cursor and fixed watermark, completion flag, bounded progress
+counts, status, safe error code, operator identity, lifecycle timestamps, and
+optimistic version. Status is `RUNNING`, `FAILED`, `READY_TO_PROMOTE`,
+`PROMOTED`, or `ROLLED_BACK`. It stores no source body, passage, vector,
+provider response, or credential.
+
+`knowledge_deletion_jobs` stores one unique exact
+`(source_type, source_id, source_version, language)` cleanup operation with
+invalidation time, bounded attempt count, next attempt, expiring claim,
+status, safe error code, and lifecycle timestamps. Status is `PENDING`,
+`PROCESSING`, `RETRY_WAIT`, `SUCCEEDED`, or `DEAD_LETTER`. Tombstone or
+supersession processing invalidates the exact version in every live
+generation before this row is scheduled, so delayed physical deletion cannot
+make content retrievable.
+
+Both tables remain agent-owned and reference no other service schema.
+
+### `agent_sessions`
+
+Stores:
+
+- session ID and type;
+- actor application user ID;
+- subject type and listing ID;
+- `OPEN`, `READ_ONLY`, or `CLOSED` status;
+- created, updated, last-activity, and closed timestamps.
+
+One open `LISTING_CUSTOMER_SERVICE` session is allowed per
+`(actor_user_id, subject_listing_id)`. Agent Service Flyway V4 enforces this
+with a MySQL-safe nullable generated open-session marker and unique key, not
+only an application check.
+
+Index `(actor_user_id, updated_at, id)` supports session lookup.
+
+### `agent_messages`
+
+Stores:
+
+- session and actor references;
+- `USER` or `ASSISTANT` role;
+- bounded message body;
+- assistant resolution type;
+- validated source and action payloads for assistant messages;
+- created time.
+
+Index `(session_id, created_at, id)` supports cursor pagination.
+
+Message bodies and model answer payloads are retained for 90 days after session
+activity, then deleted by the agent retention job. They are not copied into
+unrestricted logs, traces, analytics, or evaluation datasets.
+
+### `agent_invocations`
+
+Stores:
+
+- session, actor, and user-message references;
+- client message ID and request hash;
+- `PENDING`, `SUCCEEDED`, or `FAILED` result status;
+- safe provider error classification;
+- prompt, model, schema, tool-registry, and policy versions;
+- token usage, latency, estimated cost, retry count, and correlation ID;
+- created and completed timestamps.
+
+Unique `(session_id, actor_user_id, client_message_id)` deduplicates client
+retries. Reuse with a different request hash is rejected.
+
+Agent Service Flyway V5 expands invocation correlation IDs to 128 characters
+so the Agent persistence contract matches the gateway correlation boundary.
+
+### `agent_tool_calls`
+
+Stores:
+
+- invocation reference and sequence;
+- allowlisted tool name;
+- argument and result hashes;
+- safe source IDs and versions used;
+- result status, latency, and created time.
+
+Raw tool payloads, retrieved passages, prompts, credentials, private contact
+data, exact locations, storage internals, and moderation data are not stored in
+this audit table.
+
+Safe invocation and tool-call metadata is retained for 365 days. Production
+message content is not used as an evaluation fixture unless separately
+approved and redacted.
+
+### `agent_listing_proposals` (`AI-LIST-02A`)
+
+Agent Flyway V6 stores one seller-review-only proposal row per
+`(actor_user_id, client_request_id)`. The row stores actor/listing IDs, exact
+source listing version, canonical request and media hashes, status and
+proposal version, bounded proposal/evidence/result JSON, and lifecycle
+timestamps. It never stores media bytes, prompts, provider bodies, storage
+references, seller PII, Product patch data, or model-owned trusted IDs.
+
+Status is only `READY`, `DISMISSED`, or `EXPIRED`. `READY` contains bounded
+review content. Dismissal immediately nulls proposal, evidence, and result
+metadata. Content expires exactly 24 hours after creation and is lazily purged
+on owner access plus by an hourly bounded retention job. Safe hashes,
+identifiers, versions, and timestamps remain as an idempotency tombstone until
+exactly 90 days after creation, then the row is hard deleted.
+
+`agent_listing_proposal_claims` is a short-lived DB coordination table, not
+proposal state. Its unique actor/client key and expiring claim token ensure
+concurrent same-key requests have at most one active Product/provider
+execution without a process lock. Failed or cancelled generation deletes the
+claim and creates no proposal row.
+
+`agent_listing_proposal_dismissals` stores only actor/proposal/key, a fixed
+DISMISS hash, and creation time. Its composite key makes dismiss retries
+idempotent and it cascades when the 90-day proposal tombstone is deleted.
+
+Forward-only Agent migration:
+
+```text
+V6__create_listing_proposal_review_persistence.sql
+```
+
+Forward-only Agent Service migration:
+
+```text
+V4__create_agent_customer_service_persistence.sql
+```
+
+V4 creates all four tables with actor-bound same-schema foreign keys, terminal
+row-shape checks, retry and pagination indexes, allowlisted tool names, and
+retention-supporting indexes. After 90-day content purge, message references,
+client message IDs, and request hashes are cleared while safe terminal
+invocation/tool metadata may remain until the 365-day audit cutoff.
+
+### Agent OpenSearch knowledge chunks
+
+The rebuildable V3 knowledge index stores:
+
+- chunk ID and ordinal;
+- source type, ID, version, and content hash;
+- nullable subject listing ID;
+- `PUBLIC` visibility;
+- language;
+- nullable effective-from and effective-to timestamps;
+- indexed and nullable invalidated timestamps;
+- safe section label, sanitized text, and embedding vector.
+
+Initial source types are `LISTING`, `MARKETPLACE_POLICY`, `SAFETY_GUIDANCE`,
+`MARKETPLACE_FAQ`, and `CATEGORY_GUIDANCE`.
+
+The active alias returns only non-invalidated, effective, public content.
+Listing-specific retrieval requires the exact session subject listing ID and
+matching current listing version. Conversation messages, private or
+permission-scoped content, media bytes, contact data, exact locations,
+moderation evidence, internal notes, object keys, signed URLs, and credentials
+are never indexed.
+
+Updates and tombstones are idempotent by source ID and version. The operational
+target for update or deletion propagation is 15 minutes; excessive lag disables
+affected vector-backed answers. OpenSearch remains derived and may be rebuilt
+from authoritative source APIs and durable events.
+
+## 10. Reliability and Audit Tables
 
 ### `outbox_events`
 
@@ -879,7 +1324,7 @@ Append-only:
 Audit logs must not contain passwords, tokens, payment details, or unrestricted
 chat message bodies.
 
-## 10. Migration Sequence
+## 11. Migration Sequence
 
 Create small migrations in this order:
 
@@ -903,7 +1348,8 @@ Create small migrations in this order:
 18. Reviews and aggregates.
 19. Moderation, reports, and support.
 20. Notifications and delivery attempts.
-21. Shared idempotency, processed-event, and audit support as owned per schema.
+21. Agent sessions, messages, invocations, and tool-call audit.
+22. Shared idempotency, processed-event, and audit support as owned per schema.
 
 Each migration must be backward compatible with the application version that
 precedes it. Destructive cleanup is a separate, later migration.

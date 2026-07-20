@@ -148,6 +148,12 @@ interface PendingListingMedia {
           <div class="success-message">Store: {{ storeContext()?.store?.name }}</div>
         }
 
+        @if (businessStoreMode() && isEditMode() && listingStatus() === 'ACTIVE') {
+          <div class="success-message">
+            This item is active. Pause it before changing item details or images.
+          </div>
+        }
+
         <section class="media-panel" aria-label="Listing media">
           <label class="field">
             <span>Listing images</span>
@@ -189,7 +195,13 @@ interface PendingListingMedia {
               @for (media of mediaItems(); track media.id) {
                 <li>
                   <img [src]="imageUrl(media)" [alt]="media.altText || media.originalFileName || 'Listing image'" />
-                  <span>{{ media.originalFileName || media.objectKey }}</span>
+                  <div class="media-copy">
+                    <span>{{ media.originalFileName || media.objectKey }}</span>
+                    <div class="media-status-row" aria-label="Image status">
+                      <strong [class]="mediaStatusClass(media.uploadStatus)">Upload: {{ mediaStatusLabel(media.uploadStatus) }}</strong>
+                      <strong [class]="mediaStatusClass(media.moderationStatus)">Review: {{ mediaStatusLabel(media.moderationStatus) }}</strong>
+                    </div>
+                  </div>
                   <button type="button" class="text-btn" (click)="removeAttachedMedia(media)" [disabled]="!canEditDraft() || saving() || uploadingMedia()">
                     Remove
                   </button>
@@ -211,8 +223,23 @@ interface PendingListingMedia {
           <div class="success-message">Listing is CLOSED. Save changes and submit for review to reopen it after approval.</div>
         }
 
+        @if (isPendingReview()) {
+          <div class="pending-review-panel">
+            <strong>Pending review</strong>
+            <span>Your listing and uploaded images are locked while an admin reviews them.</span>
+          </div>
+        }
+
+        @if (isChangesRequested()) {
+          <div class="pending-review-panel" data-testid="changes-requested-recovery">
+            <strong>Changes requested</strong>
+            <span>{{ moderationReason() || 'An admin requested updates to this listing.' }}</span>
+            <span>Update the listing details or images, then submit it for review again.</span>
+          </div>
+        }
+
         <div class="actions">
-          <button type="button" class="secondary-btn" (click)="router.navigate([listingBasePath()])" [disabled]="saving() || submitting()">Cancel</button>
+          <button type="button" class="secondary-btn" (click)="cancelDraft()" [disabled]="saving() || submitting()">Cancel</button>
           @if (!businessStoreMode() && isEditMode() && canCloseListing()) {
             <button type="button" class="danger-btn" (click)="closeListing()" [disabled]="saving() || submitting() || uploadingMedia()">
               Close listing
@@ -223,9 +250,24 @@ interface PendingListingMedia {
               {{ submitting() ? 'Submitting' : 'Submit for review' }}
             </button>
           }
+          @if (businessStoreMode() && isEditMode() && listingStatus() === 'DRAFT') {
+            <button type="button" class="secondary-btn" (click)="publishStoreItem()" [disabled]="!canPublishStoreItem() || saving() || submitting() || uploadingMedia()">
+              {{ submitting() ? 'Publishing' : 'Publish' }}
+            </button>
+          }
+          @if (businessStoreMode() && isEditMode() && listingStatus() === 'ACTIVE') {
+            <button type="button" class="secondary-btn" (click)="pauseStoreItem()" [disabled]="hasUnsavedListingChanges() || saving() || submitting() || uploadingMedia()">
+              {{ submitting() ? 'Pausing' : 'Pause' }}
+            </button>
+          }
+          @if (businessStoreMode() && isEditMode() && listingStatus() === 'PAUSED') {
+            <button type="button" class="secondary-btn" (click)="relistStoreItem()" [disabled]="!canPublishStoreItem() || saving() || submitting() || uploadingMedia()">
+              {{ submitting() ? 'Relisting' : 'Relist' }}
+            </button>
+          }
           @if (canEditDraft()) {
             <button type="submit" class="primary-btn" [disabled]="saving() || submitting() || loadingCategories() || loadingStoreContext()">
-              {{ saving() ? 'Saving' : (isEditMode() ? 'Update draft' : 'Save draft') }}
+              {{ saveButtonLabel() }}
             </button>
           }
         </div>
@@ -391,16 +433,66 @@ interface PendingListingMedia {
       background: var(--listing-surface);
     }
 
-    .media-list span {
+    .media-copy {
       flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .media-list span {
       overflow-wrap: anywhere;
       color: var(--listing-muted);
     }
 
     .media-list strong {
-      flex: 0 0 auto;
-      color: var(--color-success);
+      width: fit-content;
+      border-radius: 999px;
+      padding: 0.15rem 0.45rem;
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--listing-muted);
       font-size: 0.75rem;
+    }
+
+    .media-status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .media-list strong.status-good {
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--color-success);
+    }
+
+    .media-list strong.status-warn {
+      background: rgba(245, 158, 11, 0.14);
+      color: #b45309;
+    }
+
+    .media-list strong.status-bad {
+      background: rgba(244, 63, 94, 0.12);
+      color: var(--color-danger);
+    }
+
+    .pending-review-panel {
+      display: grid;
+      gap: 0.25rem;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(245, 158, 11, 0.28);
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--listing-text);
+      padding: 0.75rem 0.875rem;
+    }
+
+    .pending-review-panel strong {
+      color: #b45309;
+    }
+
+    .pending-review-panel span {
+      color: var(--listing-muted);
+      font-size: 0.875rem;
     }
 
     .media-selection {
@@ -502,6 +594,7 @@ export class ListingDraftFormComponent implements OnInit {
   submitting = signal(false);
   isEditMode = signal(false);
   listingStatus = signal('DRAFT');
+  moderationReason = signal<string | null>(null);
   errorMsg = signal('');
   savedId = signal('');
   uploadingMedia = signal(false);
@@ -612,13 +705,20 @@ export class ListingDraftFormComponent implements OnInit {
         this.saving.set(false);
         this.toastService.success(this.isEditMode() ? 'Listing draft updated.' : 'Listing draft saved.');
         if (!this.isEditMode()) {
-          this.router.navigate(this.editListingPath(listing.id));
+          this.router.navigate(this.editListingPath(listing.id), { queryParamsHandling: 'preserve' });
         }
       },
       error: error => {
         this.saving.set(false);
         if (error.status === 403) {
           this.errorMsg.set('Your account does not have permission to create this listing draft.');
+          return;
+        }
+        if (error.status === 409 && error.error?.error?.code === 'BUSINESS_SKU_CONFLICT') {
+          this.errorMsg.set(
+            error.error?.error?.message
+              || 'This store already has an item with that SKU. Edit the existing item or use a different SKU.',
+          );
           return;
         }
         if (error.status === 409) {
@@ -632,7 +732,9 @@ export class ListingDraftFormComponent implements OnInit {
 
   handleMediaSelected(event: Event): void {
     if (!this.canEditDraft()) {
-      this.mediaError.set('Images can be changed only while the listing is draft, pending review, or active.');
+      this.mediaError.set(this.businessStoreMode()
+        ? 'Pause an active store item before changing its images.'
+        : 'Images cannot be changed in this listing state.');
       return;
     }
     const input = event.target as HTMLInputElement;
@@ -718,7 +820,22 @@ export class ListingDraftFormComponent implements OnInit {
   }
 
   canEditDraft(): boolean {
+    if (this.businessStoreMode()) {
+      return !this.isEditMode() || this.listingStatus() === 'DRAFT' || this.listingStatus() === 'PAUSED';
+    }
     return isEditableListingStatus(this.listingStatus());
+  }
+
+  isPendingReview(): boolean {
+    return this.isEditMode() && this.listingStatus() === 'PENDING_REVIEW';
+  }
+
+  isChangesRequested(): boolean {
+    return this.isEditMode() && this.listingStatus() === 'CHANGES_REQUESTED';
+  }
+
+  cancelDraft(): void {
+    this.router.navigate([this.listingBasePath()], { queryParamsHandling: 'preserve' });
   }
 
   canCloseListing(): boolean {
@@ -832,6 +949,75 @@ export class ListingDraftFormComponent implements OnInit {
     });
   }
 
+  canPublishStoreItem(): boolean {
+    if (!this.businessStoreMode() || !this.editListingId) {
+      return false;
+    }
+    if (this.mediaItems().length === 0 || this.pendingMediaItems().length > 0) {
+      return false;
+    }
+    return !this.hasUnsavedListingChanges();
+  }
+
+  publishStoreItem(): void {
+    this.runStorePublicationAction('publish');
+  }
+
+  pauseStoreItem(): void {
+    this.runStorePublicationAction('pause');
+  }
+
+  relistStoreItem(): void {
+    this.runStorePublicationAction('relist');
+  }
+
+  private runStorePublicationAction(actionName: 'publish' | 'pause' | 'relist'): void {
+    const businessId = this.businessMediaBusinessId();
+    if (!businessId || !this.editListingId) {
+      this.errorMsg.set('An approved business store is required.');
+      return;
+    }
+    if (actionName !== 'pause' && !this.canPublishStoreItem()) {
+      this.errorMsg.set(this.hasUnsavedListingChanges()
+        ? 'Save changes before publishing this store item.'
+        : 'Add at least one image before publishing this store item.');
+      return;
+    }
+    if (actionName === 'pause' && this.hasUnsavedListingChanges()) {
+      this.errorMsg.set('Save or discard changes before pausing this store item.');
+      return;
+    }
+
+    const action = actionName === 'publish'
+      ? this.listingService.publishBusinessStoreItem(businessId, this.editListingId, this.currentVersion)
+      : actionName === 'pause'
+        ? this.listingService.pauseBusinessStoreItem(businessId, this.editListingId, this.currentVersion)
+        : this.listingService.relistBusinessStoreItem(businessId, this.editListingId, this.currentVersion);
+
+    this.submitting.set(true);
+    this.errorMsg.set('');
+    action.subscribe({
+      next: listing => {
+        this.submitting.set(false);
+        this.populateFromDraft(listing);
+        const message = actionName === 'publish'
+          ? 'Store item published.'
+          : actionName === 'pause'
+            ? 'Store item paused.'
+            : 'Store item relisted.';
+        this.toastService.success(message);
+      },
+      error: error => {
+        this.submitting.set(false);
+        if (error.status === 409) {
+          this.errorMsg.set('This store item changed elsewhere. Reload it before continuing.');
+          return;
+        }
+        this.errorMsg.set(error.error?.error?.message || 'Store item status could not be changed.');
+      },
+    });
+  }
+
   private uploadPendingMediaForListing(listingId: string, draftJustCreated: boolean): void {
     const pendingItems = this.pendingMediaItems();
     if (pendingItems.length === 0) {
@@ -867,12 +1053,30 @@ export class ListingDraftFormComponent implements OnInit {
     this.refreshDraftAfterMediaChange(listingId);
     this.toastService.success(draftJustCreated ? 'Listing draft and images saved.' : 'Listing images saved.');
     if (draftJustCreated && !this.isEditMode()) {
-      this.router.navigate(this.editListingPath(listingId));
+      this.router.navigate(this.editListingPath(listingId), { queryParamsHandling: 'preserve' });
     }
   }
 
   imageUrl(image: ListingImage): string {
     return this.listingService.mediaUrl(image.url || image.uploadUrl);
+  }
+
+  mediaStatusLabel(status: string): string {
+    return status
+      .toLowerCase()
+      .split('_')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  mediaStatusClass(status: string): string {
+    if (['UPLOADED', 'APPROVED'].includes(status)) {
+      return 'status-good';
+    }
+    if (['FAILED', 'REJECTED', 'CHANGES_REQUESTED'].includes(status)) {
+      return 'status-bad';
+    }
+    return 'status-warn';
   }
 
   fieldInvalid(field: string): boolean {
@@ -908,9 +1112,44 @@ export class ListingDraftFormComponent implements OnInit {
     return this.router.url.startsWith('/seller/store/items');
   }
 
+  // Keeps paused business item copy distinct from pre-publication drafts.
+  saveButtonLabel(): string {
+    if (this.saving()) {
+      return 'Saving';
+    }
+    if (!this.isEditMode()) {
+      return 'Save draft';
+    }
+    if (!this.businessStoreMode() && this.listingStatus() === 'ACTIVE') {
+      return 'Update active listing';
+    }
+    if (!this.businessStoreMode() && this.listingStatus() === 'CLOSED') {
+      return 'Update closed listing';
+    }
+    if (!this.businessStoreMode() && this.listingStatus() === 'CHANGES_REQUESTED') {
+      return 'Save requested changes';
+    }
+    if (this.businessStoreMode() && this.listingStatus() === 'PAUSED') {
+      return 'Update item';
+    }
+    return 'Update draft';
+  }
+
   pageTitle(): string {
     if (this.businessStoreMode()) {
       return this.isEditMode() ? 'Edit Store Item' : 'New Store Item';
+    }
+    if (this.isPendingReview()) {
+      return 'Pending review';
+    }
+    if (this.isChangesRequested()) {
+      return 'Update requested changes';
+    }
+    if (this.isEditMode() && this.listingStatus() === 'ACTIVE') {
+      return 'Edit Active Listing';
+    }
+    if (this.isEditMode() && this.listingStatus() === 'CLOSED') {
+      return 'Edit Closed Listing';
     }
     return this.isEditMode() ? 'Edit Listing Draft' : 'New Listing Draft';
   }
@@ -918,8 +1157,20 @@ export class ListingDraftFormComponent implements OnInit {
   pageDescription(): string {
     if (this.businessStoreMode()) {
       return this.isEditMode()
-        ? 'Update this store item draft before it is made public later.'
-        : 'Create a store item draft for your approved business catalog.';
+        ? 'Update this business item while it is draft or paused.'
+        : 'Create a business item for your approved catalog.';
+    }
+    if (this.isPendingReview()) {
+      return 'Your listing is locked while an admin reviews the listing details and uploaded images.';
+    }
+    if (this.isChangesRequested()) {
+      return 'Review the admin feedback, update your listing details or images, and submit it again.';
+    }
+    if (this.isEditMode() && this.listingStatus() === 'ACTIVE') {
+      return 'This listing is approved and public. Save changes and submit them for review to update the public listing.';
+    }
+    if (this.isEditMode() && this.listingStatus() === 'CLOSED') {
+      return 'This listing is closed. Save changes and submit it for review to make it public again.';
     }
     return this.isEditMode()
       ? 'Update your marketplace draft before review.'
@@ -1022,6 +1273,7 @@ export class ListingDraftFormComponent implements OnInit {
     this.savedId.set(listing.id);
     this.currentVersion = listing.version;
     this.listingStatus.set(listing.status);
+    this.moderationReason.set(listing.moderationReason || null);
     this.applyFormState(state);
     this.mediaItems.set(listing.images || []);
     this.clearSelectedMedia();
@@ -1084,7 +1336,7 @@ export class ListingDraftFormComponent implements OnInit {
     });
   }
 
-  private hasUnsavedListingChanges(): boolean {
+  hasUnsavedListingChanges(): boolean {
     return this.formRequestSnapshot() !== this.lastLoadedRequestSnapshot;
   }
 

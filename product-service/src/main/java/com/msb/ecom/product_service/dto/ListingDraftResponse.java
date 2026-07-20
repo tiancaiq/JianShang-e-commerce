@@ -25,9 +25,14 @@ public record ListingDraftResponse(
         String publicRegion,
         String status,
         String moderationStatus,
+        String publicationSource,
+        Instant publishedAt,
         long version,
         Instant createdAt,
         Instant updatedAt,
+        String moderationAction,
+        String moderationReason,
+        Instant moderationActionAt,
         List<ListingImageResponse> images
 ) {
     public ListingDraftResponse withSellerDisplayName(String displayName) {
@@ -52,9 +57,47 @@ public record ListingDraftResponse(
                 publicRegion,
                 status,
                 moderationStatus,
+                publicationSource,
+                publishedAt,
                 version,
                 createdAt,
                 updatedAt,
+                moderationAction,
+                moderationReason,
+                moderationActionAt,
+                images);
+    }
+
+    public ListingDraftResponse withModerationAction(ListingModerationDecisionResponse decision) {
+        return new ListingDraftResponse(
+                id,
+                sellerType,
+                individualSellerUserId,
+                businessId,
+                storeId,
+                sellerDisplayName,
+                categoryId,
+                title,
+                description,
+                condition,
+                conditionNotes,
+                priceAmount,
+                currency,
+                negotiable,
+                sku,
+                quantity,
+                publicCity,
+                publicRegion,
+                status,
+                moderationStatus,
+                publicationSource,
+                publishedAt,
+                version,
+                createdAt,
+                updatedAt,
+                decision == null ? null : decision.decision(),
+                decision == null ? null : decision.reason(),
+                decision == null ? null : decision.createdAt(),
                 images);
     }
 }

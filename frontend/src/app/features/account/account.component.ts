@@ -243,6 +243,19 @@ import { environment } from '../../../environments/environment';
             <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
           </a>
 
+          @if (buyerAddressesEnabled) {
+            <a routerLink="/account/addresses" class="account-tile">
+              <span class="tile-icon purple">
+                <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.1 7 13 7 13s7-7.9 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg>
+              </span>
+              <span>
+                <b>Addresses</b>
+                <small>Manage saved delivery addresses.</small>
+              </span>
+              <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
+            </a>
+          }
+
           <a routerLink="/account/liked" class="account-tile">
             <span class="tile-icon pink">
               <svg viewBox="0 0 24 24"><path d="M12 20.4 5.4 14C2 10.8 3.8 5 8.4 5c1.5 0 2.8.7 3.6 1.8C12.8 5.7 14.1 5 15.6 5 20.2 5 22 10.8 18.6 14L12 20.4z"/></svg>
@@ -466,8 +479,15 @@ import { environment } from '../../../environments/environment';
     .middle-grid,
     .lower-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 24px;
+    }
+
+    .middle-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .lower-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
     .welcome-card,
@@ -1129,8 +1149,7 @@ import { environment } from '../../../environments/environment';
       }
 
       .profile-card,
-      .trade-panel,
-      .lower-grid .account-tile:last-child {
+      .trade-panel {
         grid-column: span 2;
       }
     }
@@ -1160,8 +1179,7 @@ import { environment } from '../../../environments/environment';
       }
 
       .profile-card,
-      .trade-panel,
-      .lower-grid .account-tile:last-child {
+      .trade-panel {
         grid-column: auto;
       }
 
@@ -1215,6 +1233,7 @@ import { environment } from '../../../environments/environment';
 })
 export class AccountComponent implements OnInit {
   authService = inject(AuthService);
+  readonly buyerAddressesEnabled = environment.features.buyerAddresses;
   private readonly router = inject(Router);
   private readonly listingService = inject(ListingService);
   private readonly chatService = inject(ChatService);

@@ -938,6 +938,81 @@ Acceptance criteria:
 AI is not allowed to become a dependency of checkout, payment, inventory,
 moderation decisions, or authentication.
 
+#### AI-LLM-01 OpenAI provider foundation
+
+Acceptance criteria:
+
+- OpenAI access exists only in the isolated agent service and uses runtime
+  credentials that are never committed or logged.
+- The service remains live without provider credentials but reports itself not
+  ready for AI work.
+- Provider access supports strict structured text, image input, and an
+  allowlisted function-tool loop behind a replaceable adapter.
+- Provider errors have stable safe classifications, and logs contain operation,
+  model, correlation ID, status, latency, and token usage without prompt bodies,
+  image bytes, credentials, or complete model responses.
+- Automated tests use provider fakes and do not require a live credential or
+  paid request.
+- No marketplace API, database, listing, chat, report, or automated operation
+  is added by this foundation slice.
+
+#### AI-RAG-00 Hybrid-RAG knowledge contract
+
+Release: V3.
+
+Acceptance criteria:
+
+- The listing customer-service assistant combines current structured listing
+  facts from Product Service with approved public knowledge from a derived
+  OpenSearch vector index.
+- Product Service remains authoritative for listing eligibility, price,
+  quantity, negotiability, condition, public location, payment and delivery
+  preferences, and the transaction notice.
+- Supported vector sources are approved listing descriptions and public
+  attributes, versioned marketplace policy, safety guidance, marketplace FAQs,
+  and category buying guidance.
+- Every retrieved passage carries source type, source ID, source version,
+  content hash, visibility, language, effective dates, and invalidation
+  metadata. Listing-specific retrieval is restricted to the session's subject
+  listing.
+- Current structured facts override conflicting vector content. Current policy
+  and safety guidance override FAQs and category guidance. Unresolved
+  same-precedence conflicts produce uncertainty.
+- Answers identify supporting sources, and UI actions come from a deterministic
+  allowlist rather than parsed model text.
+- OpenSearch remains rebuildable and non-authoritative. Stale, invalidated, or
+  deleted content is excluded, and retrieval failure cannot break core
+  marketplace flows.
+- Agent sessions use an agent-owned MySQL schema with forward-only Flyway
+  migrations. Message-content and safe audit-metadata retention are separately
+  bounded.
+
+#### AI-KNOW-01 Author category buying guidance
+
+Release: V3.
+
+Acceptance criteria:
+
+- Product Service owns one immutable public `CATEGORY_GUIDANCE` source stream
+  per active category and normalized language.
+- Only an authenticated platform admin may publish or retire guidance, and
+  every action records actor, correlation ID, source version, and effective
+  time.
+- Publication and retirement require optimistic version matching. Retirement
+  creates a newer invalidation version rather than rewriting history.
+- Source version and reference-only outbox event commit atomically.
+- Agent Service may read only exact versions or a bounded watermark-stable
+  export through its dedicated internal token; exact reads never fall back to
+  latest.
+- Category deactivation invalidates every active guidance language, while
+  category reactivation requires a new explicit admin publication.
+- Guidance is manually authored plain text. AI cannot create, approve,
+  activate, or retire the authoritative source.
+- No category-guidance failure affects category browse, listing creation,
+  search, checkout, or buyer/seller chat.
+
+Depends on: `LST-01`, `ADM-01`, `AI-RAG-00`.
+
 #### AI-01 Search and compare listings
 
 Acceptance criteria:
@@ -971,6 +1046,34 @@ Acceptance criteria:
 - Authorized support agent may summarize an assigned case.
 - Tool access is read-only in MVP.
 - Prompt, tool calls, output, actor, and case ID are audited.
+
+#### AI-05 Answer questions about an individual listing
+
+Release: V3.
+
+Acceptance criteria:
+
+- An authenticated user may start or resume one AI customer-service session
+  bound to an active, approved individual listing.
+- The assistant is clearly labeled as AI and does not impersonate the seller.
+- Answers use `getListing` for current structured facts and
+  `retrieveKnowledge` for approved source-attributed public knowledge rather
+  than relying on model memory.
+- Factual answers identify their supporting source type, ID, and version, and
+  preserve the approved transaction notice.
+- Missing or conflicting information is identified instead of invented.
+- The assistant cannot negotiate, accept a deal, verify payment, create a
+  trade, modify a listing, or send a buyer/seller message.
+- Seller-specific questions route the user to the existing buyer/seller chat
+  flow without sending a message automatically.
+- The existing marketplace chat UI presentation is reused without storing
+  agent sessions or messages in buyer/seller chat tables.
+- Agent sessions are isolated by actor and do not expose private contact,
+  exact location, identity-provider, storage, or moderation data.
+- Listing detail, search, and buyer/seller chat continue to work when AI is
+  disabled or when OpenAI, embeddings, Kafka, or OpenSearch are unavailable.
+
+Depends on: `AI-RAG-00`, `AI-01`, `LST-11`, `CHAT-04`.
 
 ## 5. Non-Functional Requirements
 

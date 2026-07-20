@@ -56,6 +56,11 @@ describe('IndividualSellerActivationComponent', () => {
 
     expect(individualSellerService.getMe).toHaveBeenCalled();
     expect(component.profile()).toEqual(profile);
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    expect(text).toContain('Seller profile');
+    expect(text).toContain('Review your public seller details and completed sales.');
+    expect(text).not.toContain('Become a Seller');
+    expect(text).not.toContain('Register an individual seller profile');
   });
 
   it('submits only public location and the accepted terms version', () => {
@@ -80,6 +85,7 @@ describe('IndividualSellerActivationComponent', () => {
 
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
+    expect(text).toContain('Become a Seller');
     expect(text).toContain('Register an individual seller profile');
     expect(text).toContain('City');
     expect(text).toContain('County / region');

@@ -2,6 +2,8 @@ import { Component, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
+import { environment } from '../../../environments/environment';
+import { BUSINESS_ORDERS_ENABLED } from '../../features/business/business-orders.capability';
 
 @Component({
   selector: 'app-seller-layout',
@@ -14,6 +16,13 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
         <nav class="portal-nav" aria-label="Seller navigation">
           <a routerLink="/seller/dashboard" routerLinkActive="active">Dashboard</a>
           <a routerLink="/seller/business/apply" routerLinkActive="active">Business Apply</a>
+          <a routerLink="/seller/store/items" routerLinkActive="active">Store Items</a>
+          @if (sellerInventoryEnabled) {
+            <a routerLink="/seller/inventory" routerLinkActive="active">Inventory</a>
+          }
+          @if (businessOrdersEnabled) {
+            <a routerLink="/seller/orders" routerLinkActive="active">Orders</a>
+          }
           <a routerLink="/seller/account" routerLinkActive="active">Business Account</a>
         </nav>
         <a routerLink="/" class="back-link">Marketplace</a>
@@ -24,7 +33,7 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
           <h1>{{ pageTitle() }}</h1>
           <div class="user-menu">
             <span>{{ authService.user()?.displayName || authService.user()?.email }}</span>
-            <button type="button" (click)="authService.logout()">Logout</button>
+            <button type="button" (click)="authService.logout('seller-portal')">Logout</button>
           </div>
         </header>
         <main class="portal-content">
@@ -184,9 +193,15 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 export class SellerLayoutComponent {
   authService = inject(AuthService);
   private router = inject(Router);
+  readonly sellerInventoryEnabled = environment.features.sellerInventory;
+  readonly businessOrdersEnabled = inject(BUSINESS_ORDERS_ENABLED);
 
   pageTitle(): string {
-    const segment = this.router.url.split('/').filter(Boolean).at(-1) || 'dashboard';
+    const path = this.router.url.split(/[?#]/, 1)[0];
+    if (/^\/seller\/orders\/[^/]+$/.test(path)) {
+      return 'Order Detail';
+    }
+    const segment = path.split('/').filter(Boolean).at(-1) || 'dashboard';
     return segment.replace(/-/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
   }
 }

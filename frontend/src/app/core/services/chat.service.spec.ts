@@ -128,6 +128,25 @@ describe('ChatService', () => {
     expect(result?.items[0].otherParticipant.avatarUrl).toBe(`http://localhost:9000/api/v1/public/user-avatars/${sellerId}?v=4`);
   });
 
+  it('emits a conversation read event after mark-read succeeds', () => {
+    const readEvents: string[] = [];
+    service.conversationRead$.subscribe(conversationId => readEvents.push(conversationId));
+
+    service.markRead(conversationId).subscribe();
+
+    const request = httpMock.expectOne(`http://localhost:9000/api/v1/conversations/${conversationId}/read`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.withCredentials).toBeTrue();
+    request.flush({
+      conversationId,
+      lastReadMessageId: '01M00000000000000000000001',
+      lastReadAt: '2026-07-06T12:02:00Z',
+      unread: false,
+    });
+
+    expect(readEvents).toEqual([conversationId]);
+  });
+
   it('posts seller mark-done requests', () => {
     service.markDone(conversationId, 2).subscribe();
 

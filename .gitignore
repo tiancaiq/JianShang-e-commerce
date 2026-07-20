@@ -142,10 +142,15 @@ pids.txt
 port_check.txt
 port_check2.txt
 maven_build.log
+.playwright-mcp/
+frontend/playwright-report/
+frontend/test-results/
+marketplace-images-*.png
 
 # GitHub Actions cache
 .github/java-upgrade/*/logs/
 
 # Python cache
 __pycache__/
+*.egg-info/
 *.pyc

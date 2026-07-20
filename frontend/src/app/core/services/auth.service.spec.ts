@@ -355,7 +355,7 @@ describe('AuthService', () => {
     expect(await statePromise).toEqual({ authenticated: false, user: null });
   });
 
-  it('posts native login through the gateway with CSRF and refreshes the identity user', async () => {
+  it('posts native login through the gateway and refreshes the authenticated session before logout', async () => {
     const statePromise = firstValueFrom(service.nativeLogin({
       email: 'buyer@example.com',
       password: 'password-123',
@@ -395,6 +395,22 @@ describe('AuthService', () => {
       },
     });
 
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: true,
+      user: {
+        subject: 'keycloak-sub-1',
+        email: 'buyer@example.com',
+        displayName: 'Buyer One',
+        roles: ['BUYER'],
+        expiresAt: '2026-06-16T12:00:00Z',
+      },
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'post-login-csrf-token',
+      },
+    });
+
     httpMock.expectOne('/api/v1/users/me').flush({
       data: {
         id: '01JY0000000000000000000000',
@@ -413,9 +429,20 @@ describe('AuthService', () => {
     });
 
     expect((await statePromise).authenticated).toBeTrue();
+
+    const submitSpy = spyOn(HTMLFormElement.prototype, 'submit').and.stub();
+    expect(service.logout('marketplace')).toBeTrue();
+    const form = Array.from(document.forms).find(candidate =>
+      candidate.getAttribute('action') === '/api/v1/auth/logout'
+    );
+    expect(form?.parentElement).toBe(document.body);
+    expect(form?.querySelector('input[name="_csrf"]')?.getAttribute('value')).toBe('post-login-csrf-token');
+    expect(form?.querySelector('input[name="client"]')?.getAttribute('value')).toBe('marketplace');
+    expect(submitSpy).toHaveBeenCalled();
+    form?.remove();
   });
 
-  it('refreshes the gateway session before native registration so CSRF is current', async () => {
+  it('refreshes the gateway session before and after native registration so CSRF is current', async () => {
     const statePromise = firstValueFrom(service.nativeRegister({
       email: 'new@example.com',
       password: 'password-123',
@@ -459,6 +486,22 @@ describe('AuthService', () => {
       },
     });
 
+    httpMock.expectOne('/api/v1/auth/session').flush({
+      authenticated: true,
+      user: {
+        subject: 'keycloak-sub-2',
+        email: 'new@example.com',
+        displayName: 'New Buyer',
+        roles: ['BUYER'],
+        expiresAt: '2026-06-16T12:00:00Z',
+      },
+      csrf: {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'csrf-token-3',
+      },
+    });
+
     httpMock.expectOne('/api/v1/users/me').flush({
       data: {
         id: '01JY0000000000000000000001',
@@ -479,7 +522,7 @@ describe('AuthService', () => {
     expect((await statePromise).authenticated).toBeTrue();
   });
 
-  it('posts logout through the gateway with the current CSRF parameter', async () => {
+  it('posts logout through the gateway with the current CSRF parameter and client hint', async () => {
     const statePromise = firstValueFrom(service.ensureSession());
     httpMock.expectOne('/api/v1/auth/session').flush({
       authenticated: false,
@@ -497,14 +540,16 @@ describe('AuthService', () => {
     sessionStorage.setItem('refreshToken', 'legacy-refresh-token');
     localStorage.setItem('saved-filter', 'keep-user-preference');
 
-    service.logout();
+    expect(service.logout('admin-portal')).toBeTrue();
 
     const form = Array.from(document.forms).find(candidate =>
       candidate.getAttribute('action') === '/api/v1/auth/logout'
     );
     expect(form).toBeTruthy();
+    expect(form?.parentElement).toBe(document.body);
     expect(form?.method).toBe('post');
     expect(form?.querySelector('input[name="_csrf"]')?.getAttribute('value')).toBe('csrf-token');
+    expect(form?.querySelector('input[name="client"]')?.getAttribute('value')).toBe('admin-portal');
     expect(localStorage.getItem('accessToken')).toBeNull();
     expect(sessionStorage.getItem('refreshToken')).toBeNull();
     expect(localStorage.getItem('saved-filter')).toBe('keep-user-preference');
@@ -512,6 +557,19 @@ describe('AuthService', () => {
 
     localStorage.removeItem('saved-filter');
     form?.remove();
+  });
+
+  it('keeps in-memory user state when logout form submission cannot start', async () => {
+    service.setCurrentUser(currentUserFixture());
+    const submitSpy = spyOn(HTMLFormElement.prototype, 'submit').and.throwError('submit blocked');
+
+    expect(service.logout('marketplace')).toBeFalse();
+
+    expect(service.isAuthenticated()).toBeTrue();
+    expect(submitSpy).toHaveBeenCalled();
+    expect(Array.from(document.forms).some(candidate =>
+      candidate.getAttribute('action') === '/api/v1/auth/logout'
+    )).toBeFalse();
   });
 });
 

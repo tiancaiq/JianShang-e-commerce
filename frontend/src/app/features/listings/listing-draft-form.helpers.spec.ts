@@ -110,6 +110,8 @@ describe('listing draft form helpers', () => {
       publicRegion: 'CA',
       status: 'DRAFT',
       moderationStatus: 'NOT_SUBMITTED',
+      publicationSource: null,
+      publishedAt: null,
       version: 0,
       createdAt: '2026-06-16T12:00:00Z',
       updatedAt: '2026-06-16T12:00:00Z',
@@ -151,15 +153,16 @@ describe('listing draft form helpers', () => {
 
   it('identifies statuses that seller edit actions can still update', () => {
     expect(isEditableListingStatus('DRAFT')).toBeTrue();
-    expect(isEditableListingStatus('PENDING_REVIEW')).toBeTrue();
+    expect(isEditableListingStatus('PENDING_REVIEW')).toBeFalse();
     expect(isEditableListingStatus('ACTIVE')).toBeTrue();
     expect(isEditableListingStatus('CLOSED')).toBeTrue();
+    expect(isEditableListingStatus('CHANGES_REQUESTED')).toBeTrue();
     expect(isEditableListingStatus('SOLD')).toBeFalse();
   });
 
   it('identifies statuses that seller close actions can still close', () => {
     expect(isClosableListingStatus('DRAFT')).toBeTrue();
-    expect(isClosableListingStatus('PENDING_REVIEW')).toBeTrue();
+    expect(isClosableListingStatus('PENDING_REVIEW')).toBeFalse();
     expect(isClosableListingStatus('ACTIVE')).toBeTrue();
     expect(isClosableListingStatus('CLOSED')).toBeFalse();
   });
@@ -189,6 +192,13 @@ describe('listing draft form helpers', () => {
     expect(canSubmitListingForReview({
       editMode: true,
       status: 'CLOSED',
+      attachedImageCount: 1,
+      pendingImageCount: 0,
+      hasUnsavedChanges: true,
+    })).toBeTrue();
+    expect(canSubmitListingForReview({
+      editMode: true,
+      status: 'CHANGES_REQUESTED',
       attachedImageCount: 1,
       pendingImageCount: 0,
       hasUnsavedChanges: true,

@@ -9,8 +9,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$PROJECT_ROOT/.run_pids"
 
-SERVICES=(product-service order-service inventory-service notification-service payment-service auth-service api-gateway)
-SERVICE_PORTS=(8080 8081 8082 8083 8084 8085 9000)
+SERVICES=(product-service order-service inventory-service notification-service payment-service auth-service chat-service api-gateway)
+SERVICE_PORTS=(8091 8081 8082 8083 8084 8085 8092 9000)
 FRONTEND_PORT=4200
 
 # ─── Colors ──────────────────────────────────────────────────────
@@ -37,6 +37,17 @@ success() { echo -e "${GREEN}[✓]${NC}       $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}    $1"; }
 error()   { echo -e "${RED}[✗]${NC}       $1"; }
 step()    { echo -e "${MAGENTA}[STEP]${NC}    $1"; }
+
+load_environment() {
+  for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.local"; do
+    if [ -f "$env_file" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      . "$env_file"
+      set +a
+    fi
+  done
+}
 
 # ─── Check prerequisites ────────────────────────────────────────
 check_prereqs() {
@@ -127,12 +138,13 @@ print_dashboard() {
   echo -e "${CYAN}${BOLD}║${NC}  ${BOLD}Service${NC}                  ${BOLD}URL${NC}                         ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}╠═══════════════════════════════════════════════════════════╣${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  API Gateway            http://localhost:9000          ${CYAN}${BOLD}║${NC}"
-  echo -e "${CYAN}${BOLD}║${NC}  Product Service        http://localhost:8080          ${CYAN}${BOLD}║${NC}"
+  echo -e "${CYAN}${BOLD}║${NC}  Product Service        http://localhost:8091          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Order Service          http://localhost:8081          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Inventory Service      http://localhost:8082          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Notification Service   http://localhost:8083          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Payment Service        http://localhost:8084          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Auth Service           http://localhost:8085          ${CYAN}${BOLD}║${NC}"
+  echo -e "${CYAN}${BOLD}║${NC}  Chat Service           http://localhost:8092          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  Frontend               http://localhost:4200          ${CYAN}${BOLD}║${NC}"
   echo -e "${CYAN}${BOLD}╠═══════════════════════════════════════════════════════════╣${NC}"
   echo -e "${CYAN}${BOLD}║${NC}  ${BOLD}Infrastructure${NC}                                         ${CYAN}${BOLD}║${NC}"
@@ -158,11 +170,13 @@ cleanup() {
 
 # ─── CREATE MySQL DATABASES ─────────────────────────────────────
 create_mysql_databases() {
-  step "Creating MySQL databases (order_service, inventory_service, payment_service)..."
+  step "Creating MySQL databases (catalog, chat, order_service, inventory_service, payment_service)..."
   local password="${MYSQL_ROOT_PASSWORD:-mysql}"
+  local databases=("${CATALOG_DB_NAME:-catalog}" "${CHAT_DB_NAME:-chat}" order_service inventory_service payment_service)
 
-  for db in order_service inventory_service payment_service; do
-    docker exec -i mysql mysql -uroot -p"$password" -e "CREATE DATABASE IF NOT EXISTS $db;" 2>/dev/null \
+  for db in "${databases[@]}"; do
+    local escaped_db="${db//\`/\`\`}"
+    docker exec -i mysql mysql -uroot -p"$password" -e "CREATE DATABASE IF NOT EXISTS \`$escaped_db\`;" 2>/dev/null \
       && success "Database '$db' ready" \
       || warn "Could not create '$db' (may already exist)"
   done
@@ -248,6 +262,7 @@ do_local() {
   for i in "${!SERVICES[@]}"; do
     wait_for_port localhost "${SERVICE_PORTS[$i]}" "${SERVICES[$i]}" 120 || true
   done
+  wait_for_http "http://localhost:8092/actuator/health" "chat-service health" 120 || true
   wait_for_port localhost $FRONTEND_PORT "Frontend" 120 || true
 
   # ── 8. Dashboard ────────────────────────────────────────────
@@ -286,6 +301,7 @@ do_docker() {
   for i in "${!SERVICES[@]}"; do
     wait_for_port localhost "${SERVICE_PORTS[$i]}" "${SERVICES[$i]}" 180 || true
   done
+  wait_for_http "http://localhost:8092/actuator/health" "chat-service health" 180 || true
   wait_for_port localhost $FRONTEND_PORT "Frontend" 120 || true
 
   # ── 5. Dashboard ────────────────────────────────────────────
@@ -346,6 +362,11 @@ do_status() {
   else
     error "Frontend — port $FRONTEND_PORT CLOSED"
   fi
+  if curl -sf "http://localhost:8092/actuator/health" >/dev/null 2>&1; then
+    success "chat-service health endpoint OK"
+  else
+    error "chat-service health endpoint unavailable"
+  fi
 }
 
 # ═════════════════════════════════════════════════════════════════
@@ -392,6 +413,7 @@ usage() {
 # ═════════════════════════════════════════════════════════════════
 main() {
   local cmd="${1:-}"
+  load_environment
 
   case "$cmd" in
     local)    do_local ;;
