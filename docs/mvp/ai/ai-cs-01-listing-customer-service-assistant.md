@@ -556,6 +556,14 @@ subject listing ID, prompt/tool/schema/model versions, and result status. Raw
 prompts, message bodies, tool payloads, storage URLs, email, phone, and exact
 location are excluded from unrestricted logs and traces.
 
+Create-session request-validation diagnostics are a narrower pre-handler
+exception: they retain only correlation ID, bounded error count, fixed
+location/error categories, allowlisted top-level/subject key presence, and the
+runtime type and length (never the value) of `subject.id`. Their metric labels
+are fixed and contain no arbitrary field name, request value, actor, listing,
+session, header, cookie, token, prompt, or upstream response. The public
+`400 VALIDATION_ERROR` envelope remains unchanged.
+
 ## Test And Evaluation Plan
 
 `AI-CS-01E-A` establishes the offline baseline contract:

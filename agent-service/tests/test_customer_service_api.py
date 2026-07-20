@@ -1,5 +1,8 @@
 import asyncio
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import logging
+import re
 import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -43,6 +46,7 @@ CLIENT_MESSAGE = "01ARZ3NDEKTSV4RRFFQ69G5FAZ"
 USER_MESSAGE = "01ARZ3NDEKTSV4RRFFQ69G5FB0"
 ASSISTANT_MESSAGE = "01ARZ3NDEKTSV4RRFFQ69G5FB1"
 INVOCATION = "01ARZ3NDEKTSV4RRFFQ69G5FB2"
+WALNUT_LISTING = "01D00000000000000000000101"
 NOW = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
 
 
@@ -334,6 +338,293 @@ class CustomerServiceApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(SESSION, response.json()["id"])
         self.assertEqual("12", response.json()["subjectListing"]["version"])
         self.assertEqual("agent-api-test-1", response.headers["X-Correlation-Id"])
+
+    async def test_exact_walnut_request_reaches_authentication_boundary(self):
+        repository = FakeRepository()
+        async with await self.client(repository, answerer=FakeAnswerer()) as client:
+            response = await client.post(
+                "/api/v1/agent/sessions",
+                headers={"X-Correlation-Id": "walnut-validation-boundary-1"},
+                json={
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {
+                        "type": "LISTING",
+                        "id": WALNUT_LISTING,
+                    },
+                },
+            )
+
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("UNAUTHORIZED", response.json()["error"]["code"])
+        self.assertEqual(
+            "walnut-validation-boundary-1",
+            response.json()["error"]["correlationId"],
+        )
+
+    async def test_create_validation_maps_only_fixed_field_and_error_categories(self):
+        cases = (
+            (
+                "missing-session-type",
+                {"subject": {"type": "LISTING", "id": LISTING}},
+                "session_type",
+                "missing",
+            ),
+            (
+                "wrong-session-type",
+                {
+                    "sessionType": "WRONG",
+                    "subject": {"type": "LISTING", "id": LISTING},
+                },
+                "session_type",
+                "literal_mismatch",
+            ),
+            (
+                "missing-subject",
+                {"sessionType": "LISTING_CUSTOMER_SERVICE"},
+                "subject",
+                "missing",
+            ),
+            (
+                "wrong-subject-shape",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": [],
+                },
+                "subject",
+                "type_mismatch",
+            ),
+            (
+                "missing-subject-type",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"id": LISTING},
+                },
+                "subject_type",
+                "missing",
+            ),
+            (
+                "wrong-subject-type",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "listing", "id": LISTING},
+                },
+                "subject_type",
+                "literal_mismatch",
+            ),
+            (
+                "missing-subject-id",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "LISTING"},
+                },
+                "subject_id",
+                "missing",
+            ),
+            (
+                "wrong-subject-id-type",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "LISTING", "id": 26},
+                },
+                "subject_id",
+                "type_mismatch",
+            ),
+            (
+                "malformed-subject-id",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "LISTING", "id": "lowercase-id"},
+                },
+                "subject_id",
+                "pattern_mismatch",
+            ),
+            (
+                "top-level-extra",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {"type": "LISTING", "id": LISTING},
+                    "unexpected": "value",
+                },
+                "top_level_extra",
+                "extra_forbidden",
+            ),
+            (
+                "subject-extra",
+                {
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {
+                        "type": "LISTING",
+                        "id": LISTING,
+                        "unexpected": "value",
+                    },
+                },
+                "subject_extra",
+                "extra_forbidden",
+            ),
+            (
+                "body-shape",
+                [],
+                "body_shape",
+                "type_mismatch",
+            ),
+        )
+        repository = FakeRepository()
+        async with await self.client(repository, answerer=FakeAnswerer()) as client:
+            for name, body, expected_field, expected_error in cases:
+                with self.subTest(name=name), self.assertLogs(
+                    "msb_agent_service.api",
+                    level=logging.WARNING,
+                ) as captured:
+                    response = await client.post(
+                        "/api/v1/agent/sessions",
+                        headers={
+                            "Authorization": "Bearer actor-token",
+                            "X-Correlation-Id": f"validation-{name}",
+                        },
+                        json=body,
+                    )
+
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(
+                    "VALIDATION_ERROR",
+                    response.json()["error"]["code"],
+                )
+                combined = "\n".join(captured.output)
+                self.assertIn(
+                    f"fieldCategories={expected_field}",
+                    combined,
+                )
+                self.assertIn(
+                    f"errorCategories={expected_error}",
+                    combined,
+                )
+                self.assertIn(f"correlationId=validation-{name}", combined)
+                self.assertEqual(
+                    {
+                        "code",
+                        "message",
+                        "details",
+                        "correlationId",
+                    },
+                    set(response.json()["error"]),
+                )
+
+    async def test_create_validation_diagnostics_are_bounded_and_secret_safe(self):
+        secret_value = "diagnostic-secret-customer@example.invalid"
+        secret_top_key = "customer@example.invalid"
+        secret_subject_key = "Authorization-Bearer-secret"
+        payload = {
+            "sessionType": "WRONG",
+            "subject": {
+                "type": "wrong",
+                "id": secret_value,
+                secret_subject_key: secret_value,
+            },
+            secret_top_key: secret_value,
+            **{
+                f"malicious-extra-{index}-{secret_value}": secret_value
+                for index in range(20)
+            },
+        }
+        stdout = StringIO()
+        stderr = StringIO()
+        repository = FakeRepository()
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+            self.assertLogs(
+                "msb_agent_service.api",
+                level=logging.WARNING,
+            ) as captured,
+        ):
+            async with await self.client(
+                repository,
+                answerer=FakeAnswerer(),
+            ) as client:
+                response = await client.post(
+                    "/api/v1/agent/sessions",
+                    headers={
+                        "Authorization": "Bearer actor-token",
+                        "X-Correlation-Id": "validation-safe-1",
+                    },
+                    json=payload,
+                )
+                invalid_json = await client.post(
+                    "/api/v1/agent/sessions",
+                    headers={
+                        "Authorization": "Bearer actor-token",
+                        "Content-Type": "application/json",
+                        "X-Correlation-Id": "validation-safe-json-1",
+                    },
+                    content=f'{{"subject":"{secret_value}"',
+                )
+                metrics = await client.get("/metrics/")
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(400, invalid_json.status_code)
+        self.assertEqual(
+            "VALIDATION_ERROR",
+            invalid_json.json()["error"]["code"],
+        )
+        self.assertEqual(
+            "validation-safe-1",
+            response.json()["error"]["correlationId"],
+        )
+        combined_logs = "\n".join(captured.output)
+        safe_output = combined_logs + stdout.getvalue() + stderr.getvalue()
+        metrics_text = metrics.text
+        for secret in (secret_value, secret_top_key, secret_subject_key):
+            self.assertNotIn(secret, safe_output)
+            self.assertNotIn(secret, metrics_text)
+        self.assertIn("errorCount=20", combined_logs)
+        self.assertIn(
+            "fieldCategories=session_type,subject_type,subject_id,"
+            "top_level_extra,top_level_extra,top_level_extra,"
+            "top_level_extra,subject_extra",
+            combined_logs,
+        )
+        self.assertIn(
+            "errorCategories=literal_mismatch,literal_mismatch,"
+            "pattern_mismatch,extra_forbidden,extra_forbidden,"
+            "extra_forbidden,extra_forbidden,extra_forbidden",
+            combined_logs,
+        )
+        self.assertIn(
+            "topLevelKeys=sessionType,subject,other",
+            combined_logs,
+        )
+        self.assertIn("subjectKeys=type,id,other", combined_logs)
+        self.assertIn("subjectIdType=string", combined_logs)
+        self.assertIn(
+            f"subjectIdLength={len(secret_value)}",
+            combined_logs,
+        )
+        self.assertIn(
+            "correlationId=validation-safe-json-1 errorCount=1 "
+            "fieldCategories=body_shape errorCategories=invalid_json "
+            "topLevelKeys=not_object",
+            combined_logs,
+        )
+        labels = re.findall(
+            r'agent_customer_service_api_validation_errors_total'
+            r'\{([^}]*)\}',
+            metrics_text,
+        )
+        self.assertTrue(labels)
+        for label_set in labels:
+            self.assertRegex(label_set, r'route="create_session"')
+            self.assertRegex(label_set, r'result="VALIDATION_ERROR"')
+            self.assertRegex(
+                label_set,
+                r'field_category="(?:session_type|subject|subject_type|'
+                r'subject_id|top_level_extra|subject_extra|body_shape|unknown)"',
+            )
+            self.assertRegex(
+                label_set,
+                r'error_category="(?:missing|literal_mismatch|'
+                r'pattern_mismatch|type_mismatch|extra_forbidden|'
+                r'invalid_json|invalid_body|other)"',
+            )
 
     async def test_ineligible_listing_log_omits_actor_and_listing_identifiers(self):
         repository = FakeRepository()

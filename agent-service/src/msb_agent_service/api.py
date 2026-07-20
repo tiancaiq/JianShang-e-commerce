@@ -96,6 +96,30 @@ CustomerServiceRuntimeFactory = Callable[
     CustomerServiceRuntime,
 ]
 LOGGER = logging.getLogger(__name__)
+_CREATE_SESSION_PATH = "/api/v1/agent/sessions"
+_VALIDATION_RESULT = "VALIDATION_ERROR"
+_MAX_DIAGNOSTIC_ERRORS = 8
+_MAX_PUBLIC_VALIDATION_ERRORS = 20
+_FIELD_CATEGORY_ORDER = {
+    "session_type": 0,
+    "subject": 1,
+    "subject_type": 2,
+    "subject_id": 3,
+    "top_level_extra": 4,
+    "subject_extra": 5,
+    "body_shape": 6,
+    "unknown": 7,
+}
+_ERROR_CATEGORY_ORDER = {
+    "missing": 0,
+    "literal_mismatch": 1,
+    "pattern_mismatch": 2,
+    "type_mismatch": 3,
+    "extra_forbidden": 4,
+    "invalid_json": 5,
+    "invalid_body": 6,
+    "other": 7,
+}
 
 
 def create_app(
@@ -366,12 +390,41 @@ def create_app(
         request: Request,
         error: RequestValidationError,
     ) -> JSONResponse:
+        if (
+            request.method == "POST"
+            and request.url.path == _CREATE_SESSION_PATH
+        ):
+            diagnostics = _create_session_validation_diagnostics(error)
+            for field_category, error_category in diagnostics:
+                api_metrics.record_validation(
+                    "create_session",
+                    field_category,
+                    error_category,
+                    _VALIDATION_RESULT,
+                )
+            input_shape = _create_session_input_shape(error.body)
+            LOGGER.warning(
+                "Agent create-session validation rejected "
+                "operation=create_session result=%s correlationId=%s "
+                "errorCount=%d fieldCategories=%s errorCategories=%s "
+                "topLevelKeys=%s subjectKeys=%s subjectIdType=%s "
+                "subjectIdLength=%s",
+                _VALIDATION_RESULT,
+                request.state.correlation_id,
+                min(len(error.errors()), _MAX_PUBLIC_VALIDATION_ERRORS),
+                ",".join(item[0] for item in diagnostics),
+                ",".join(item[1] for item in diagnostics),
+                input_shape["top_level_keys"],
+                input_shape["subject_keys"],
+                input_shape["subject_id_type"],
+                input_shape["subject_id_length"],
+            )
         details = [
             ApiErrorDetail(
                 field=".".join(str(part) for part in item["loc"][1:]) or None,
                 message=item["msg"],
             )
-            for item in error.errors()[:20]
+            for item in error.errors()[:_MAX_PUBLIC_VALIDATION_ERRORS]
         ]
         error_code = (
             ListingProposalApiErrorCode.INVALID_REQUEST.value
@@ -812,6 +865,156 @@ def create_app(
         )
 
     return app
+
+
+def _create_session_validation_diagnostics(
+    error: RequestValidationError,
+) -> list[tuple[str, str]]:
+    """Classify bounded validation errors without retaining locations or values."""
+
+    diagnostics = [
+        (
+            _validation_field_category(item),
+            _validation_error_category(item),
+        )
+        for item in error.errors()[:_MAX_DIAGNOSTIC_ERRORS]
+    ]
+    diagnostics.sort(
+        key=lambda item: (
+            _FIELD_CATEGORY_ORDER[item[0]],
+            _ERROR_CATEGORY_ORDER[item[1]],
+        )
+    )
+    return diagnostics or [("unknown", "other")]
+
+
+def _validation_field_category(item: dict[str, object]) -> str:
+    location = tuple(item.get("loc", ()))
+    error_type = item.get("type")
+    if error_type == "json_invalid":
+        return "body_shape"
+    if not location or location[0] != "body":
+        return "unknown"
+    if location == ("body",):
+        return "body_shape"
+    if location == ("body", "sessionType"):
+        return "session_type"
+    if location == ("body", "subject"):
+        return "subject"
+    if location == ("body", "subject", "type"):
+        return "subject_type"
+    if location == ("body", "subject", "id"):
+        return "subject_id"
+    if error_type == "extra_forbidden":
+        if len(location) == 2:
+            return "top_level_extra"
+        if len(location) == 3 and location[1] == "subject":
+            return "subject_extra"
+    return "unknown"
+
+
+def _validation_error_category(item: dict[str, object]) -> str:
+    error_type = item.get("type")
+    if error_type == "missing":
+        return "missing"
+    if error_type == "literal_error":
+        return "literal_mismatch"
+    if error_type == "string_pattern_mismatch":
+        return "pattern_mismatch"
+    if error_type in {
+        "string_type",
+        "model_attributes_type",
+        "dict_type",
+        "list_type",
+    }:
+        return "type_mismatch"
+    if error_type == "extra_forbidden":
+        return "extra_forbidden"
+    if error_type == "json_invalid":
+        return "invalid_json"
+    if error_type in {"model_type", "missing_sentinel_error"}:
+        return "invalid_body"
+    return "other"
+
+
+def _create_session_input_shape(body: object) -> dict[str, str]:
+    """Describe allowlisted JSON shape and ID type/length without its value."""
+
+    if not isinstance(body, dict):
+        return {
+            "top_level_keys": "not_object",
+            "subject_keys": "not_available",
+            "subject_id_type": "not_available",
+            "subject_id_length": "not_available",
+        }
+    top_level_keys = _allowlisted_key_shape(
+        body,
+        ("sessionType", "subject"),
+    )
+    if "subject" not in body:
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": "missing",
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject = body["subject"]
+    if not isinstance(subject, dict):
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": "not_object",
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject_keys = _allowlisted_key_shape(subject, ("type", "id"))
+    if "id" not in subject:
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": subject_keys,
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject_id = subject["id"]
+    subject_id_type = _safe_runtime_type(subject_id)
+    subject_id_length = (
+        str(len(subject_id))
+        if isinstance(subject_id, str)
+        else "not_available"
+    )
+    return {
+        "top_level_keys": top_level_keys,
+        "subject_keys": subject_keys,
+        "subject_id_type": subject_id_type,
+        "subject_id_length": subject_id_length,
+    }
+
+
+def _allowlisted_key_shape(
+    value: dict[object, object],
+    allowlist: tuple[str, ...],
+) -> str:
+    present = [key for key in allowlist if key in value]
+    if any(key not in allowlist for key in value):
+        present.append("other")
+    return ",".join(present) or "none"
+
+
+def _safe_runtime_type(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return "other"
 
 
 app = create_app()
