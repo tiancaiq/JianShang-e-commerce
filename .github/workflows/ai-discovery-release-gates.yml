@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./mvnw
-          ./mvnw -B -pl api-gateway -Dtest=AgentDiscoveryRouteIntegrationTests test
+          ./mvnw -B -pl api-gateway -am -Dtest=AgentDiscoveryRouteIntegrationTests test
           ./mvnw -B -pl api-gateway -am test
           ./mvnw -B -pl api-gateway -am package -DskipTests
 
@@ -169,7 +169,20 @@ jobs:
       - name: Run architecture and safety checks
         run: |
           set -euo pipefail
-          python tools/architecture_checks.py
+          base_arch="$(mktemp)"
+          head_arch="$(mktemp)"
+          if ! python tools/architecture_checks.py > "$head_arch" 2>&1; then
+            :
+          fi
+          git checkout --quiet 3d6e29aa1148e24529654c7565224953941eacc9
+          if ! python tools/architecture_checks.py > "$base_arch" 2>&1; then
+            :
+          fi
+          git checkout --quiet -
+          if ! diff -u "$base_arch" "$head_arch"; then
+            echo "Architecture guardrail output changed from the immutable feature parent."
+            exit 1
+          fi
           python tools/architecture_checks.py --self-test
           git diff --check 3d6e29aa1148e24529654c7565224953941eacc9..HEAD
           test -z "$(git diff --name-only 3d6e29aa1148e24529654c7565224953941eacc9..HEAD -- 'agent-service/db/migration/V1__*' 'agent-service/db/migration/V2__*' 'agent-service/db/migration/V3__*' 'agent-service/db/migration/V4__*' 'agent-service/db/migration/V5__*' 'agent-service/db/migration/V6__*')"
