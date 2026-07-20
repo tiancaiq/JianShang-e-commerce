@@ -82,8 +82,11 @@ export function categoryGuidanceRoute(enabled: boolean): Route {
 }
 
 // Keeps the reserved agent paths ahead of :conversationId while defaulting to a network-silent redirect.
-export function agentMessageRoutes(enabled: boolean): Routes {
-  if (!enabled) {
+export function agentMessageRoutes(
+  customerServiceEnabled: boolean,
+  discoveryEnabled = false,
+): Routes {
+  if (!customerServiceEnabled && !discoveryEnabled) {
     return [
       { path: 'account/messages/agent/:sessionId', redirectTo: '/account/messages', pathMatch: 'full' },
       { path: 'account/messages/agent', redirectTo: '/account/messages', pathMatch: 'full' },
@@ -191,7 +194,10 @@ export const routes: Routes = [
       buyerAddressesRoute(environment.features.buyerAddresses),
       { path: 'account/liked', canActivate: [authGuard], loadComponent: () => import('./features/account/liked-listings.component').then(m => m.LikedListingsComponent) },
       { path: 'account/seller-profile', canActivate: [authGuard], loadComponent: () => import('./features/seller/individual-seller-activation.component').then(m => m.IndividualSellerActivationComponent) },
-      ...agentMessageRoutes(environment.features.aiAssistant),
+      ...agentMessageRoutes(
+        environment.features.aiAssistant,
+        environment.features.aiDiscovery,
+      ),
       { path: 'account/messages', canActivate: [authGuard], loadComponent: () => import('./features/account/conversation-shell.component').then(m => m.ConversationShellComponent) },
       { path: 'account/messages/:conversationId', canActivate: [authGuard], loadComponent: () => import('./features/account/conversation-shell.component').then(m => m.ConversationShellComponent) },
       { path: 'account/listings', canActivate: [authGuard], loadComponent: () => import('./features/listings/account-listings-entry.component').then(m => m.AccountListingsEntryComponent) },
