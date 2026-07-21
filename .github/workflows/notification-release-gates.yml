@@ -63,7 +63,8 @@ jobs:
           set -euo pipefail
           chmod +x ./mvnw
           ./mvnw -B -pl order-service,notification-service -am \
-            -Dtest=PaymentSucceededOrderConfirmationMySqlIntegrationTests,OrderConfirmedNotificationMySqlIntegrationTests,NotificationReadMySqlIntegrationTests \
+            -Dtest=BuyerOrderRepositoryMySqlIntegrationTests,BusinessOrderRepositoryMySqlIntegrationTests,PaymentSucceededOrderConfirmationMySqlIntegrationTests,OrderConfirmedNotificationMySqlIntegrationTests,NotificationReadMySqlIntegrationTests \
+            -Dsurefire.failIfNoSpecifiedTests=false \
             test
 
   gateway:
