@@ -62,6 +62,11 @@ uses `GATEWAY_FEATURE_AGENT_DISCOVERY`, also false by default. The existing
 `GATEWAY_FEATURE_AGENT` route now owns only listing customer-service sessions
 and listing proposals; it cannot expose `/api/v1/agent/discovery/**`.
 
+Demo canaries must use the explicit `demo-ai-discovery` frontend build when
+the approved discovery chain is intentionally activated. The default Docker
+build remains production, and the `demo-ai` build keeps discovery hidden so
+listing customer-service can stay independently deployable.
+
 ## AI-DISC-01C status
 
 `AI-DISC-01C Deterministic Offline Discovery Quality, Safety And Release-Gate

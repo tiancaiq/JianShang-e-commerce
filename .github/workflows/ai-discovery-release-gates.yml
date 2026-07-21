@@ -64,6 +64,7 @@ jobs:
             "frontend/src/app/features/agent/agent-marketplace-discovery.model.ts" \
             "frontend/src/app/features/agent/agent-marketplace-discovery.service.spec.ts" \
             "frontend/src/app/features/agent/agent-marketplace-discovery.service.ts" \
+            "frontend/src/environments/environment.demo-ai-discovery.ts" \
             "frontend/src/environments/environment.demo-ai.ts" \
             "frontend/src/environments/environment.development.ts" \
             "frontend/src/environments/environment.ts")"
@@ -252,6 +253,7 @@ jobs:
         run: |
           npm run build -- --configuration production
           npm run build -- --configuration demo-ai
+          npm run build -- --configuration demo-ai-discovery
 
   safety:
     name: Integrated Safety Checks
@@ -288,9 +290,11 @@ jobs:
           test -f agent-service/db/migration/V7__create_marketplace_discovery_sessions.sql
           test -f agent-service/src/msb_agent_service/customer_service_runtime.py
           test -f agent-service/src/msb_agent_service/customer_service_langchain.py
-          grep -R "aiDiscovery: false" frontend/src/environments
+          grep -R "aiDiscovery: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts frontend/src/environments/environment.demo-ai.ts
+          grep -R "aiDiscovery: true" frontend/src/environments/environment.demo-ai-discovery.ts
           grep -R "aiAssistant: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts
           grep -R "aiAssistant: true" frontend/src/environments/environment.demo-ai.ts
+          grep -R "aiAssistant: true" frontend/src/environments/environment.demo-ai-discovery.ts
           grep -R "GATEWAY_FEATURE_AGENT_DISCOVERY:false" api-gateway/src/main/resources
           grep -R "GATEWAY_FEATURE_AGENT:false" api-gateway/src/main/resources
           grep -R "AGENT_DISCOVERY_API_ENABLED" agent-service/src/msb_agent_service/config.py

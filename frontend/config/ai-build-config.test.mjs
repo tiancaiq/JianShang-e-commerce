@@ -24,7 +24,7 @@ test('production and development keep the Agent UI disabled', () => {
   );
 });
 
-test('demo-ai is the only explicit Agent UI build opt-in', () => {
+test('demo-ai enables only listing customer-service Agent UI', () => {
   const angular = JSON.parse(read('angular.json'));
   const replacement =
     angular.projects.frontend.architect.build.configurations['demo-ai']
@@ -45,6 +45,37 @@ test('demo-ai is the only explicit Agent UI build opt-in', () => {
   assert.match(demo, /production:\s*true/);
   assert.match(demo, /aiAssistant:\s*true/);
   assert.match(demo, /aiDiscovery:\s*false/);
+  assert.doesNotMatch(demo, /https?:\/\//);
+});
+
+test('demo-ai-discovery is the explicit Discovery canary opt-in', () => {
+  const angular = JSON.parse(read('angular.json'));
+  const replacement =
+    angular.projects.frontend.architect.build.configurations['demo-ai-discovery']
+      .fileReplacements;
+
+  assert.deepEqual(replacement, [
+    {
+      replace: 'src/environments/environment.ts',
+      with: 'src/environments/environment.demo-ai-discovery.ts',
+    },
+  ]);
+  assert.equal(
+    angular.projects.frontend.architect.serve.configurations['demo-ai-discovery']
+      .buildTarget,
+    'frontend:build:demo-ai-discovery',
+  );
+  const demo = read('src/environments/environment.demo-ai-discovery.ts');
+  assert.match(demo, /production:\s*true/);
+  assert.match(demo, /cart:\s*false/);
+  assert.match(demo, /buyerAddresses:\s*false/);
+  assert.match(demo, /categoryGuidance:\s*false/);
+  assert.match(demo, /sellerInventory:\s*false/);
+  assert.match(demo, /businessOrders:\s*false/);
+  assert.match(demo, /buyerCheckout:\s*false/);
+  assert.match(demo, /aiAssistant:\s*true/);
+  assert.match(demo, /aiDiscovery:\s*true/);
+  assert.match(demo, /notifications:\s*false/);
   assert.doesNotMatch(demo, /https?:\/\//);
 });
 
