@@ -13,6 +13,18 @@ export const AGENT_CUSTOMER_SERVICE_ENABLED = new InjectionToken<boolean>(
   },
 );
 
+/**
+ * Keeps query-first discovery independently hidden so listing customer
+ * service or proposal activation cannot expose its routes or network calls.
+ */
+export const AGENT_DISCOVERY_ENABLED = new InjectionToken<boolean>(
+  'AGENT_DISCOVERY_ENABLED',
+  {
+    providedIn: 'root',
+    factory: () => environment.features.aiDiscovery === true,
+  },
+);
+
 export const AGENT_CLIENT_MESSAGE_ID_FACTORY = new InjectionToken<() => string>(
   'AGENT_CLIENT_MESSAGE_ID_FACTORY',
   {
@@ -43,4 +55,3 @@ export function generateClientMessageId(): string {
   }
   return `${encodedTime}${encodedRandom}`;
 }
-

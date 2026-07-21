@@ -39,6 +39,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "categoryGuidanceIntake": "DISABLED",
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
+                "marketplaceDiscoveryApi": "DISABLED",
             },
             response.json(),
         )
@@ -59,6 +60,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "categoryGuidanceIntake": "DISABLED",
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
+                "marketplaceDiscoveryApi": "DISABLED",
             },
             response.json(),
         )

@@ -401,6 +401,64 @@ class AgentApiSettings:
 
 
 @dataclass(frozen=True)
+class DiscoveryApiSettings:
+    """Holds the independently default-off marketplace discovery boundary."""
+
+    enabled: bool = False
+    kill_switch_enabled: bool = False
+    orchestration_enabled: bool = False
+    product_tools_enabled: bool = False
+    provider_enabled: bool = False
+    auth_service_url: str | None = None
+    product_service_url: str | None = None
+    dependency_timeout_seconds: float = 2.0
+
+    def validate(self, *, persistence_enabled: bool) -> None:
+        """Reject partial activation and keep all Product/provider work fail closed."""
+
+        _validate_number(
+            "AGENT_DISCOVERY_DEPENDENCY_TIMEOUT_SECONDS",
+            self.dependency_timeout_seconds,
+            0.1,
+            2.0,
+        )
+        if not self.enabled:
+            if (
+                self.orchestration_enabled
+                or self.product_tools_enabled
+                or self.provider_enabled
+            ):
+                raise ValueError(
+                    "AGENT_DISCOVERY_API_ENABLED must be true when discovery "
+                    "generation gates are enabled"
+                )
+            return
+        if not persistence_enabled:
+            raise ValueError(
+                "AGENT_PERSISTENCE_ENABLED must be true when "
+                "AGENT_DISCOVERY_API_ENABLED is true"
+            )
+        _validate_service_url("AUTH_SERVICE_URL", self.auth_service_url)
+        if self.product_tools_enabled:
+            _validate_service_url(
+                "AGENT_PRODUCT_SERVICE_URL",
+                self.product_service_url,
+            )
+
+    @property
+    def generation_enabled(self) -> bool:
+        """Require the full local discovery chain and a clear kill switch."""
+
+        return (
+            self.enabled
+            and not self.kill_switch_enabled
+            and self.orchestration_enabled
+            and self.product_tools_enabled
+            and self.provider_enabled
+        )
+
+
+@dataclass(frozen=True)
 class ListingProposalApiSettings:
     """Holds the independently default-off AI-LIST-02A API and generation gates."""
 
@@ -568,6 +626,9 @@ class Settings:
         default_factory=AgentPersistenceSettings
     )
     agent_api: AgentApiSettings = field(default_factory=AgentApiSettings)
+    discovery_api: DiscoveryApiSettings = field(
+        default_factory=DiscoveryApiSettings
+    )
     listing_proposal_api: ListingProposalApiSettings = field(
         default_factory=ListingProposalApiSettings
     )
@@ -808,6 +869,36 @@ class Settings:
             ),
         )
         agent_api.validate(persistence_enabled=agent_persistence.enabled)
+        discovery_api = DiscoveryApiSettings(
+            enabled=_boolean("AGENT_DISCOVERY_API_ENABLED", False),
+            kill_switch_enabled=_boolean(
+                "AGENT_DISCOVERY_KILL_SWITCH_ENABLED",
+                False,
+            ),
+            orchestration_enabled=_boolean(
+                "AGENT_DISCOVERY_ORCHESTRATION_ENABLED",
+                False,
+            ),
+            product_tools_enabled=_boolean(
+                "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED",
+                False,
+            ),
+            provider_enabled=_boolean(
+                "AGENT_DISCOVERY_PROVIDER_ENABLED",
+                False,
+            ),
+            auth_service_url=_optional_text("AUTH_SERVICE_URL"),
+            product_service_url=_optional_text("AGENT_PRODUCT_SERVICE_URL"),
+            dependency_timeout_seconds=_bounded_float(
+                "AGENT_DISCOVERY_DEPENDENCY_TIMEOUT_SECONDS",
+                2.0,
+                0.1,
+                2.0,
+            ),
+        )
+        discovery_api.validate(
+            persistence_enabled=agent_persistence.enabled
+        )
         listing_proposal_api = ListingProposalApiSettings(
             enabled=_boolean("AGENT_LISTING_PROPOSAL_API_ENABLED", False),
             auth_service_url=_optional_text("AUTH_SERVICE_URL"),
@@ -878,6 +969,7 @@ class Settings:
             knowledge_ingestion=knowledge_ingestion,
             agent_persistence=agent_persistence,
             agent_api=agent_api,
+            discovery_api=discovery_api,
             listing_proposal_api=listing_proposal_api,
         )
 

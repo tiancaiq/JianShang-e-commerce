@@ -1,0 +1,240 @@
+name: AI Discovery Release Gates
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ai-discovery-release-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: CI Commit Scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify CI-only append commit
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 3d6e29aa1148e24529654c7565224953941eacc9 HEAD
+          changed="$(git diff --name-only 3d6e29aa1148e24529654c7565224953941eacc9..HEAD)"
+          expected="$(printf '%s\n' \
+            ".github/workflows/ai-discovery-release-gates.yml" \
+            "agent-service/tests/test_discovery_persistence_integration.py")"
+          test "$changed" = "$expected"
+          git diff --check 3d6e29aa1148e24529654c7565224953941eacc9..HEAD
+
+  agent:
+    name: Agent Discovery Tests
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-service/pyproject.toml
+
+      - name: Install locked agent service
+        run: |
+          set -euo pipefail
+          grep -F '"langchain-core==1.4.9"' agent-service/pyproject.toml
+          grep -F '"langchain==1.3.14"' agent-service/pyproject.toml
+          python - <<'PY'
+          import pathlib
+          import re
+          import sys
+          import tomllib
+
+          metadata = tomllib.loads(pathlib.Path("agent-service/pyproject.toml").read_text(encoding="utf-8"))
+          dependencies = list(metadata["project"]["dependencies"])
+          optional = metadata["project"].get("optional-dependencies", {})
+          for values in optional.values():
+              dependencies.extend(values)
+
+          unconstrained = [
+              dependency
+              for dependency in dependencies
+              if not re.search(r"(==|~=|>=|<=|>|<)", dependency)
+          ]
+          if unconstrained:
+              print("Unconstrained direct dependencies:", unconstrained)
+              sys.exit(1)
+          print(f"direct_dependencies_checked={len(dependencies)}")
+          PY
+          python -m pip install -e "./agent-service[dev]"
+          python -m pip check
+          python - <<'PY'
+          from importlib import metadata
+
+          expected = {
+              "langchain": "1.3.14",
+              "langchain-core": "1.4.9",
+          }
+          for package, version in expected.items():
+              actual = metadata.version(package)
+              if actual != version:
+                  raise SystemExit(f"{package} installed as {actual}, expected {version}")
+          print("locked_dependency_versions_ok")
+          PY
+          test -z "${OPENAI_API_KEY:-}"
+
+      - name: Run focused discovery suites
+        run: >-
+          python -m unittest
+          agent-service.tests.test_discovery_api
+          agent-service.tests.test_marketplace_discovery
+          agent-service.tests.test_marketplace_discovery_evaluation
+          -v
+
+      - name: Run full agent suite
+        run: python -m unittest discover -s agent-service/tests -v
+
+      - name: Run deterministic evaluator and blocked release gate
+        run: |
+          set -euo pipefail
+          python -m msb_agent_service.marketplace_discovery_evaluation \
+            --fixture agent-service/evals/ai_disc_01c_offline_baseline_v1.json \
+            --digest
+          python -m unittest \
+            agent-service.tests.test_marketplace_discovery_evaluation.MarketplaceDiscoveryEvaluationTest.test_report_passes_every_provisional_threshold_but_release_is_blocked \
+            agent-service.tests.test_marketplace_discovery_evaluation.MarketplaceDiscoveryEvaluationTest.test_usage_is_zero_cost_and_latency_is_explicitly_non_production \
+            -v
+
+      - name: Require executable V7 discovery MySQL coverage
+        env:
+          RUN_MYSQL_INTEGRATION: "1"
+        run: |
+          set -euo pipefail
+          if ! grep -RIl "agent_discovery_sessions\|DiscoverySession\|discovery_recommendations" agent-service/tests/*integration*.py; then
+            echo "Missing executable discovery MySQL/Testcontainers persistence coverage."
+            exit 1
+          fi
+          python -m unittest discover \
+            -s agent-service/tests \
+            -p "test_discovery_persistence_integration.py" \
+            -v
+
+  gateway:
+    name: Discovery Gateway Tests
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run gateway focused and full tests
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B -pl api-gateway -am -Dtest=AgentDiscoveryRouteIntegrationTests -Dsurefire.failIfNoSpecifiedTests=false test
+          ./mvnw -B -pl api-gateway -am test
+          ./mvnw -B -pl api-gateway -am package -DskipTests
+
+  frontend:
+    name: Discovery Frontend Tests And Builds
+    runs-on: ubuntu-latest
+    needs: scope
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused discovery tests
+        run: >-
+          npx ng test
+          --watch=false
+          --browsers=ChromeHeadless
+          --include=src/app/features/agent/agent-marketplace-discovery.component.spec.ts
+          --include=src/app/features/agent/agent-marketplace-discovery.service.spec.ts
+
+      - name: Run full frontend tests
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+
+      - name: Build production and demo AI
+        run: |
+          npm run build -- --configuration production
+          npm run build -- --configuration demo-ai
+
+  safety:
+    name: Discovery Safety Checks
+    runs-on: ubuntu-latest
+    needs: scope
+    steps:
+      - name: Checkout exact event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Run architecture and safety checks
+        run: |
+          set -euo pipefail
+          base_arch="$(mktemp)"
+          head_arch="$(mktemp)"
+          if ! python tools/architecture_checks.py > "$head_arch" 2>&1; then
+            :
+          fi
+          git checkout --quiet 3d6e29aa1148e24529654c7565224953941eacc9
+          if ! python tools/architecture_checks.py > "$base_arch" 2>&1; then
+            :
+          fi
+          git checkout --quiet -
+          if ! diff -u "$base_arch" "$head_arch"; then
+            echo "Architecture guardrail output changed from the immutable feature parent."
+            exit 1
+          fi
+          python tools/architecture_checks.py --self-test
+          git diff --check 3d6e29aa1148e24529654c7565224953941eacc9..HEAD
+          test -z "$(git diff --name-only 3d6e29aa1148e24529654c7565224953941eacc9..HEAD -- 'agent-service/db/migration/V1__*' 'agent-service/db/migration/V2__*' 'agent-service/db/migration/V3__*' 'agent-service/db/migration/V4__*' 'agent-service/db/migration/V5__*' 'agent-service/db/migration/V6__*')"
+          test -f agent-service/db/migration/V7__create_marketplace_discovery_sessions.sql
+          grep -R "aiDiscovery: false" frontend/src/environments
+          grep -R "GATEWAY_FEATURE_AGENT_DISCOVERY:false" api-gateway/src/main/resources
+          grep -R "AGENT_DISCOVERY_API_ENABLED" agent-service/src/msb_agent_service/config.py
+          pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{20,})'
+          if grep -RInE --exclude-dir=.git --exclude-dir=target --exclude-dir=node_modules --exclude=package-lock.json "$pattern" .; then
+            exit 1
+          fi

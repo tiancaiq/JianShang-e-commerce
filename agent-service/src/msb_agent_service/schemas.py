@@ -68,6 +68,15 @@ class ReadinessResponse(StrictModel):
         "UNAVAILABLE",
         "ORCHESTRATION_DEFERRED",
     ] = Field(alias="customerServiceApi")
+    marketplace_discovery_api: Literal[
+        "DISABLED",
+        "READY",
+        "UNAVAILABLE",
+        "ORCHESTRATION_DEFERRED",
+    ] = Field(
+        default="DISABLED",
+        alias="marketplaceDiscoveryApi",
+    )
 
 
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-9A-Z]{26}$")]
@@ -145,6 +154,10 @@ class AgentMessageResponse(StrictModel):
         "UNKNOWN",
         "CONTACT_SELLER",
         "REFUSED",
+        "CLARIFY",
+        "RECOMMEND",
+        "NO_RESULTS",
+        "HANDOFF",
     ] | None = Field(default=None, alias="resolutionType")
     sources: list[AgentSourceResponse] = Field(default_factory=list)
     actions: list[AgentActionResponse] = Field(default_factory=list)
