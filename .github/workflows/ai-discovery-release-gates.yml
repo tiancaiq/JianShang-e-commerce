@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           base="16a30ae38739ec28f011c63f017f22b9812d8822"
-          test "$(git rev-parse HEAD^)" = "$base"
+          git merge-base --is-ancestor "$base" HEAD
           changed="$(git diff --name-only "$base"..HEAD)"
           expected="$(printf '%s\n' \
             ".github/workflows/ai-discovery-release-gates.yml" \
@@ -133,6 +133,8 @@ jobs:
           test -z "${OPENAI_API_KEY:-}"
 
       - name: Run focused customer-service and discovery suites
+        env:
+          PYTHONPATH: agent-service/tests
         run: >-
           python -m unittest
           agent-service.tests.test_customer_service_api
@@ -145,9 +147,13 @@ jobs:
           -v
 
       - name: Run full agent suite
+        env:
+          PYTHONPATH: agent-service/tests
         run: python -m unittest discover -s agent-service/tests -v
 
       - name: Run deterministic evaluator and blocked release gate
+        env:
+          PYTHONPATH: agent-service/tests
         run: |
           set -euo pipefail
           python -m msb_agent_service.marketplace_discovery_evaluation \
@@ -160,6 +166,7 @@ jobs:
 
       - name: Require executable V7 discovery MySQL coverage
         env:
+          PYTHONPATH: agent-service/tests
           RUN_MYSQL_INTEGRATION: "1"
         run: |
           set -euo pipefail
