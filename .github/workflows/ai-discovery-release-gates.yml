@@ -55,6 +55,7 @@ jobs:
             "api-gateway/src/main/resources/application.properties" \
             "api-gateway/src/test/java/com/msb/ecom/api_gateway/AgentDiscoveryRouteIntegrationTests.java" \
             "docs/mvp/ai/ai-disc-01-agent-conversational-marketplace-discovery.md" \
+            "frontend/angular.json" \
             "frontend/config/ai-build-config.test.mjs" \
             "frontend/src/app/app.routes.ts" \
             "frontend/src/app/features/agent/agent-customer-service-page.component.ts" \
