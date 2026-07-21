@@ -54,6 +54,7 @@ jobs:
             "api-gateway/src/main/java/com/msb/ecom/api_gateway/routes/Routes.java" \
             "api-gateway/src/main/resources/application.properties" \
             "api-gateway/src/test/java/com/msb/ecom/api_gateway/AgentDiscoveryRouteIntegrationTests.java" \
+            "docker-compose.demo.yml" \
             "docs/mvp/ai/ai-disc-01-agent-conversational-marketplace-discovery.md" \
             "frontend/angular.json" \
             "frontend/config/ai-build-config.test.mjs" \
@@ -71,7 +72,7 @@ jobs:
             "frontend/src/environments/environment.ts")"
           test "$changed" = "$expected"
           git diff --check "$base"..HEAD
-          test -z "$(git diff --name-only "$base"..HEAD -- '.env*' 'notification-service/**' 'order-service/**' 'product-service/**' 'payment-service/**' 'inventory-service/**' 'docs/v2/**' 'docker-compose*.yml')"
+          test -z "$(git diff --name-only "$base"..HEAD -- '.env*' 'notification-service/**' 'order-service/**' 'product-service/**' 'payment-service/**' 'inventory-service/**' 'docs/v2/**' 'docker-compose.yml' 'docker-compose.prod.yml')"
 
   agent:
     name: Agent CS And Discovery Tests
@@ -299,6 +300,16 @@ jobs:
           grep -R "GATEWAY_FEATURE_AGENT_DISCOVERY:false" api-gateway/src/main/resources
           grep -R "GATEWAY_FEATURE_AGENT:false" api-gateway/src/main/resources
           grep -R "AGENT_DISCOVERY_API_ENABLED" agent-service/src/msb_agent_service/config.py
+          grep -F "GATEWAY_FEATURE_AGENT_DISCOVERY: \${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}" docker-compose.demo.yml
+          grep -F "AGENT_DISCOVERY_API_ENABLED: \${AGENT_DISCOVERY_API_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "AGENT_DISCOVERY_KILL_SWITCH_ENABLED: \${AGENT_DISCOVERY_KILL_SWITCH_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "AGENT_DISCOVERY_ORCHESTRATION_ENABLED: \${AGENT_DISCOVERY_ORCHESTRATION_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED: \${AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "AGENT_DISCOVERY_PROVIDER_ENABLED: \${AGENT_DISCOVERY_PROVIDER_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "AGENT_CUSTOMER_SERVICE_API_ENABLED: \${AGENT_CUSTOMER_SERVICE_API_ENABLED:-false}" docker-compose.demo.yml
+          grep -F "GATEWAY_FEATURE_AGENT: \${GATEWAY_FEATURE_AGENT:-false}" docker-compose.demo.yml
+          grep -F "FRONTEND_BUILD_CONFIGURATION: \${FRONTEND_BUILD_CONFIGURATION:-production}" docker-compose.demo.yml
+          test -z "$(grep -nE 'GATEWAY_FEATURE_NOTIFICATION|NOTIFICATION_|ORDER_SERVICE_ENABLED|LISTING_PROPOSAL' docker-compose.demo.yml || true)"
           pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{20,})'
           if grep -RInE --exclude-dir=.git --exclude-dir=target --exclude-dir=node_modules --exclude=package-lock.json "$pattern" .; then
             exit 1
