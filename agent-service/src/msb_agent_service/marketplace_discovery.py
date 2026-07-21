@@ -678,8 +678,12 @@ class MarketplaceDiscoveryOrchestrator:
             ),
             args_schema=_GetListingArguments,
         )
+        request_model = self._model
+        request_scope = getattr(request_model, "for_request", None)
+        if callable(request_scope):
+            request_model = request_scope(correlation_id)
         graph = create_agent(
-            model=self._model,
+            model=request_model,
             tools=[search_tool, get_tool],
             system_prompt=_SYSTEM_PROMPT,
             middleware=[
