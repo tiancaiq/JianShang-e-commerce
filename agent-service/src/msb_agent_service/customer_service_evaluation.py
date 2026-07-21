@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from prometheus_client import CollectorRegistry
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -22,7 +22,7 @@ from .agent_persistence import (
     BeginInvocation,
     BeginInvocationResult,
 )
-from .customer_service_api import AgentApiError, ListingContext
+from .customer_service_api import AgentApiError, ListingContext, QuestionAnswerer
 from .customer_service_orchestration import (
     CustomerServiceModelRequest,
     CustomerServiceModelResult,
@@ -475,6 +475,8 @@ def load_offline_fixture(path: Path = DEFAULT_FIXTURE) -> OfflineEvaluationFixtu
 
 async def run_offline_evaluation(
     fixture: OfflineEvaluationFixture,
+    *,
+    answerer_adapter: Callable[[QuestionAnswerer], QuestionAnswerer] | None = None,
 ) -> OfflineEvaluationReport:
     """Evaluate current listing-only boundaries with deterministic local fakes."""
 
@@ -492,7 +494,7 @@ async def run_offline_evaluation(
         "outcome_conformance": [0, 0],
     }
     for case in fixture.cases:
-        result, measurements = await _run_case(case)
+        result, measurements = await _run_case(case, answerer_adapter)
         case_results.append(result)
         for metric, (numerator, denominator) in measurements.items():
             totals[metric][0] += numerator
@@ -546,6 +548,7 @@ async def run_offline_evaluation(
 
 async def _run_case(
     case: OfflineEvaluationCase,
+    answerer_adapter: Callable[[QuestionAnswerer], QuestionAnswerer] | None,
 ) -> tuple[CaseEvaluationResult, dict[str, tuple[int, int]]]:
     repository = _OfflineAuditRepository([])
     search = _OfflineSearchClient(case)
@@ -559,18 +562,23 @@ async def _run_case(
         embedding_dimensions=3,
         metrics=KnowledgeRetrievalMetrics(CollectorRegistry()),
     )
-    orchestrator = ListingCustomerServiceOrchestrator(
+    direct_answerer = ListingCustomerServiceOrchestrator(
         repository=repository,
         retriever=retriever,
         model=model,
         metrics=CustomerServiceOrchestrationMetrics(CollectorRegistry()),
+    )
+    answerer = (
+        direct_answerer
+        if answerer_adapter is None
+        else answerer_adapter(direct_answerer)
     )
     resolution: str | None = None
     error_code: str | None = None
     sources: tuple[dict[str, object], ...] = ()
     body = ""
     try:
-        answer = await orchestrator.answer(
+        answer = await answerer.answer(
             begin=_begin(case.question),
             actor_user_id=_ACTOR,
             listing=ListingContext(

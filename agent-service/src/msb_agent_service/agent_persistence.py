@@ -28,7 +28,12 @@ _REQUIRED_TABLES = {
     "agent_invocations",
     "agent_tool_calls",
 }
-_ALLOWED_TOOLS = {"getListing", "retrieveKnowledge"}
+_ALLOWED_TOOLS = {
+    "getListing",
+    "retrieveKnowledge",
+    "SEARCH_INDIVIDUAL",
+    "GET_LISTING",
+}
 _ALLOWED_SOURCE_TYPES = {
     "LISTING",
     "MARKETPLACE_POLICY",
@@ -55,6 +60,10 @@ class AgentResolutionType(StrEnum):
     UNKNOWN = "UNKNOWN"
     CONTACT_SELLER = "CONTACT_SELLER"
     REFUSED = "REFUSED"
+    CLARIFY = "CLARIFY"
+    RECOMMEND = "RECOMMEND"
+    NO_RESULTS = "NO_RESULTS"
+    HANDOFF = "HANDOFF"
 
 
 class AgentInvocationStatus(StrEnum):
@@ -101,8 +110,8 @@ class AgentSession:
     session_id: str
     session_type: str
     actor_user_id: str
-    subject_type: str
-    subject_listing_id: str
+    subject_type: str | None
+    subject_listing_id: str | None
     status: AgentSessionStatus
     created_at: datetime
     updated_at: datetime
@@ -193,6 +202,7 @@ class MessagePage:
 class RetentionResult:
     sessions_purged: int
     messages_deleted: int
+    discovery_recommendations_deleted: int
     deduplication_keys_redacted: int
     audit_invocations_deleted: int
 
@@ -1406,6 +1416,7 @@ class AgentPersistenceRepository:
         )
         purged_sessions = 0
         deleted_messages = 0
+        deleted_discovery_recommendations = 0
         redacted_keys = 0
         async with self._pool.acquire() as connection:
             try:
@@ -1464,6 +1475,14 @@ class AgentPersistenceRepository:
                         redacted_keys += cursor.rowcount
                         await cursor.execute(
                             """
+                            DELETE FROM agent_discovery_recommendations
+                            WHERE session_id = %s
+                            """,
+                            (session_id,),
+                        )
+                        deleted_discovery_recommendations += cursor.rowcount
+                        await cursor.execute(
+                            """
                             DELETE FROM agent_messages
                             WHERE session_id = %s
                             """,
@@ -1505,6 +1524,10 @@ class AgentPersistenceRepository:
                 raise
         self._metrics.record_retention("sessions_purged", purged_sessions)
         self._metrics.record_retention("messages_deleted", deleted_messages)
+        self._metrics.record_retention(
+            "discovery_recommendations_deleted",
+            deleted_discovery_recommendations,
+        )
         self._metrics.record_retention("deduplication_keys_redacted", redacted_keys)
         self._metrics.record_retention(
             "audit_invocations_deleted",
@@ -1513,15 +1536,18 @@ class AgentPersistenceRepository:
         if purged_sessions or deleted_audit:
             LOGGER.info(
                 "Agent retention applied sessionsPurged=%s messagesDeleted=%s "
+                "discoveryRecommendationsDeleted=%s "
                 "deduplicationKeysRedacted=%s auditInvocationsDeleted=%s",
                 purged_sessions,
                 deleted_messages,
+                deleted_discovery_recommendations,
                 redacted_keys,
                 deleted_audit,
             )
         return RetentionResult(
             sessions_purged=purged_sessions,
             messages_deleted=deleted_messages,
+            discovery_recommendations_deleted=deleted_discovery_recommendations,
             deduplication_keys_redacted=redacted_keys,
             audit_invocations_deleted=deleted_audit,
         )
@@ -1601,8 +1627,14 @@ def _session_from_row(row: dict[str, object]) -> AgentSession:
         session_id=str(row["session_id"]),
         session_type=str(row["session_type"]),
         actor_user_id=str(row["actor_user_id"]),
-        subject_type=str(row["subject_type"]),
-        subject_listing_id=str(row["subject_listing_id"]),
+        subject_type=(
+            None if row["subject_type"] is None else str(row["subject_type"])
+        ),
+        subject_listing_id=(
+            None
+            if row["subject_listing_id"] is None
+            else str(row["subject_listing_id"])
+        ),
         status=AgentSessionStatus(str(row["status"])),
         created_at=_utc_datetime(row["created_at"]),
         updated_at=_utc_datetime(row["updated_at"]),

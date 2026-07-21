@@ -5,6 +5,7 @@ import { provideRouter, Router } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { ConversationSummary } from '../../core/models/chat.model';
 import { ChatService } from '../../core/services/chat.service';
+import { AuthService } from '../../core/services/auth.service';
 import { ListingService } from '../../core/services/listing.service';
 import { publicListing } from '../../testing/listing-test-fixtures';
 import {
@@ -16,7 +17,10 @@ import {
   AgentSession,
   SendAgentMessageResponse,
 } from './agent-customer-service.model';
-import { AgentCustomerService } from './agent-customer-service.service';
+import {
+  AgentAuthenticationRequiredError,
+  AgentCustomerService,
+} from './agent-customer-service.service';
 import { AgentCustomerServiceThreadComponent } from './agent-customer-service-thread.component';
 
 describe('AgentCustomerServiceThreadComponent', () => {
@@ -25,6 +29,7 @@ describe('AgentCustomerServiceThreadComponent', () => {
   let agentService: jasmine.SpyObj<AgentCustomerService>;
   let chatService: jasmine.SpyObj<ChatService>;
   let listingService: jasmine.SpyObj<ListingService>;
+  let authService: jasmine.SpyObj<AuthService>;
   let router: Router;
 
   const listingId = '01L00000000000000000000001';
@@ -77,6 +82,7 @@ describe('AgentCustomerServiceThreadComponent', () => {
       'ListingService',
       ['searchMarketplaceListings', 'mediaUrl'],
     );
+    authService = jasmine.createSpyObj<AuthService>('AuthService', ['login']);
     listingService.searchMarketplaceListings.and.returnValue(of({
       data: [publicListing({
         id: listingId,
@@ -108,6 +114,7 @@ describe('AgentCustomerServiceThreadComponent', () => {
         { provide: AgentCustomerService, useValue: agentService },
         { provide: ChatService, useValue: chatService },
         { provide: ListingService, useValue: listingService },
+        { provide: AuthService, useValue: authService },
       ],
     }).compileComponents();
 
@@ -205,6 +212,39 @@ describe('AgentCustomerServiceThreadComponent', () => {
     expect(fixture.nativeElement.querySelector('app-agent-listing-context-picker')).not.toBeNull();
     expect(agentService.sendMessage).not.toHaveBeenCalled();
     expect(chatService.startListingConversation).not.toHaveBeenCalled();
+  });
+
+  it('returns an expired create session to marketplace login instead of an outage retry', () => {
+    agentService.createOrResumeSession.and.returnValue(
+      throwError(() => new AgentAuthenticationRequiredError()),
+    );
+    fixture.detectChanges();
+
+    fixture.nativeElement.querySelector('.listing-result').click();
+    fixture.detectChanges();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('marketplace', router.url);
+    expect(fixture.nativeElement.textContent).toContain('session expired');
+    expect(fixture.nativeElement.textContent).not.toContain('marketplace and seller messages still work');
+  });
+
+  it('preserves the pending message key when an expired session returns to login', () => {
+    agentService.sendMessage.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 401 })),
+    );
+    fixture.detectChanges();
+    component.session.set(session);
+    component.draft.set('Can I collect it today?');
+
+    component.sendQuestion();
+    fixture.detectChanges();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('marketplace', router.url);
+    expect(component.pendingQuestion()).toEqual({
+      clientMessageId: '01C00000000000000000000001',
+      body: 'Can I collect it today?',
+    });
+    expect(fixture.nativeElement.textContent).toContain('session expired');
   });
 
   it('renders grounded provenance and the explicit seller handoff without trade controls', () => {

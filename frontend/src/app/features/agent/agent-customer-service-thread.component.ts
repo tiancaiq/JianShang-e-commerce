@@ -14,6 +14,7 @@ import { Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ChatService } from '../../core/services/chat.service';
+import { AuthService } from '../../core/services/auth.service';
 import {
   AGENT_CLIENT_MESSAGE_ID_FACTORY,
   AGENT_CUSTOMER_SERVICE_ENABLED,
@@ -24,6 +25,7 @@ import {
   AgentSession,
 } from './agent-customer-service.model';
 import {
+  AgentAuthenticationRequiredError,
   AgentContractError,
   AgentCustomerService,
 } from './agent-customer-service.service';
@@ -642,6 +644,7 @@ export class AgentCustomerServiceThreadComponent implements OnInit {
   readonly enabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
   private readonly idFactory = inject(AGENT_CLIENT_MESSAGE_ID_FACTORY);
   private readonly agentService = inject(AgentCustomerService);
+  private readonly authService = inject(AuthService);
   private readonly chatService = inject(ChatService);
   private readonly router = inject(Router);
 
@@ -809,6 +812,9 @@ export class AgentCustomerServiceThreadComponent implements OnInit {
 
   private handleSessionError(error: unknown): void {
     this.session.set(null);
+    if (this.handleAuthenticationRequired(error, true)) {
+      return;
+    }
     this.listingUnavailable.set(error instanceof HttpErrorResponse && error.status === 404);
     this.listingSelectionError.set(
       this.listingUnavailable()
@@ -818,6 +824,9 @@ export class AgentCustomerServiceThreadComponent implements OnInit {
   }
 
   private handleQuestionError(error: unknown): void {
+    if (this.handleAuthenticationRequired(error, false)) {
+      return;
+    }
     const errorCode = agentErrorCode(error);
     if (
       error instanceof HttpErrorResponse
@@ -844,6 +853,21 @@ export class AgentCustomerServiceThreadComponent implements OnInit {
     this.errorMessage.set(safeErrorMessage(error));
   }
 
+  /** Returns expired BFF sessions to the existing marketplace login flow. */
+  private handleAuthenticationRequired(error: unknown, openingSession: boolean): boolean {
+    if (!isAuthenticationRequired(error)) {
+      return false;
+    }
+    const message = 'Your marketplace session expired. Sign in again to use listing help.';
+    if (openingSession) {
+      this.listingSelectionError.set(message);
+    } else {
+      this.errorMessage.set(message);
+    }
+    this.authService.login('marketplace', this.router.url);
+    return true;
+  }
+
   private isReadOnly(): boolean {
     return this.session()?.status !== 'OPEN' || this.listingUnavailable();
   }
@@ -854,6 +878,12 @@ function safeErrorMessage(error: unknown): string {
     return 'The assistant returned an invalid response. Try again later.';
   }
   return 'Your marketplace and seller messages still work. Try listing help again shortly.';
+}
+
+function isAuthenticationRequired(error: unknown): boolean {
+  return error instanceof AgentAuthenticationRequiredError
+    || (error instanceof HttpErrorResponse
+      && (error.status === 401 || agentErrorCode(error) === 'AUTHENTICATION_REQUIRED'));
 }
 
 function agentErrorCode(error: unknown): string | null {

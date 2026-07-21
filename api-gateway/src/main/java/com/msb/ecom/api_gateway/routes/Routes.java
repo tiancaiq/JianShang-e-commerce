@@ -69,6 +69,37 @@ public class Routes {
                 return disabledRoute("disabled_agent_service", RequestPredicates.path("/api/v1/agent/**"));
         }
 
+        /**
+         * Keeps discovery independently gated so listing Agent activation cannot
+         * expose the broader query-first Product/tool boundary.
+         */
+        @Bean
+        @Order(-1)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent-discovery", havingValue = "true")
+        public RouterFunction<ServerResponse> agentDiscoveryServiceRoute() {
+                return route("agent_discovery_service")
+                                .route(RequestPredicates.path("/api/v1/agent/discovery/**"),
+                                                http(agentServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("agentServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(-1)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent-discovery", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledAgentDiscoveryServiceRoute() {
+                return disabledRoute(
+                                "disabled_agent_discovery_service",
+                                RequestPredicates.path("/api/v1/agent/discovery/**"));
+        }
+
         @Bean
         @Order(1)
         public RouterFunction<ServerResponse> chatServiceRoute() {

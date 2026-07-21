@@ -112,6 +112,10 @@ service does not load or create `.env` files.
 | `AGENT_KNOWLEDGE_INGESTION_ENABLED` | No | `false` | Start durable Kafka intake after schema validation |
 | `AGENT_PERSISTENCE_ENABLED` | No | `false` | Validate and expose readiness for internal agent persistence |
 | `AGENT_CUSTOMER_SERVICE_API_ENABLED` | No | `false` | Enable authenticated customer-service routes; requires persistence and service dependencies |
+| `AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED` | No | `false` | Emergency generation stop; `true` overrides every generation gate |
+| `AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED` | No | `false` | Permit bounded listing customer-service orchestration |
+| `AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED` | No | `false` | Permit listing-only knowledge retrieval |
+| `AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED` | No | `false` | Permit provider execution after every preceding gate passes |
 | `AUTH_SERVICE_URL` | When customer-service API is enabled | none | Resolve the app-owned actor from the BFF-relayed bearer token |
 | `AGENT_API_DEPENDENCY_TIMEOUT_SECONDS` | No | `5` | Bounded Auth/Product dependency timeout |
 | `AGENT_MESSAGE_PAGE_DEFAULT_LIMIT` | No | `50` | Default message page size |
@@ -168,10 +172,11 @@ reports `knowledgeIngestion` as `READY` only while its intake task is running.
 When agent persistence is enabled, startup validates the externally migrated
 V4 tables plus the V5 correlation-width update and readiness reports
 `agentPersistence=READY`. Customer-service
-routes additionally require their own feature flag. The source-level provider
-binding is not constructed by `create_app`; until a later activation slice
-explicitly installs the AI-CS-01C bounded answerer, enabling that flag reports
-`customerServiceApi=ORCHESTRATION_DEFERRED` and answer execution fails closed.
+routes additionally require their API and generation gates. Production
+composition is constructed only after the API, orchestration, retrieval, and
+provider gates are true and the kill switch is clear. Otherwise no production
+retriever, embedding provider, model provider, or LangChain adapter is
+constructed, and answer execution fails closed.
 When the processor is enabled, startup also requires the exact
 `openai`/`text-embedding-3-small`/`1536` index identity and an API key. Neither
 endpoint makes an OpenAI request. Prometheus metrics are available at

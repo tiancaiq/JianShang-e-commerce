@@ -11,7 +11,8 @@ from typing import Awaitable, Callable
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from prometheus_client import make_asgi_app
+from opensearchpy import AsyncOpenSearch
+from prometheus_client import CollectorRegistry, make_asgi_app
 
 from .agent_persistence import (
     AgentPersistenceError,
@@ -28,9 +29,25 @@ from .customer_service_api import (
     DeferredQuestionAnswerer,
     ListingEligibilityClient,
     QuestionAnswerer,
+    decode_cursor,
     map_persistence_error,
 )
 from .customer_service_metrics import CustomerServiceApiMetrics
+from .customer_service_runtime import (
+    CustomerServiceRuntime,
+    build_customer_service_runtime,
+)
+from .discovery_api import (
+    CreateDiscoverySessionRequest,
+    DiscoveryApiError,
+    DiscoveryApiErrorCode,
+    DiscoveryHistoryPage,
+    DiscoverySessionResponse,
+    MarketplaceDiscoveryService,
+    SendDiscoveryMessageRequest,
+    SendDiscoveryMessageResponse,
+)
+from .discovery_persistence import DiscoveryPersistenceRepository
 from .knowledge_ingestion_runtime import (
     KnowledgeIngestionRuntime,
     KnowledgeIngestionStatus,
@@ -53,6 +70,11 @@ from .listing_proposal_review import (
     ListingProposalResponse,
     ListingProposalReviewService,
     listing_proposal_retention_loop,
+)
+from .marketplace_discovery import MarketplaceDiscoveryOrchestrator
+from .marketplace_discovery_runtime import (
+    MarketplaceDiscoveryRuntime,
+    build_marketplace_discovery_runtime,
 )
 from .schemas import (
     AgentMessagePageResponse,
@@ -81,7 +103,44 @@ ListingProposalRepositoryFactory = Callable[
     [AgentPersistenceRepository, ListingProposalMetrics],
     Awaitable[ListingProposalRepositoryProtocol],
 ]
+CustomerServiceRuntimeFactory = Callable[
+    [
+        Settings,
+        AgentPersistenceRepository,
+        AsyncOpenSearch,
+        CollectorRegistry,
+    ],
+    CustomerServiceRuntime,
+]
+MarketplaceDiscoveryRuntimeFactory = Callable[
+    [Settings],
+    MarketplaceDiscoveryRuntime,
+]
 LOGGER = logging.getLogger(__name__)
+_CREATE_SESSION_PATH = "/api/v1/agent/sessions"
+_VALIDATION_RESULT = "VALIDATION_ERROR"
+_MAX_DIAGNOSTIC_ERRORS = 8
+_MAX_PUBLIC_VALIDATION_ERRORS = 20
+_FIELD_CATEGORY_ORDER = {
+    "session_type": 0,
+    "subject": 1,
+    "subject_type": 2,
+    "subject_id": 3,
+    "top_level_extra": 4,
+    "subject_extra": 5,
+    "body_shape": 6,
+    "unknown": 7,
+}
+_ERROR_CATEGORY_ORDER = {
+    "missing": 0,
+    "literal_mismatch": 1,
+    "pattern_mismatch": 2,
+    "type_mismatch": 3,
+    "extra_forbidden": 4,
+    "invalid_json": 5,
+    "invalid_body": 6,
+    "other": 7,
+}
 
 
 def create_app(
@@ -92,15 +151,25 @@ def create_app(
     identity_client: ActorIdentityClient | None = None,
     listing_client: ListingEligibilityClient | None = None,
     question_answerer: QuestionAnswerer | None = None,
+    customer_service_runtime_factory: CustomerServiceRuntimeFactory | None = None,
     listing_proposal_repository_factory: (
         ListingProposalRepositoryFactory | None
     ) = None,
     listing_proposal_generator: ListingProposalGenerator | None = None,
+    discovery_orchestrator: MarketplaceDiscoveryOrchestrator | None = None,
+    discovery_service_override: MarketplaceDiscoveryService | None = None,
+    discovery_runtime_factory: MarketplaceDiscoveryRuntimeFactory | None = None,
 ) -> FastAPI:
     """Create the service app without performing provider calls at startup."""
 
     runtime_settings = settings or Settings.from_env()
+    runtime_settings.agent_api.validate(
+        persistence_enabled=runtime_settings.agent_persistence.enabled
+    )
     runtime_settings.listing_proposal_api.validate(
+        persistence_enabled=runtime_settings.agent_persistence.enabled
+    )
+    runtime_settings.discovery_api.validate(
         persistence_enabled=runtime_settings.agent_persistence.enabled
     )
     metrics = KnowledgeIndexMetrics()
@@ -125,16 +194,26 @@ def create_app(
     api_metrics = CustomerServiceApiMetrics(metrics.registry)
     listing_proposal_metrics = ListingProposalMetrics(metrics.registry)
     customer_service: AgentCustomerService | None = None
+    discovery_repository: DiscoveryPersistenceRepository | None = None
+    discovery_service: MarketplaceDiscoveryService | None = None
     listing_proposal_repository: ListingProposalRepositoryProtocol | None = None
     listing_proposal_service: ListingProposalReviewService | None = None
     listing_proposal_retention_task: asyncio.Task[None] | None = None
+    customer_service_runtime: CustomerServiceRuntime | None = None
+    discovery_runtime: MarketplaceDiscoveryRuntime | None = None
     create_listing_proposal_repository = (
         listing_proposal_repository_factory
         or ListingProposalRepository.from_agent_repository
     )
     runtime_identity_client = identity_client
     runtime_listing_client = listing_client
-    orchestration_available = question_answerer is not None
+    orchestration_available = False
+    create_customer_service_runtime = (
+        customer_service_runtime_factory or build_customer_service_runtime
+    )
+    create_discovery_runtime = (
+        discovery_runtime_factory or build_marketplace_discovery_runtime
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -142,11 +221,16 @@ def create_app(
             nonlocal ingestion_runtime
             nonlocal persistence_repository
             nonlocal customer_service
+            nonlocal discovery_repository
+            nonlocal discovery_service
             nonlocal runtime_identity_client
             nonlocal runtime_listing_client
             nonlocal listing_proposal_repository
             nonlocal listing_proposal_service
             nonlocal listing_proposal_retention_task
+            nonlocal customer_service_runtime
+            nonlocal discovery_runtime
+            nonlocal orchestration_available
             if runtime_settings.knowledge_ingestion.enabled:
                 ingestion_runtime = await create_ingestion_runtime(
                     runtime_settings,
@@ -172,11 +256,58 @@ def create_app(
                     runtime_listing_client
                     or ListingEligibilityClient(runtime_settings.agent_api)
                 )
+                selected_answerer: QuestionAnswerer = DeferredQuestionAnswerer()
+                if runtime_settings.agent_api.generation_enabled:
+                    if question_answerer is not None:
+                        selected_answerer = question_answerer
+                    else:
+                        if knowledge_client is None:
+                            raise RuntimeError(
+                                "Enabled customer-service generation requires "
+                                "an initialized knowledge client"
+                            )
+                        customer_service_runtime = create_customer_service_runtime(
+                            runtime_settings,
+                            persistence_repository,
+                            knowledge_client,
+                            metrics.registry,
+                        )
+                        selected_answerer = customer_service_runtime.answerer
+                    orchestration_available = True
                 customer_service = AgentCustomerService(
                     persistence_repository,
                     runtime_listing_client,
-                    question_answerer or DeferredQuestionAnswerer(),
+                    selected_answerer,
                 )
+            if runtime_settings.discovery_api.enabled:
+                if persistence_repository is None:
+                    raise RuntimeError(
+                        "Discovery API requires initialized persistence"
+                    )
+                runtime_identity_client = (
+                    runtime_identity_client
+                    or ActorIdentityClient(runtime_settings.discovery_api)
+                )
+                if discovery_service_override is not None:
+                    discovery_service = discovery_service_override
+                else:
+                    selected_discovery_orchestrator = discovery_orchestrator
+                    if (
+                        runtime_settings.discovery_api.generation_enabled
+                        and selected_discovery_orchestrator is None
+                    ):
+                        discovery_runtime = create_discovery_runtime(runtime_settings)
+                        selected_discovery_orchestrator = (
+                            discovery_runtime.orchestrator
+                        )
+                    discovery_repository = DiscoveryPersistenceRepository(
+                        persistence_repository
+                    )
+                    await discovery_repository.validate_schema()
+                    discovery_service = MarketplaceDiscoveryService(
+                        discovery_repository,
+                        selected_discovery_orchestrator,
+                    )
             if runtime_settings.listing_proposal_api.enabled:
                 if persistence_repository is None:
                     raise RuntimeError(
@@ -226,6 +357,10 @@ def create_app(
                 await ingestion_runtime.stop()
             if knowledge_client is not None:
                 await close_open_search_client(knowledge_client)
+            if customer_service_runtime is not None:
+                await customer_service_runtime.close()
+            if discovery_runtime is not None:
+                await discovery_runtime.close()
 
     app = FastAPI(title="MSB Agent Service", version="0.9.0", lifespan=lifespan)
     app.mount("/metrics", make_asgi_app(registry=metrics.registry))
@@ -304,6 +439,18 @@ def create_app(
             error.public_message,
         )
 
+    @app.exception_handler(DiscoveryApiError)
+    async def discovery_api_error_handler(
+        request: Request,
+        error: DiscoveryApiError,
+    ) -> JSONResponse:
+        return _error_response(
+            request,
+            error.status_code,
+            error.code.value,
+            error.public_message,
+        )
+
     @app.exception_handler(AgentPersistenceError)
     async def persistence_error_handler(
         request: Request,
@@ -322,12 +469,41 @@ def create_app(
         request: Request,
         error: RequestValidationError,
     ) -> JSONResponse:
+        if (
+            request.method == "POST"
+            and request.url.path == _CREATE_SESSION_PATH
+        ):
+            diagnostics = _create_session_validation_diagnostics(error)
+            for field_category, error_category in diagnostics:
+                api_metrics.record_validation(
+                    "create_session",
+                    field_category,
+                    error_category,
+                    _VALIDATION_RESULT,
+                )
+            input_shape = _create_session_input_shape(error.body)
+            LOGGER.warning(
+                "Agent create-session validation rejected "
+                "operation=create_session result=%s correlationId=%s "
+                "errorCount=%d fieldCategories=%s errorCategories=%s "
+                "topLevelKeys=%s subjectKeys=%s subjectIdType=%s "
+                "subjectIdLength=%s",
+                _VALIDATION_RESULT,
+                request.state.correlation_id,
+                min(len(error.errors()), _MAX_PUBLIC_VALIDATION_ERRORS),
+                ",".join(item[0] for item in diagnostics),
+                ",".join(item[1] for item in diagnostics),
+                input_shape["top_level_keys"],
+                input_shape["subject_keys"],
+                input_shape["subject_id_type"],
+                input_shape["subject_id_length"],
+            )
         details = [
             ApiErrorDetail(
                 field=".".join(str(part) for part in item["loc"][1:]) or None,
                 message=item["msg"],
             )
-            for item in error.errors()[:20]
+            for item in error.errors()[:_MAX_PUBLIC_VALIDATION_ERRORS]
         ]
         error_code = (
             ListingProposalApiErrorCode.INVALID_REQUEST.value
@@ -417,6 +593,17 @@ def create_app(
             else "ORCHESTRATION_DEFERRED"
         )
         customer_service_ready = customer_service_status in {"DISABLED", "READY"}
+        discovery_status = (
+            "DISABLED"
+            if not runtime_settings.discovery_api.enabled
+            else "READY"
+            if (
+                discovery_service is not None
+                and runtime_settings.discovery_api.generation_enabled
+            )
+            else "ORCHESTRATION_DEFERRED"
+        )
+        discovery_ready = discovery_status in {"DISABLED", "READY"}
         if (
             runtime_settings.openai_configured
             and knowledge_ready
@@ -424,6 +611,7 @@ def create_app(
             and category_ready
             and persistence_ready
             and customer_service_ready
+            and discovery_ready
         ):
             return ReadinessResponse(
                 status="READY",
@@ -433,6 +621,7 @@ def create_app(
                 categoryGuidanceIntake=category_status,
                 agentPersistence=persistence_status,
                 customerServiceApi=customer_service_status,
+                marketplaceDiscoveryApi=discovery_status,
             )
         response = ReadinessResponse(
             status="NOT_READY",
@@ -446,6 +635,7 @@ def create_app(
             categoryGuidanceIntake=category_status,
             agentPersistence=persistence_status,
             customerServiceApi=customer_service_status,
+            marketplaceDiscoveryApi=discovery_status,
         )
         return JSONResponse(
             status_code=503,
@@ -472,6 +662,79 @@ def create_app(
             authorization,
             request.state.correlation_id,
         )
+
+    def require_answer_generation() -> None:
+        """Block write-side Agent work before actor, Product, or persistence calls."""
+
+        if not runtime_settings.agent_api.enabled:
+            raise AgentApiError(
+                AgentApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Agent customer service is not available.",
+            )
+        if (
+            not runtime_settings.agent_api.generation_enabled
+            or not orchestration_available
+        ):
+            raise AgentApiError(
+                AgentApiErrorCode.ORCHESTRATION_UNAVAILABLE,
+                503,
+                "The customer-service answer engine is not available.",
+            )
+
+
+    async def discovery_actor(
+        request: Request,
+        authorization: str | None,
+    ) -> str:
+        """Resolve the actor only after the discovery API capability gate."""
+
+        if (
+            not runtime_settings.discovery_api.enabled
+            or runtime_identity_client is None
+            or discovery_service is None
+        ):
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Marketplace discovery is not available.",
+            )
+        try:
+            return await runtime_identity_client.resolve(
+                authorization,
+                request.state.correlation_id,
+            )
+        except AgentApiError as error:
+            if error.status_code == 401:
+                raise DiscoveryApiError(
+                    DiscoveryApiErrorCode.AUTHENTICATION_REQUIRED,
+                    401,
+                    "Authentication is required.",
+                ) from error
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.UNAVAILABLE,
+                503,
+                "Marketplace discovery is temporarily unavailable.",
+            ) from error
+
+    def require_discovery_generation() -> None:
+        """Stop discovery writes before actor, persistence, Product, or model calls."""
+
+        if not runtime_settings.discovery_api.enabled:
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Marketplace discovery is not available.",
+            )
+        if (
+            not runtime_settings.discovery_api.generation_enabled
+            or discovery_service is None
+        ):
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.UNAVAILABLE,
+                503,
+                "Marketplace discovery is temporarily unavailable.",
+            )
 
     async def proposal_actor(
         request: Request,
@@ -529,6 +792,7 @@ def create_app(
         started = time.perf_counter()
         route = "create_session"
         try:
+            require_answer_generation()
             actor_user_id = await actor(request, authorization)
             assert customer_service is not None
             response = await customer_service.create_session(
@@ -628,6 +892,7 @@ def create_app(
 
         started = time.perf_counter()
         try:
+            require_answer_generation()
             actor_user_id = await actor(request, authorization)
             assert customer_service is not None
             response = await customer_service.send_message(
@@ -642,6 +907,120 @@ def create_app(
         except Exception as error:
             api_metrics.record(
                 "send_message",
+                _metric_result(error),
+                time.perf_counter() - started,
+            )
+            raise
+
+
+    @app.post(
+        "/api/v1/agent/discovery/sessions",
+        response_model=DiscoverySessionResponse,
+    )
+    async def create_discovery_session(
+        body: CreateDiscoverySessionRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> DiscoverySessionResponse:
+        """Create/resume one actor session or explicitly begin a New search."""
+
+        started = time.perf_counter()
+        try:
+            require_discovery_generation()
+            actor_user_id = await discovery_actor(request, authorization)
+            assert discovery_service is not None
+            response = await discovery_service.create_session(
+                actor_user_id=actor_user_id,
+                new_search=body.new_search,
+            )
+            api_metrics.record(
+                "discovery_create_session",
+                "SUCCEEDED",
+                time.perf_counter() - started,
+            )
+            return response
+        except Exception as error:
+            api_metrics.record(
+                "discovery_create_session",
+                _metric_result(error),
+                time.perf_counter() - started,
+            )
+            raise
+
+    @app.get(
+        "/api/v1/agent/discovery/sessions/{sessionId}",
+        response_model=DiscoverySessionResponse,
+    )
+    async def get_discovery_session(
+        sessionId: Ulid,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> DiscoverySessionResponse:
+        """Return only the authenticated actor's discovery preference state."""
+
+        actor_user_id = await discovery_actor(request, authorization)
+        assert discovery_service is not None
+        return await discovery_service.get_session(
+            actor_user_id=actor_user_id,
+            session_id=sessionId,
+        )
+
+    @app.get(
+        "/api/v1/agent/discovery/sessions/{sessionId}/messages",
+        response_model=DiscoveryHistoryPage,
+    )
+    async def get_discovery_messages(
+        sessionId: Ulid,
+        request: Request,
+        cursor: str | None = Query(default=None, max_length=300),
+        limit: int = Query(default=50, ge=1, le=100),
+        authorization: str | None = Header(default=None),
+    ) -> DiscoveryHistoryPage:
+        """Read an actor-isolated keyset page of safe structured discovery turns."""
+
+        actor_user_id = await discovery_actor(request, authorization)
+        assert discovery_service is not None
+        return await discovery_service.list_messages(
+            actor_user_id=actor_user_id,
+            session_id=sessionId,
+            limit=limit,
+            cursor=decode_cursor(cursor),
+        )
+
+    @app.post(
+        "/api/v1/agent/discovery/sessions/{sessionId}/messages",
+        response_model=SendDiscoveryMessageResponse,
+    )
+    async def send_discovery_message(
+        sessionId: Ulid,
+        body: SendDiscoveryMessageRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> SendDiscoveryMessageResponse:
+        """Run one idempotent discovery turn without any automatic action."""
+
+        started = time.perf_counter()
+        try:
+            require_discovery_generation()
+            actor_user_id = await discovery_actor(request, authorization)
+            assert discovery_service is not None
+            response = await discovery_service.send_message(
+                actor_user_id=actor_user_id,
+                session_id=sessionId,
+                client_message_id=body.client_message_id,
+                expected_preference_version=body.expected_preference_version,
+                body=body.body,
+                correlation_id=request.state.correlation_id,
+            )
+            api_metrics.record(
+                "discovery_send_message",
+                "SUCCEEDED",
+                time.perf_counter() - started,
+            )
+            return response
+        except Exception as error:
+            api_metrics.record(
+                "discovery_send_message",
                 _metric_result(error),
                 time.perf_counter() - started,
             )
@@ -747,6 +1126,156 @@ def create_app(
         )
 
     return app
+
+
+def _create_session_validation_diagnostics(
+    error: RequestValidationError,
+) -> list[tuple[str, str]]:
+    """Classify bounded validation errors without retaining locations or values."""
+
+    diagnostics = [
+        (
+            _validation_field_category(item),
+            _validation_error_category(item),
+        )
+        for item in error.errors()[:_MAX_DIAGNOSTIC_ERRORS]
+    ]
+    diagnostics.sort(
+        key=lambda item: (
+            _FIELD_CATEGORY_ORDER[item[0]],
+            _ERROR_CATEGORY_ORDER[item[1]],
+        )
+    )
+    return diagnostics or [("unknown", "other")]
+
+
+def _validation_field_category(item: dict[str, object]) -> str:
+    location = tuple(item.get("loc", ()))
+    error_type = item.get("type")
+    if error_type == "json_invalid":
+        return "body_shape"
+    if not location or location[0] != "body":
+        return "unknown"
+    if location == ("body",):
+        return "body_shape"
+    if location == ("body", "sessionType"):
+        return "session_type"
+    if location == ("body", "subject"):
+        return "subject"
+    if location == ("body", "subject", "type"):
+        return "subject_type"
+    if location == ("body", "subject", "id"):
+        return "subject_id"
+    if error_type == "extra_forbidden":
+        if len(location) == 2:
+            return "top_level_extra"
+        if len(location) == 3 and location[1] == "subject":
+            return "subject_extra"
+    return "unknown"
+
+
+def _validation_error_category(item: dict[str, object]) -> str:
+    error_type = item.get("type")
+    if error_type == "missing":
+        return "missing"
+    if error_type == "literal_error":
+        return "literal_mismatch"
+    if error_type == "string_pattern_mismatch":
+        return "pattern_mismatch"
+    if error_type in {
+        "string_type",
+        "model_attributes_type",
+        "dict_type",
+        "list_type",
+    }:
+        return "type_mismatch"
+    if error_type == "extra_forbidden":
+        return "extra_forbidden"
+    if error_type == "json_invalid":
+        return "invalid_json"
+    if error_type in {"model_type", "missing_sentinel_error"}:
+        return "invalid_body"
+    return "other"
+
+
+def _create_session_input_shape(body: object) -> dict[str, str]:
+    """Describe allowlisted JSON shape and ID type/length without its value."""
+
+    if not isinstance(body, dict):
+        return {
+            "top_level_keys": "not_object",
+            "subject_keys": "not_available",
+            "subject_id_type": "not_available",
+            "subject_id_length": "not_available",
+        }
+    top_level_keys = _allowlisted_key_shape(
+        body,
+        ("sessionType", "subject"),
+    )
+    if "subject" not in body:
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": "missing",
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject = body["subject"]
+    if not isinstance(subject, dict):
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": "not_object",
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject_keys = _allowlisted_key_shape(subject, ("type", "id"))
+    if "id" not in subject:
+        return {
+            "top_level_keys": top_level_keys,
+            "subject_keys": subject_keys,
+            "subject_id_type": "missing",
+            "subject_id_length": "not_available",
+        }
+    subject_id = subject["id"]
+    subject_id_type = _safe_runtime_type(subject_id)
+    subject_id_length = (
+        str(len(subject_id))
+        if isinstance(subject_id, str)
+        else "not_available"
+    )
+    return {
+        "top_level_keys": top_level_keys,
+        "subject_keys": subject_keys,
+        "subject_id_type": subject_id_type,
+        "subject_id_length": subject_id_length,
+    }
+
+
+def _allowlisted_key_shape(
+    value: dict[object, object],
+    allowlist: tuple[str, ...],
+) -> str:
+    present = [key for key in allowlist if key in value]
+    if any(key not in allowlist for key in value):
+        present.append("other")
+    return ",".join(present) or "none"
+
+
+def _safe_runtime_type(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return "other"
 
 
 app = create_app()

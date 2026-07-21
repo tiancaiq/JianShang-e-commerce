@@ -15,10 +15,69 @@ the machine-enforced release-gate evaluator and offline-observability contract.
 `AI-CS-01E-C` adds the default-off public-listing context picker and explicit
 listing-detail launch. The mandatory `AI-CS-CLEAN-P0-02` evaluation,
 release-gate, and listing-context cleanup is complete, and the AI lane is reset
-to 0/3. Runtime construction, external activation, live evaluation, dashboards,
-cohorts, and rollout remain unimplemented.
+to 0/3. `AI-CS-02B` now adds the Python LangChain Core v1 adapter and
+default-off production composition behind the existing Agent-owned interfaces.
+`AI-CS-02C` adds only the explicit, tracked `demo-ai` build and default-off
+Compose/runbook contract, advancing the AI lane to 2/3. No runtime was
+activated. Live evaluation, dashboards, cohorts, and rollout remain
+unimplemented.
 
 Release: V3.
+
+## AI-CS-02B Python LangChain Core Runtime Boundary
+
+The approved runtime dependency is exactly `langchain-core==1.4.9`. The full
+`langchain` package and LangGraph are not required because this slice uses only
+typed `RunnableLambda` and `RunnableSequence` composition. The adapter:
+
+- remains behind the existing `QuestionAnswerer`;
+- delegates authorization, Product eligibility, filtered retrieval, provider
+  calls, grounding, citation validation, redaction, budgets, cancellation,
+  errors, metrics, and tool audits to the existing application-owned code;
+- adds no LangChain type to external DTOs, persistence, BFF contracts, or
+  OpenAPI;
+- uses no LangChain memory, checkpointer, tool discovery, agent executor, or
+  tracing transport;
+- preserves MySQL as the only session, message, invocation, and replay
+  authority.
+
+Production composition binds the existing OpenSearch listing retriever,
+OpenAI embedding/provider adapters, listing-only orchestrator, and LangChain
+adapter only when all of these Agent-owned gates pass:
+
+- `AGENT_CUSTOMER_SERVICE_API_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED=false`;
+- `AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED=true`.
+
+All gates remain false by default. Create and send operations fail before
+actor resolution, Product reads, invocation persistence, retrieval, or
+provider execution when generation is disabled or kill-switched. Existing
+owned session and history reads remain available through the authenticated API
+boundary when the API itself is enabled.
+
+The current Product projection still limits trusted current facts to listing
+identity/version, title, thumbnail, seller type, eligibility, and transaction
+notice. The runtime may ground answers in approved listing passages, title,
+and transaction notice only. It must return uncertainty or seller handoff for
+price, exact or coarse location, quantity, condition, negotiability, or other
+facts that the approved projection does not supply.
+
+Official API basis:
+
+- Python LangChain v1
+  [Runnable composition](https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.RunnableSequence.html)
+  and asynchronous `ainvoke`;
+- `langchain-core`
+  [typed `with_types` boundaries](https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.Runnable.html);
+- no LangGraph state machine because the application-owned orchestration is
+  already deterministic and bounded.
+
+No migration, gateway, frontend, Product, Auth, runtime flag, provider key, or
+external OpenSearch change is part of AI-CS-02B. Offline evaluation parity
+must remain exact, zero-provider, zero-token, zero-cost, and release
+`BLOCKED`.
 
 ## Goal
 
@@ -496,6 +555,14 @@ Logs and traces include correlation ID, agent session ID, actor app user ID,
 subject listing ID, prompt/tool/schema/model versions, and result status. Raw
 prompts, message bodies, tool payloads, storage URLs, email, phone, and exact
 location are excluded from unrestricted logs and traces.
+
+Create-session request-validation diagnostics are a narrower pre-handler
+exception: they retain only correlation ID, bounded error count, fixed
+location/error categories, allowlisted top-level/subject key presence, and the
+runtime type and length (never the value) of `subject.id`. Their metric labels
+are fixed and contain no arbitrary field name, request value, actor, listing,
+session, header, cookie, token, prompt, or upstream response. The public
+`400 VALIDATION_ERROR` envelope remains unchanged.
 
 ## Test And Evaluation Plan
 
