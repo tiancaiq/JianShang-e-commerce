@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./mvnw
-          ./mvnw -B -pl api-gateway -am -Dtest=NotificationDisabledRouteTests,NotificationRouteIntegrationTests test
+          ./mvnw -B -pl api-gateway -am -Dtest=NotificationDisabledRouteTests,NotificationRouteIntegrationTests -Dsurefire.failIfNoSpecifiedTests=false test
           ./mvnw -B -pl api-gateway -am test
           ./mvnw -B -pl api-gateway -am package -DskipTests
 
