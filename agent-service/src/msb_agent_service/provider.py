@@ -25,6 +25,31 @@ from .schemas import (
 
 LOGGER = logging.getLogger(__name__)
 StructuredResultT = TypeVar("StructuredResultT", bound=BaseModel)
+_DISCOVERY_TOOL_NAMES = {
+    "SEARCH_INDIVIDUAL",
+    "GET_LISTING",
+    "DiscoveryTurnResult",
+}
+
+
+@dataclass(frozen=True)
+class DiscoveryProviderToolCall:
+    """Carries one validated provider tool request without SDK types."""
+
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+@dataclass(frozen=True)
+class DiscoveryProviderResult:
+    """Carries one bounded discovery model turn behind the provider boundary."""
+
+    content: str
+    tool_calls: tuple[DiscoveryProviderToolCall, ...]
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
 
 DEMO_LISTING_ID = "demo-listing-1"
 DEMO_LISTING_TOOL = {
@@ -138,6 +163,128 @@ class OpenAIProvider:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
             )
+        except LlmProviderError as error:
+            self._log_failure(operation, correlation_id, started, error)
+            raise
+        except Exception as error:
+            mapped = classify_openai_error(error)
+            self._log_failure(operation, correlation_id, started, mapped)
+            raise mapped from error
+
+    async def discovery_chat(
+        self,
+        *,
+        instructions: str,
+        input_items: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        maximum_output_tokens: int,
+        maximum_tool_calls: int,
+        correlation_id: str,
+    ) -> DiscoveryProviderResult:
+        """Run one stored-disabled discovery ReAct model step with allowlisted tools."""
+
+        if (
+            not isinstance(instructions, str)
+            or not instructions.strip()
+            or len(instructions.encode("utf-8")) > 16_000
+            or not 64 <= maximum_output_tokens <= 800
+            or not 1 <= maximum_tool_calls <= 6
+            or not tools
+        ):
+            raise invalid_provider_response()
+        try:
+            encoded_input = json.dumps(
+                input_items,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            encoded_tools = json.dumps(
+                tools,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as error:
+            raise invalid_provider_response() from error
+        if (
+            not 1 <= len(encoded_input.encode("utf-8")) <= 64_000
+            or not 1 <= len(encoded_tools.encode("utf-8")) <= 32_000
+        ):
+            raise invalid_provider_response()
+
+        allowed_tool_names = {
+            item.get("name")
+            for item in tools
+            if item.get("type") == "function"
+            and item.get("strict") is True
+            and isinstance(item.get("parameters"), dict)
+            and item.get("name") in _DISCOVERY_TOOL_NAMES
+        }
+        if len(allowed_tool_names) != len(tools):
+            raise invalid_provider_response()
+
+        started = time.monotonic()
+        operation = "marketplace_discovery_turn"
+        try:
+            response = await self._responses().create(
+                model=self._settings.openai_model,
+                instructions=instructions,
+                input=input_items,
+                tools=tools,
+                tool_choice="required",
+                max_output_tokens=maximum_output_tokens,
+                max_tool_calls=maximum_tool_calls,
+                truncation="disabled",
+                store=False,
+            )
+            if getattr(response, "status", "completed") != "completed":
+                raise invalid_provider_response()
+            tool_calls: list[DiscoveryProviderToolCall] = []
+            for item in getattr(response, "output", ()):
+                if getattr(item, "type", None) != "function_call":
+                    continue
+                name = getattr(item, "name", None)
+                call_id = getattr(item, "call_id", None)
+                raw_arguments = getattr(item, "arguments", None)
+                if (
+                    name not in allowed_tool_names
+                    or not isinstance(call_id, str)
+                    or not 1 <= len(call_id) <= 200
+                    or not isinstance(raw_arguments, str)
+                    or len(raw_arguments.encode("utf-8")) > 16_000
+                ):
+                    raise invalid_provider_response()
+                try:
+                    arguments = json.loads(raw_arguments)
+                except (TypeError, ValueError) as error:
+                    raise invalid_provider_response() from error
+                if not isinstance(arguments, dict):
+                    raise invalid_provider_response()
+                tool_calls.append(
+                    DiscoveryProviderToolCall(
+                        call_id=call_id,
+                        name=name,
+                        arguments=arguments,
+                    )
+                )
+            if not tool_calls or len(tool_calls) > maximum_tool_calls:
+                raise invalid_provider_response()
+            content = getattr(response, "output_text", "") or ""
+            if not isinstance(content, str) or len(content.encode("utf-8")) > 8_000:
+                raise invalid_provider_response()
+            input_tokens, output_tokens = _bounded_usage(response)
+            if output_tokens > maximum_output_tokens:
+                raise invalid_provider_response()
+            result = DiscoveryProviderResult(
+                content=content,
+                tool_calls=tuple(tool_calls),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=max(0, round((time.monotonic() - started) * 1_000)),
+            )
+            self._log_success(operation, correlation_id, started, response)
+            return result
         except LlmProviderError as error:
             self._log_failure(operation, correlation_id, started, error)
             raise

@@ -72,6 +72,10 @@ from .listing_proposal_review import (
     listing_proposal_retention_loop,
 )
 from .marketplace_discovery import MarketplaceDiscoveryOrchestrator
+from .marketplace_discovery_runtime import (
+    MarketplaceDiscoveryRuntime,
+    build_marketplace_discovery_runtime,
+)
 from .schemas import (
     AgentMessagePageResponse,
     AgentSessionResponse,
@@ -107,6 +111,10 @@ CustomerServiceRuntimeFactory = Callable[
         CollectorRegistry,
     ],
     CustomerServiceRuntime,
+]
+MarketplaceDiscoveryRuntimeFactory = Callable[
+    [Settings],
+    MarketplaceDiscoveryRuntime,
 ]
 LOGGER = logging.getLogger(__name__)
 _CREATE_SESSION_PATH = "/api/v1/agent/sessions"
@@ -150,6 +158,7 @@ def create_app(
     listing_proposal_generator: ListingProposalGenerator | None = None,
     discovery_orchestrator: MarketplaceDiscoveryOrchestrator | None = None,
     discovery_service_override: MarketplaceDiscoveryService | None = None,
+    discovery_runtime_factory: MarketplaceDiscoveryRuntimeFactory | None = None,
 ) -> FastAPI:
     """Create the service app without performing provider calls at startup."""
 
@@ -191,6 +200,7 @@ def create_app(
     listing_proposal_service: ListingProposalReviewService | None = None
     listing_proposal_retention_task: asyncio.Task[None] | None = None
     customer_service_runtime: CustomerServiceRuntime | None = None
+    discovery_runtime: MarketplaceDiscoveryRuntime | None = None
     create_listing_proposal_repository = (
         listing_proposal_repository_factory
         or ListingProposalRepository.from_agent_repository
@@ -200,6 +210,9 @@ def create_app(
     orchestration_available = False
     create_customer_service_runtime = (
         customer_service_runtime_factory or build_customer_service_runtime
+    )
+    create_discovery_runtime = (
+        discovery_runtime_factory or build_marketplace_discovery_runtime
     )
 
     @asynccontextmanager
@@ -216,6 +229,7 @@ def create_app(
             nonlocal listing_proposal_service
             nonlocal listing_proposal_retention_task
             nonlocal customer_service_runtime
+            nonlocal discovery_runtime
             nonlocal orchestration_available
             if runtime_settings.knowledge_ingestion.enabled:
                 ingestion_runtime = await create_ingestion_runtime(
@@ -274,25 +288,25 @@ def create_app(
                     runtime_identity_client
                     or ActorIdentityClient(runtime_settings.discovery_api)
                 )
-                if (
-                    runtime_settings.discovery_api.generation_enabled
-                    and discovery_orchestrator is None
-                    and discovery_service_override is None
-                ):
-                    raise RuntimeError(
-                        "Enabled marketplace discovery requires an injected "
-                        "LangChain orchestrator"
-                    )
                 if discovery_service_override is not None:
                     discovery_service = discovery_service_override
                 else:
+                    selected_discovery_orchestrator = discovery_orchestrator
+                    if (
+                        runtime_settings.discovery_api.generation_enabled
+                        and selected_discovery_orchestrator is None
+                    ):
+                        discovery_runtime = create_discovery_runtime(runtime_settings)
+                        selected_discovery_orchestrator = (
+                            discovery_runtime.orchestrator
+                        )
                     discovery_repository = DiscoveryPersistenceRepository(
                         persistence_repository
                     )
                     await discovery_repository.validate_schema()
                     discovery_service = MarketplaceDiscoveryService(
                         discovery_repository,
-                        discovery_orchestrator,
+                        selected_discovery_orchestrator,
                     )
             if runtime_settings.listing_proposal_api.enabled:
                 if persistence_repository is None:
@@ -345,6 +359,8 @@ def create_app(
                 await close_open_search_client(knowledge_client)
             if customer_service_runtime is not None:
                 await customer_service_runtime.close()
+            if discovery_runtime is not None:
+                await discovery_runtime.close()
 
     app = FastAPI(title="MSB Agent Service", version="0.9.0", lifespan=lifespan)
     app.mount("/metrics", make_asgi_app(registry=metrics.registry))

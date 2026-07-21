@@ -45,12 +45,16 @@ jobs:
             "agent-service/src/msb_agent_service/discovery_persistence.py" \
             "agent-service/src/msb_agent_service/marketplace_discovery.py" \
             "agent-service/src/msb_agent_service/marketplace_discovery_evaluation.py" \
+            "agent-service/src/msb_agent_service/marketplace_discovery_runtime.py" \
+            "agent-service/src/msb_agent_service/provider.py" \
             "agent-service/src/msb_agent_service/schemas.py" \
             "agent-service/tests/test_api.py" \
             "agent-service/tests/test_discovery_api.py" \
             "agent-service/tests/test_discovery_persistence_integration.py" \
             "agent-service/tests/test_marketplace_discovery.py" \
             "agent-service/tests/test_marketplace_discovery_evaluation.py" \
+            "agent-service/tests/test_marketplace_discovery_runtime.py" \
+            "agent-service/tests/test_provider.py" \
             "api-gateway/src/main/java/com/msb/ecom/api_gateway/routes/Routes.java" \
             "api-gateway/src/main/resources/application.properties" \
             "api-gateway/src/test/java/com/msb/ecom/api_gateway/AgentDiscoveryRouteIntegrationTests.java" \
@@ -147,6 +151,7 @@ jobs:
           agent-service.tests.test_discovery_api
           agent-service.tests.test_marketplace_discovery
           agent-service.tests.test_marketplace_discovery_evaluation
+          agent-service.tests.test_marketplace_discovery_runtime
           -v
 
       - name: Run full agent suite
@@ -300,6 +305,8 @@ jobs:
           grep -R "GATEWAY_FEATURE_AGENT_DISCOVERY:false" api-gateway/src/main/resources
           grep -R "GATEWAY_FEATURE_AGENT:false" api-gateway/src/main/resources
           grep -R "AGENT_DISCOVERY_API_ENABLED" agent-service/src/msb_agent_service/config.py
+          grep -R "build_marketplace_discovery_runtime" agent-service/src/msb_agent_service/api.py agent-service/src/msb_agent_service/marketplace_discovery_runtime.py
+          grep -R "store.*False" agent-service/src/msb_agent_service/marketplace_discovery_runtime.py
           grep -F "GATEWAY_FEATURE_AGENT_DISCOVERY: \${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}" docker-compose.demo.yml
           grep -F "AGENT_DISCOVERY_API_ENABLED: \${AGENT_DISCOVERY_API_ENABLED:-false}" docker-compose.demo.yml
           grep -F "AGENT_DISCOVERY_KILL_SWITCH_ENABLED: \${AGENT_DISCOVERY_KILL_SWITCH_ENABLED:-false}" docker-compose.demo.yml

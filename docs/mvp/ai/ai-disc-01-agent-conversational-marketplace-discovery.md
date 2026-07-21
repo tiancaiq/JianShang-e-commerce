@@ -62,10 +62,34 @@ uses `GATEWAY_FEATURE_AGENT_DISCOVERY`, also false by default. The existing
 `GATEWAY_FEATURE_AGENT` route now owns only listing customer-service sessions
 and listing proposals; it cannot expose `/api/v1/agent/discovery/**`.
 
-Demo canaries must use the explicit `demo-ai-discovery` frontend build when
-the approved discovery chain is intentionally activated. The default Docker
-build remains production, and the `demo-ai` build keeps discovery hidden so
-listing customer-service can stay independently deployable.
+`AI-DISC-STAB-P1-01` adds the explicit Angular `demo-ai-discovery` build and
+serve configuration. It is the only committed frontend configuration with
+both `features.aiAssistant=true` and `features.aiDiscovery=true`; every other
+feature retains its safe value. Docker still defaults
+`FRONTEND_BUILD_CONFIGURATION` to `production` and can select this build only
+through an explicit build argument. This source configuration does not enable
+the Agent or gateway discovery flags, configure a provider, authorize rollout,
+or change the release decision from `BLOCKED`.
+
+`AI-DISC-STAB-P1-02 Production LangChain Discovery Orchestrator Composition`
+closes the Agent startup composition gap exposed by the disabled canary. When,
+and only when, the complete Discovery API/orchestration/Product-tool/provider
+gate is valid and the global kill switch is clear, `create_app` now composes
+the existing `MarketplaceDiscoveryOrchestrator` from the Agent-owned
+`OpenAIProvider`, a strict request-scoped LangChain chat adapter, and the
+approved public Product search/detail client. The adapter uses Responses with
+`store=false`, strict allowlisted tools, the existing 800-output-token/six-tool
+and eight-second provider bounds, and no LangChain memory or persistence
+types. Provider ownership is closed with the application lifespan.
+
+Normal default-off startup does not construct the Product client, provider,
+or Discovery runtime and makes no call. Partial configuration remains
+deferred/fail-closed; missing provider configuration fails startup before any
+Product or provider request. Offline fake-transport tests prove the full
+composition, request-scoped correlation, safe resource closure, and
+coexistence with listing customer service. This stabilization does not change
+the AI counter (`0/3`), activate any flag, add production evidence, or change
+the release decision from `BLOCKED`.
 
 ## AI-DISC-01C status
 

@@ -27,8 +27,14 @@ class FakeFunctionCall:
 
 
 class FakeResponses:
-    def __init__(self, parsed_results: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        parsed_results: list[Any] | None = None,
+        *,
+        create_output: list[Any] | None = None,
+    ) -> None:
         self.parsed_results = parsed_results or []
+        self.create_output = create_output
         self.parse_calls: list[dict[str, Any]] = []
         self.create_calls: list[dict[str, Any]] = []
         self.status: str | None = None
@@ -44,7 +50,12 @@ class FakeResponses:
 
     async def create(self, **kwargs: Any) -> Any:
         self.create_calls.append(kwargs)
-        return SimpleNamespace(output=[FakeFunctionCall()], usage=None)
+        return SimpleNamespace(
+            output=self.create_output or [FakeFunctionCall()],
+            output_text="",
+            usage=None,
+            status="completed",
+        )
 
 
 class FakeClient:
@@ -53,6 +64,51 @@ class FakeClient:
 
 
 class OpenAIProviderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_chat_uses_strict_stored_disabled_tool_boundary(
+        self,
+    ) -> None:
+        function_call = SimpleNamespace(
+            type="function_call",
+            name="SEARCH_INDIVIDUAL",
+            arguments='{"q":"pillow","limit":20}',
+            call_id="discovery-call-1",
+        )
+        responses = FakeResponses(create_output=[function_call])
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+
+        result = await provider.discovery_chat(
+            instructions="Use only the supplied public marketplace tools.",
+            input_items=[{"role": "user", "content": "Find a pillow"}],
+            tools=[
+                {
+                    "type": "function",
+                    "name": "SEARCH_INDIVIDUAL",
+                    "description": "Search public individual listings.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            ],
+            maximum_output_tokens=800,
+            maximum_tool_calls=6,
+            correlation_id="disc-provider-1",
+        )
+
+        self.assertEqual("SEARCH_INDIVIDUAL", result.tool_calls[0].name)
+        call = responses.create_calls[0]
+        self.assertFalse(call["store"])
+        self.assertEqual("disabled", call["truncation"])
+        self.assertEqual("required", call["tool_choice"])
+        self.assertEqual(800, call["max_output_tokens"])
+        self.assertEqual(6, call["max_tool_calls"])
+
     async def test_customer_service_answer_is_typed_bounded_and_not_stored(
         self,
     ) -> None:
