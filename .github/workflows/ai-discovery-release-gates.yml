@@ -56,6 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           grep -F '"langchain-core==1.4.9"' agent-service/pyproject.toml
+          if grep -E '"langchain[<>=]|"langgraph[<>=]' agent-service/pyproject.toml; then
+            echo "Unexpected langchain or LangGraph dependency present."
+            exit 1
+          fi
           python -m pip install -e "./agent-service[dev]"
 
       - name: Run focused discovery suites
