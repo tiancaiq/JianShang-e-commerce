@@ -2,6 +2,7 @@ import { Route, Routes } from '@angular/router';
 import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 import { environment } from '../environments/environment';
+import { NOTIFICATION_CENTER_DEFAULT_ENABLED } from './features/account/notification-center.capability';
 
 // Keeps deferred components available for explicit tests without exposing them in the MVP route tree.
 export function sellerInventoryRoute(enabled: boolean): Route {
@@ -70,6 +71,16 @@ export function buyerAddressesRoute(enabled: boolean): Route {
       loadComponent: () => import('./features/account/address-book.component').then(m => m.AddressBookComponent),
     }
   : { path: 'account/addresses', redirectTo: '/account', pathMatch: 'full' };
+}
+
+export function notificationCenterRoute(enabled: boolean): Route {
+  return enabled ? {
+      path: 'account/notifications',
+      canActivate: [authGuard],
+      loadComponent: () => import('./features/account/notification-center.component')
+        .then(m => m.NotificationCenterComponent),
+    }
+  : { path: 'account/notifications', redirectTo: '/account', pathMatch: 'full' };
 }
 
 export function categoryGuidanceRoute(enabled: boolean): Route {
@@ -189,6 +200,7 @@ export const routes: Routes = [
       { path: 'account', canActivate: [authGuard], loadComponent: () => import('./features/account/account.component').then(m => m.AccountComponent) },
       { path: 'account/profile', canActivate: [authGuard], loadComponent: () => import('./features/account/profile.component').then(m => m.ProfileComponent) },
       buyerAddressesRoute(environment.features.buyerAddresses),
+      notificationCenterRoute(NOTIFICATION_CENTER_DEFAULT_ENABLED),
       { path: 'account/liked', canActivate: [authGuard], loadComponent: () => import('./features/account/liked-listings.component').then(m => m.LikedListingsComponent) },
       { path: 'account/seller-profile', canActivate: [authGuard], loadComponent: () => import('./features/seller/individual-seller-activation.component').then(m => m.IndividualSellerActivationComponent) },
       ...agentMessageRoutes(environment.features.aiAssistant),

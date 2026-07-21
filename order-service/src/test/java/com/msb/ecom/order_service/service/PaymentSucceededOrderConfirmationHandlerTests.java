@@ -56,6 +56,21 @@ class PaymentSucceededOrderConfirmationHandlerTests {
                 org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void logReferenceUsesStableHashWithoutRawIdentifier() {
+        String rawId = "01K00000000000000000000900";
+
+        String reference = PaymentSucceededOrderConfirmationHandler.logReference(rawId);
+
+        assertThat(reference)
+                .hasSize(12)
+                .doesNotContain(rawId);
+        assertThat(PaymentSucceededOrderConfirmationHandler.logReference(rawId))
+                .isEqualTo(reference);
+        assertThat(PaymentSucceededOrderConfirmationHandler.logReference(null))
+                .isEqualTo("unavailable");
+    }
+
     private PaymentEventEnvelope event() {
         return new PaymentEventEnvelope(
                 "01K00000000000000000000900",

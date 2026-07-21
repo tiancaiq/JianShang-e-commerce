@@ -117,7 +117,7 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM order_outbox_events
                 WHERE event_type = 'order.confirmed'
-                """, Integer.class)).isEqualTo(1);
+                """, Integer.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("""
                 SELECT status FROM checkout_sessions WHERE id = ?
                 """, String.class, CHECKOUT_ID)).isEqualTo("COMPLETED");
@@ -125,13 +125,32 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
                 SELECT state FROM processed_payment_events
                 WHERE consumer_name = ? AND event_id = ?
                 """, String.class, consumerName(), id(900))).isEqualTo("COMPLETED");
-        String payload = jdbc.queryForObject("""
+        String v1Payload = jdbc.queryForObject("""
                 SELECT payload_json FROM order_outbox_events
-                WHERE event_type = 'order.confirmed'
+                WHERE event_type = 'order.confirmed' AND event_version = 1
                 """, String.class);
-        assertThat(payload)
+        assertThat(v1Payload)
                 .contains(confirmed.orderId(), CHECKOUT_ID, PAYMENT_ID)
                 .doesNotContain("1 Main St", "+15550123456", BUYER_ID);
+        String v2Payload = jdbc.queryForObject("""
+                SELECT payload_json FROM order_outbox_events
+                WHERE event_type = 'order.confirmed' AND event_version = 2
+                """, String.class);
+        assertThat(v2Payload)
+                .contains(confirmed.orderId(), CHECKOUT_ID, PAYMENT_ID, BUYER_ID)
+                .doesNotContain("1 Main St", "+15550123456", "Buyer");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM order_outbox_events e
+                JOIN orders o ON o.id = e.aggregate_id
+                WHERE e.event_type = 'order.confirmed'
+                  AND e.event_version = 2
+                  AND e.aggregate_type = 'ORDER'
+                  AND JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.orderId')) = e.aggregate_id
+                  AND JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.recipientUserId')) = o.buyer_id
+                  AND e.correlation_id = ?
+                  AND e.causation_id = ?
+                """, Integer.class, "correlation-order-900", id(900))).isEqualTo(1);
     }
 
     @Test
@@ -294,7 +313,7 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
         OrderConfirmationRepository failingOrders = spy(orders);
         doThrow(new RuntimeException("simulated persistence failure"))
                 .when(failingOrders)
-                .insertOutbox(any(), any(), any(), any(), any(), any());
+                .insertNotificationOutboxV2(any(), any(), any(), any(), any(), any());
 
         OrderConfirmationResult first =
                 handler(inventory, failingOrders, NOW).handle(event(912));

@@ -44,6 +44,9 @@ public class Routes {
         @Value("${service.agent.url}")
         private String agentServiceUrl;
 
+        @Value("${service.notification.url}")
+        private String notificationServiceUrl;
+
         @Bean
         @Order(0)
         @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent", havingValue = "true")
@@ -218,6 +221,39 @@ public class Routes {
                 return disabledRoute("disabled_business_order_service",
                                 RequestPredicates.path("/api/v1/businesses/*/orders")
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/orders/**")));
+        }
+
+        /**
+         * Relays the authenticated buyer notification-center API without accepting
+         * browser-supplied actor identity headers.
+         */
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "notifications", havingValue = "true")
+        public RouterFunction<ServerResponse> notificationServiceRoute() {
+                return route("notification_service")
+                                .route(RequestPredicates.path("/api/v1/notifications")
+                                                .or(RequestPredicates.path("/api/v1/notifications/**")),
+                                                http(notificationServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("notificationServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "notifications", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledNotificationServiceRoute() {
+                return disabledRoute(
+                                "disabled_notification_service",
+                                RequestPredicates.path("/api/v1/notifications")
+                                                .or(RequestPredicates.path("/api/v1/notifications/**")));
         }
 
         @Bean
