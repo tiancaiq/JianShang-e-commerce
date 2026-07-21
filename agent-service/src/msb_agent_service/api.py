@@ -29,6 +29,7 @@ from .customer_service_api import (
     DeferredQuestionAnswerer,
     ListingEligibilityClient,
     QuestionAnswerer,
+    decode_cursor,
     map_persistence_error,
 )
 from .customer_service_metrics import CustomerServiceApiMetrics
@@ -36,6 +37,17 @@ from .customer_service_runtime import (
     CustomerServiceRuntime,
     build_customer_service_runtime,
 )
+from .discovery_api import (
+    CreateDiscoverySessionRequest,
+    DiscoveryApiError,
+    DiscoveryApiErrorCode,
+    DiscoveryHistoryPage,
+    DiscoverySessionResponse,
+    MarketplaceDiscoveryService,
+    SendDiscoveryMessageRequest,
+    SendDiscoveryMessageResponse,
+)
+from .discovery_persistence import DiscoveryPersistenceRepository
 from .knowledge_ingestion_runtime import (
     KnowledgeIngestionRuntime,
     KnowledgeIngestionStatus,
@@ -59,6 +71,7 @@ from .listing_proposal_review import (
     ListingProposalReviewService,
     listing_proposal_retention_loop,
 )
+from .marketplace_discovery import MarketplaceDiscoveryOrchestrator
 from .schemas import (
     AgentMessagePageResponse,
     AgentSessionResponse,
@@ -135,6 +148,8 @@ def create_app(
         ListingProposalRepositoryFactory | None
     ) = None,
     listing_proposal_generator: ListingProposalGenerator | None = None,
+    discovery_orchestrator: MarketplaceDiscoveryOrchestrator | None = None,
+    discovery_service_override: MarketplaceDiscoveryService | None = None,
 ) -> FastAPI:
     """Create the service app without performing provider calls at startup."""
 
@@ -143,6 +158,9 @@ def create_app(
         persistence_enabled=runtime_settings.agent_persistence.enabled
     )
     runtime_settings.listing_proposal_api.validate(
+        persistence_enabled=runtime_settings.agent_persistence.enabled
+    )
+    runtime_settings.discovery_api.validate(
         persistence_enabled=runtime_settings.agent_persistence.enabled
     )
     metrics = KnowledgeIndexMetrics()
@@ -167,6 +185,8 @@ def create_app(
     api_metrics = CustomerServiceApiMetrics(metrics.registry)
     listing_proposal_metrics = ListingProposalMetrics(metrics.registry)
     customer_service: AgentCustomerService | None = None
+    discovery_repository: DiscoveryPersistenceRepository | None = None
+    discovery_service: MarketplaceDiscoveryService | None = None
     listing_proposal_repository: ListingProposalRepositoryProtocol | None = None
     listing_proposal_service: ListingProposalReviewService | None = None
     listing_proposal_retention_task: asyncio.Task[None] | None = None
@@ -188,6 +208,8 @@ def create_app(
             nonlocal ingestion_runtime
             nonlocal persistence_repository
             nonlocal customer_service
+            nonlocal discovery_repository
+            nonlocal discovery_service
             nonlocal runtime_identity_client
             nonlocal runtime_listing_client
             nonlocal listing_proposal_repository
@@ -243,6 +265,35 @@ def create_app(
                     runtime_listing_client,
                     selected_answerer,
                 )
+            if runtime_settings.discovery_api.enabled:
+                if persistence_repository is None:
+                    raise RuntimeError(
+                        "Discovery API requires initialized persistence"
+                    )
+                runtime_identity_client = (
+                    runtime_identity_client
+                    or ActorIdentityClient(runtime_settings.discovery_api)
+                )
+                if (
+                    runtime_settings.discovery_api.generation_enabled
+                    and discovery_orchestrator is None
+                    and discovery_service_override is None
+                ):
+                    raise RuntimeError(
+                        "Enabled marketplace discovery requires an injected "
+                        "LangChain orchestrator"
+                    )
+                if discovery_service_override is not None:
+                    discovery_service = discovery_service_override
+                else:
+                    discovery_repository = DiscoveryPersistenceRepository(
+                        persistence_repository
+                    )
+                    await discovery_repository.validate_schema()
+                    discovery_service = MarketplaceDiscoveryService(
+                        discovery_repository,
+                        discovery_orchestrator,
+                    )
             if runtime_settings.listing_proposal_api.enabled:
                 if persistence_repository is None:
                     raise RuntimeError(
@@ -364,6 +415,18 @@ def create_app(
     async def listing_proposal_error_handler(
         request: Request,
         error: ListingProposalApiError,
+    ) -> JSONResponse:
+        return _error_response(
+            request,
+            error.status_code,
+            error.code.value,
+            error.public_message,
+        )
+
+    @app.exception_handler(DiscoveryApiError)
+    async def discovery_api_error_handler(
+        request: Request,
+        error: DiscoveryApiError,
     ) -> JSONResponse:
         return _error_response(
             request,
@@ -514,6 +577,17 @@ def create_app(
             else "ORCHESTRATION_DEFERRED"
         )
         customer_service_ready = customer_service_status in {"DISABLED", "READY"}
+        discovery_status = (
+            "DISABLED"
+            if not runtime_settings.discovery_api.enabled
+            else "READY"
+            if (
+                discovery_service is not None
+                and runtime_settings.discovery_api.generation_enabled
+            )
+            else "ORCHESTRATION_DEFERRED"
+        )
+        discovery_ready = discovery_status in {"DISABLED", "READY"}
         if (
             runtime_settings.openai_configured
             and knowledge_ready
@@ -521,6 +595,7 @@ def create_app(
             and category_ready
             and persistence_ready
             and customer_service_ready
+            and discovery_ready
         ):
             return ReadinessResponse(
                 status="READY",
@@ -530,6 +605,7 @@ def create_app(
                 categoryGuidanceIntake=category_status,
                 agentPersistence=persistence_status,
                 customerServiceApi=customer_service_status,
+                marketplaceDiscoveryApi=discovery_status,
             )
         response = ReadinessResponse(
             status="NOT_READY",
@@ -543,6 +619,7 @@ def create_app(
             categoryGuidanceIntake=category_status,
             agentPersistence=persistence_status,
             customerServiceApi=customer_service_status,
+            marketplaceDiscoveryApi=discovery_status,
         )
         return JSONResponse(
             status_code=503,
@@ -587,6 +664,60 @@ def create_app(
                 AgentApiErrorCode.ORCHESTRATION_UNAVAILABLE,
                 503,
                 "The customer-service answer engine is not available.",
+            )
+
+
+    async def discovery_actor(
+        request: Request,
+        authorization: str | None,
+    ) -> str:
+        """Resolve the actor only after the discovery API capability gate."""
+
+        if (
+            not runtime_settings.discovery_api.enabled
+            or runtime_identity_client is None
+            or discovery_service is None
+        ):
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Marketplace discovery is not available.",
+            )
+        try:
+            return await runtime_identity_client.resolve(
+                authorization,
+                request.state.correlation_id,
+            )
+        except AgentApiError as error:
+            if error.status_code == 401:
+                raise DiscoveryApiError(
+                    DiscoveryApiErrorCode.AUTHENTICATION_REQUIRED,
+                    401,
+                    "Authentication is required.",
+                ) from error
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.UNAVAILABLE,
+                503,
+                "Marketplace discovery is temporarily unavailable.",
+            ) from error
+
+    def require_discovery_generation() -> None:
+        """Stop discovery writes before actor, persistence, Product, or model calls."""
+
+        if not runtime_settings.discovery_api.enabled:
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.FEATURE_DISABLED,
+                404,
+                "Marketplace discovery is not available.",
+            )
+        if (
+            not runtime_settings.discovery_api.generation_enabled
+            or discovery_service is None
+        ):
+            raise DiscoveryApiError(
+                DiscoveryApiErrorCode.UNAVAILABLE,
+                503,
+                "Marketplace discovery is temporarily unavailable.",
             )
 
     async def proposal_actor(
@@ -760,6 +891,120 @@ def create_app(
         except Exception as error:
             api_metrics.record(
                 "send_message",
+                _metric_result(error),
+                time.perf_counter() - started,
+            )
+            raise
+
+
+    @app.post(
+        "/api/v1/agent/discovery/sessions",
+        response_model=DiscoverySessionResponse,
+    )
+    async def create_discovery_session(
+        body: CreateDiscoverySessionRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> DiscoverySessionResponse:
+        """Create/resume one actor session or explicitly begin a New search."""
+
+        started = time.perf_counter()
+        try:
+            require_discovery_generation()
+            actor_user_id = await discovery_actor(request, authorization)
+            assert discovery_service is not None
+            response = await discovery_service.create_session(
+                actor_user_id=actor_user_id,
+                new_search=body.new_search,
+            )
+            api_metrics.record(
+                "discovery_create_session",
+                "SUCCEEDED",
+                time.perf_counter() - started,
+            )
+            return response
+        except Exception as error:
+            api_metrics.record(
+                "discovery_create_session",
+                _metric_result(error),
+                time.perf_counter() - started,
+            )
+            raise
+
+    @app.get(
+        "/api/v1/agent/discovery/sessions/{sessionId}",
+        response_model=DiscoverySessionResponse,
+    )
+    async def get_discovery_session(
+        sessionId: Ulid,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> DiscoverySessionResponse:
+        """Return only the authenticated actor's discovery preference state."""
+
+        actor_user_id = await discovery_actor(request, authorization)
+        assert discovery_service is not None
+        return await discovery_service.get_session(
+            actor_user_id=actor_user_id,
+            session_id=sessionId,
+        )
+
+    @app.get(
+        "/api/v1/agent/discovery/sessions/{sessionId}/messages",
+        response_model=DiscoveryHistoryPage,
+    )
+    async def get_discovery_messages(
+        sessionId: Ulid,
+        request: Request,
+        cursor: str | None = Query(default=None, max_length=300),
+        limit: int = Query(default=50, ge=1, le=100),
+        authorization: str | None = Header(default=None),
+    ) -> DiscoveryHistoryPage:
+        """Read an actor-isolated keyset page of safe structured discovery turns."""
+
+        actor_user_id = await discovery_actor(request, authorization)
+        assert discovery_service is not None
+        return await discovery_service.list_messages(
+            actor_user_id=actor_user_id,
+            session_id=sessionId,
+            limit=limit,
+            cursor=decode_cursor(cursor),
+        )
+
+    @app.post(
+        "/api/v1/agent/discovery/sessions/{sessionId}/messages",
+        response_model=SendDiscoveryMessageResponse,
+    )
+    async def send_discovery_message(
+        sessionId: Ulid,
+        body: SendDiscoveryMessageRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> SendDiscoveryMessageResponse:
+        """Run one idempotent discovery turn without any automatic action."""
+
+        started = time.perf_counter()
+        try:
+            require_discovery_generation()
+            actor_user_id = await discovery_actor(request, authorization)
+            assert discovery_service is not None
+            response = await discovery_service.send_message(
+                actor_user_id=actor_user_id,
+                session_id=sessionId,
+                client_message_id=body.client_message_id,
+                expected_preference_version=body.expected_preference_version,
+                body=body.body,
+                correlation_id=request.state.correlation_id,
+            )
+            api_metrics.record(
+                "discovery_send_message",
+                "SUCCEEDED",
+                time.perf_counter() - started,
+            )
+            return response
+        except Exception as error:
+            api_metrics.record(
+                "discovery_send_message",
                 _metric_result(error),
                 time.perf_counter() - started,
             )

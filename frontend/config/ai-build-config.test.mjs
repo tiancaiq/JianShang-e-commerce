@@ -13,9 +13,14 @@ test('production and development keep the Agent UI disabled', () => {
 
   assert.equal(build.defaultConfiguration, 'production');
   assert.match(read('src/environments/environment.ts'), /aiAssistant:\s*false/);
+  assert.match(read('src/environments/environment.ts'), /aiDiscovery:\s*false/);
   assert.match(
     read('src/environments/environment.development.ts'),
     /aiAssistant:\s*false/,
+  );
+  assert.match(
+    read('src/environments/environment.development.ts'),
+    /aiDiscovery:\s*false/,
   );
 });
 
@@ -39,6 +44,7 @@ test('demo-ai is the only explicit Agent UI build opt-in', () => {
   const demo = read('src/environments/environment.demo-ai.ts');
   assert.match(demo, /production:\s*true/);
   assert.match(demo, /aiAssistant:\s*true/);
+  assert.match(demo, /aiDiscovery:\s*false/);
   assert.doesNotMatch(demo, /https?:\/\//);
 });
 
