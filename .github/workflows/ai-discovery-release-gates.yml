@@ -32,7 +32,10 @@ jobs:
           set -euo pipefail
           git merge-base --is-ancestor 3d6e29aa1148e24529654c7565224953941eacc9 HEAD
           changed="$(git diff --name-only 3d6e29aa1148e24529654c7565224953941eacc9..HEAD)"
-          test "$changed" = ".github/workflows/ai-discovery-release-gates.yml"
+          expected="$(printf '%s\n' \
+            ".github/workflows/ai-discovery-release-gates.yml" \
+            "agent-service/tests/test_discovery_persistence_integration.py")"
+          test "$changed" = "$expected"
           git diff --check 3d6e29aa1148e24529654c7565224953941eacc9..HEAD
 
   agent:
