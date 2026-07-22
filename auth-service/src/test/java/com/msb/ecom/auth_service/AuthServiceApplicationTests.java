@@ -1238,7 +1238,8 @@ class AuthServiceApplicationTests {
                 .andExpect(jsonPath("$.data.permissions[1]").value("INVENTORY_VIEW"))
                 .andExpect(jsonPath("$.data.permissions[2]").value("INVENTORY_MANAGE"))
                 .andExpect(jsonPath("$.data.permissions[3]").value("ORDER_VIEW"))
-                .andExpect(jsonPath("$.data.permissions[4]").value("ORDER_FINANCE_VIEW"))
+                .andExpect(jsonPath("$.data.permissions[4]").value("ORDER_FULFILL"))
+                .andExpect(jsonPath("$.data.permissions[5]").value("ORDER_FINANCE_VIEW"))
                 .andExpect(jsonPath("$.data.store.businessId").value(businessId))
                 .andExpect(jsonPath("$.data.store.slug").value("business-" + businessId.toLowerCase()))
                 .andExpect(jsonPath("$.data.store.name").value("Store Context LLC"));

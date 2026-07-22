@@ -41,6 +41,69 @@
               ],
               "outputHashing": "all"
             },
+            "demo-ai": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-ai.ts"
+                }
+              ]
+            },
+            "demo-ai-discovery": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-ai-discovery.ts"
+                }
+              ]
+            },
+            "demo-cart": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-cart.ts"
+                }
+              ]
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,
@@ -60,6 +123,15 @@
           "configurations": {
             "production": {
               "buildTarget": "frontend:build:production"
+            },
+            "demo-ai": {
+              "buildTarget": "frontend:build:demo-ai"
+            },
+            "demo-ai-discovery": {
+              "buildTarget": "frontend:build:demo-ai-discovery"
+            },
+            "demo-cart": {
+              "buildTarget": "frontend:build:demo-cart"
             },
             "development": {
               "buildTarget": "frontend:build:development"

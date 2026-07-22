@@ -489,7 +489,22 @@ class AgentCustomerService:
                     type(cleanup_error).__name__,
                 )
             raise
-        except Exception:
+        except Exception as error:
+            safe_error_detail: object = None
+            errors = getattr(error, "errors", None)
+            if callable(errors):
+                try:
+                    safe_error_detail = errors(include_input=False)
+                except TypeError:
+                    safe_error_detail = errors()
+            LOGGER.warning(
+                "Agent invocation failed before response "
+                "invocationId=%s correlationId=%s errorType=%s detail=%s",
+                begin.invocation.invocation_id,
+                correlation_id,
+                type(error).__name__,
+                safe_error_detail,
+            )
             await self._record_failure(
                 begin.invocation,
                 actor_user_id,

@@ -16,6 +16,7 @@ public class RestBusinessOrderAuthorizationClient
         implements BusinessOrderAuthorizationClient {
 
     private static final String ORDER_VIEW = "ORDER_VIEW";
+    private static final String ORDER_FULFILL = "ORDER_FULFILL";
     private static final String ORDER_FINANCE_VIEW = "ORDER_FINANCE_VIEW";
 
     private final RestClient client;
@@ -33,6 +34,33 @@ public class RestBusinessOrderAuthorizationClient
     // Delegates active business membership to Auth while preserving the actor credential.
     @Override
     public Access authorize(String accessToken, String businessId) {
+        return authorize(
+                accessToken,
+                businessId,
+                ORDER_VIEW,
+                false,
+                "BUSINESS_ORDERS_DEPENDENCY_UNAVAILABLE",
+                "Business orders are temporarily unavailable.");
+    }
+
+    @Override
+    public Access authorizeFulfillment(String accessToken, String businessId) {
+        return authorize(
+                accessToken,
+                businessId,
+                ORDER_FULFILL,
+                true,
+                "BUSINESS_ORDER_ACCEPTANCE_DEPENDENCY_UNAVAILABLE",
+                "Business order acceptance is temporarily unavailable.");
+    }
+
+    private Access authorize(
+            String accessToken,
+            String businessId,
+            String requiredPermission,
+            boolean hideAuthenticationDenial,
+            String unavailableCode,
+            String unavailableMessage) {
         try {
             MembershipEnvelope envelope = client.get()
                     .uri("/api/v1/businesses/{businessId}/membership/me", businessId)
@@ -44,7 +72,7 @@ public class RestBusinessOrderAuthorizationClient
                     || !businessId.equals(membership.businessId())
                     || !"ACTIVE".equals(membership.status())
                     || membership.permissions() == null
-                    || !membership.permissions().contains(ORDER_VIEW)) {
+                    || !membership.permissions().contains(requiredPermission)) {
                 throw notFound();
             }
             return new Access(
@@ -53,12 +81,15 @@ public class RestBusinessOrderAuthorizationClient
                     membership.role(),
                     membership.permissions().contains(ORDER_FINANCE_VIEW));
         } catch (HttpClientErrorException exception) {
-            if (exception.getStatusCode().is4xxClientError()) {
+            if (exception.getStatusCode() == HttpStatus.NOT_FOUND
+                    || (hideAuthenticationDenial
+                        && (exception.getStatusCode() == HttpStatus.UNAUTHORIZED
+                            || exception.getStatusCode() == HttpStatus.FORBIDDEN))) {
                 throw notFound();
             }
-            throw unavailable();
+            throw unavailable(unavailableCode, unavailableMessage);
         } catch (RestClientException exception) {
-            throw unavailable();
+            throw unavailable(unavailableCode, unavailableMessage);
         }
     }
 
@@ -69,11 +100,11 @@ public class RestBusinessOrderAuthorizationClient
                 "Business order was not found.");
     }
 
-    private BusinessOrderException unavailable() {
+    private BusinessOrderException unavailable(String code, String message) {
         return new BusinessOrderException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "BUSINESS_ORDERS_DEPENDENCY_UNAVAILABLE",
-                "Business orders are temporarily unavailable.");
+                code,
+                message);
     }
 
     record MembershipEnvelope(Membership data) {

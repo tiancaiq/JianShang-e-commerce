@@ -5,6 +5,7 @@ import com.msb.ecom.order_service.model.BuyerOrderView;
 import org.springframework.http.HttpStatus;
 
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.regex.Pattern;
@@ -40,7 +41,7 @@ final class BuyerOrderCursorCodec {
                 throw invalidCursor();
             }
             return new Cursor(Instant.parse(parts[1]), parts[2]);
-        } catch (IllegalArgumentException exception) {
+        } catch (IllegalArgumentException | DateTimeException exception) {
             throw invalidCursor();
         }
     }

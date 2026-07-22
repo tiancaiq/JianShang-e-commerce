@@ -10,7 +10,6 @@ import tiktoken
 from openai import AsyncOpenAI
 
 from .errors import classify_openai_error
-from .knowledge_ingestion_metrics import KnowledgeIngestionMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,18 @@ class EmbeddingProvider(Protocol):
     async def close(self) -> None: ...
 
 
+class EmbeddingMetrics(Protocol):
+    """Accepts bounded embedding observations without coupling runtime owners."""
+
+    def record_embedding(
+        self,
+        result: str,
+        duration_seconds: float,
+        *,
+        input_tokens: int = 0,
+    ) -> None: ...
+
+
 class OpenAIEmbeddingProvider:
     """Calls the bounded online Embeddings API and validates every vector."""
 
@@ -60,7 +71,7 @@ class OpenAIEmbeddingProvider:
         maximum_inputs: int,
         maximum_input_tokens: int,
         maximum_total_tokens: int,
-        metrics: KnowledgeIngestionMetrics,
+        metrics: EmbeddingMetrics,
         client: Any | None = None,
         encoding: Any | None = None,
     ) -> None:

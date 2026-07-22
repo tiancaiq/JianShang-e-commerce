@@ -142,10 +142,15 @@ Credentialed CORS is restricted to configured first-party origins:
 ```text
 GATEWAY_CORS_ALLOWED_ORIGINS=http://localhost:4200
 GATEWAY_LOGOUT_REDIRECT_URI=http://localhost:4200/
+KEYCLOAK_PUBLIC_BASE_URI=http://localhost:8181
 KEYCLOAK_BROWSER_ISSUER_URI=http://localhost:8181/realms/msb-local
 ```
 
 Wildcard credentialed CORS is no longer used.
+`KEYCLOAK_PUBLIC_BASE_URI` configures Keycloak's canonical public URL so tokens
+issued through an internal container backchannel still carry the same issuer
+that application services validate. Set it to the externally reachable
+Keycloak base URL in VM environments.
 Set `GATEWAY_LOGOUT_REDIRECT_URI` to the deployed marketplace URL in VM or
 demo environments. The gateway derives its Keycloak logout endpoint from
 `KEYCLOAK_BROWSER_ISSUER_URI` unless `msb.gateway.auth.oidc-logout-uri` is

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -16,6 +17,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withResourceNotFound;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class RestBusinessOrderAuthorizationClientTests {
@@ -105,10 +107,76 @@ class RestBusinessOrderAuthorizationClientTests {
         outageServer.verify();
     }
 
+    @Test
+    void authRateLimitIsADependencyFailureRatherThanAMembershipDenial() {
+        server.expect(requestTo(
+                        "http://auth.test/api/v1/businesses/" + BUSINESS_ID + "/membership/me"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+        assertCode(() -> client.authorize("token", BUSINESS_ID), 503);
+        server.verify();
+    }
+
+    @Test
+    void fulfillmentRequiresTheDedicatedOwnerCapability() {
+        server.expect(requestTo(
+                        "http://auth.test/api/v1/businesses/" + BUSINESS_ID + "/membership/me"))
+                .andRespond(withSuccess("""
+                        {"data":{"businessId":"%s","userId":"%s","role":"OWNER",
+                        "status":"ACTIVE","permissions":["ORDER_VIEW","ORDER_FULFILL",
+                        "ORDER_FINANCE_VIEW"]}}
+                        """.formatted(BUSINESS_ID, id(2)), MediaType.APPLICATION_JSON));
+
+        BusinessOrderAuthorizationClient.Access access =
+                client.authorizeFulfillment("token", BUSINESS_ID);
+
+        assertThat(access.userId()).isEqualTo(id(2));
+        assertThat(access.role()).isEqualTo("OWNER");
+        server.verify();
+    }
+
+    @Test
+    void managerFulfillmentDenialIsHiddenAndThrottleUsesAcceptanceDependencyCode() {
+        server.expect(requestTo(
+                        "http://auth.test/api/v1/businesses/" + BUSINESS_ID + "/membership/me"))
+                .andRespond(withSuccess("""
+                        {"data":{"businessId":"%s","userId":"%s","role":"MANAGER",
+                        "status":"ACTIVE","permissions":["ORDER_VIEW"]}}
+                        """.formatted(BUSINESS_ID, id(2)), MediaType.APPLICATION_JSON));
+
+        assertCode(
+                () -> client.authorizeFulfillment("token", BUSINESS_ID),
+                404,
+                "BUSINESS_ORDER_NOT_FOUND");
+        server.verify();
+
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://auth.test");
+        MockRestServiceServer throttleServer = MockRestServiceServer.bindTo(builder).build();
+        RestBusinessOrderAuthorizationClient throttled =
+                new RestBusinessOrderAuthorizationClient(builder.build());
+        throttleServer.expect(requestTo(
+                        "http://auth.test/api/v1/businesses/" + BUSINESS_ID + "/membership/me"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+        assertCode(
+                () -> throttled.authorizeFulfillment("token", BUSINESS_ID),
+                503,
+                "BUSINESS_ORDER_ACCEPTANCE_DEPENDENCY_UNAVAILABLE");
+        throttleServer.verify();
+    }
+
     private void assertCode(Runnable operation, int status) {
         assertThatThrownBy(operation::run)
                 .isInstanceOfSatisfying(BusinessOrderException.class, exception ->
                         assertThat(exception.status().value()).isEqualTo(status));
+    }
+
+    private void assertCode(Runnable operation, int status, String code) {
+        assertThatThrownBy(operation::run)
+                .isInstanceOfSatisfying(BusinessOrderException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(status);
+                    assertThat(exception.code()).isEqualTo(code);
+                });
     }
 
     private static String id(int value) {

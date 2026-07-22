@@ -82,6 +82,11 @@ class CartValidationServiceTests {
         assertThat(response.items()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.status()).isEqualTo("READY");
+                    assertThat(item.storeName()).isEqualTo("Acme Trading Store");
+                    assertThat(item.storeSlug()).isEqualTo("acme-trading-store");
+                    assertThat(item.businessVerified()).isTrue();
+                    assertThat(item.publicCity()).isEqualTo("Irvine");
+                    assertThat(item.publicRegion()).isEqualTo("CA");
                     assertThat(item.availableQuantity()).isEqualTo(4);
                     assertThat(item.issues()).isEmpty();
                 });
@@ -236,10 +241,18 @@ class CartValidationServiceTests {
                 STORE_ID,
                 "BUSINESS",
                 "Store item",
+                "SKU-STORE-ITEM",
+                "NEW",
+                7,
                 new BigDecimal(price),
                 currency,
                 status,
-                null);
+                null,
+                "Acme Trading Store",
+                "acme-trading-store",
+                true,
+                "Irvine",
+                "CA");
     }
 
     private InventoryAvailabilityClient.Availability availability(

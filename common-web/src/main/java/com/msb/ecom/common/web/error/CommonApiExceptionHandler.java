@@ -17,6 +17,7 @@ import java.util.List;
 @RestControllerAdvice
 public final class CommonApiExceptionHandler {
 
+    private static final String UNEXPECTED_EXCEPTION_EVENT = "COMMON_WEB_UNEXPECTED_EXCEPTION";
     private static final Logger log = LoggerFactory.getLogger(CommonApiExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -108,7 +109,12 @@ public final class CommonApiExceptionHandler {
             HttpServletRequest request
     ) {
         String correlationId = CorrelationIdFilter.current(request);
-        log.error("Unexpected request failure correlationId={}", correlationId, exception);
+        log.error(
+                "event={} correlationId={} exceptionCategory={}",
+                UNEXPECTED_EXCEPTION_EVENT,
+                correlationId,
+                safeExceptionCategory(exception)
+        );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(envelope(
                         "INTERNAL_ERROR",
@@ -116,6 +122,13 @@ public final class CommonApiExceptionHandler {
                         List.of(),
                         correlationId
                 ));
+    }
+
+    // Keeps generic failure diagnostics useful without rendering exception-controlled data.
+    private String safeExceptionCategory(Exception exception) {
+        return exception instanceof RuntimeException
+                ? "RUNTIME_EXCEPTION"
+                : "CHECKED_EXCEPTION";
     }
 
     private ResponseEntity<ApiErrorEnvelope> response(

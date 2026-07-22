@@ -14,12 +14,12 @@ export class CartService {
   private readonly baseUrl = `${environment.apiGatewayUrl}/api/v1/cart`;
   private readonly currentCart = signal<Cart | null>(null);
   private readonly currentValidation = signal<CartValidation | null>(null);
-  private readonly requestInFlight = signal(false);
+  private readonly activeRequests = signal(0);
   private readonly validationInFlight = signal(false);
 
   readonly cart = this.currentCart.asReadonly();
   readonly validation = this.currentValidation.asReadonly();
-  readonly loading = this.requestInFlight.asReadonly();
+  readonly loading = computed(() => this.activeRequests() > 0);
   readonly validating = this.validationInFlight.asReadonly();
   readonly count = computed(() => this.currentCart()?.totalQuantity ?? 0);
 
@@ -74,7 +74,7 @@ export class CartService {
   }
 
   private track(request: Observable<Cart>, invalidateValidation = true): Observable<Cart> {
-    this.requestInFlight.set(true);
+    this.activeRequests.update(count => count + 1);
     return request.pipe(
       tap(cart => {
         this.currentCart.set(cart);
@@ -84,7 +84,7 @@ export class CartService {
           this.currentValidation.set(null);
         }
       }),
-      finalize(() => this.requestInFlight.set(false)),
+      finalize(() => this.activeRequests.update(count => Math.max(0, count - 1))),
     );
   }
 }

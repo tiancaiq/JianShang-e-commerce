@@ -427,8 +427,11 @@ public class CheckoutRepository {
         jdbc.update("""
                         INSERT INTO checkout_policy_snapshots (
                             id, checkout_id, business_id, store_id, source_policy_id, source,
-                            version_code, shipping_text, cancellation_text, return_text, snapshotted_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            version_code, shipping_text, cancellation_text, return_text,
+                            paid_order_cancellation_mode, snapshotted_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            (SELECT paid_order_cancellation_mode
+                             FROM platform_policy_versions WHERE id = ?), ?)
                         """,
                 policy.id(),
                 checkoutId,
@@ -440,6 +443,7 @@ public class CheckoutRepository {
                 policy.shippingText(),
                 policy.cancellationText(),
                 policy.returnText(),
+                policy.sourcePolicyId(),
                 Timestamp.from(now));
     }
 

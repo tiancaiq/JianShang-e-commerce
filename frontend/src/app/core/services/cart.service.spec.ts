@@ -2,6 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { CartValidation } from '../models/cart.model';
 import { AuthService } from './auth.service';
 import { CartService } from './cart.service';
 
@@ -60,6 +61,21 @@ describe('CartService', () => {
     expect(service.count()).toBe(2);
   });
 
+  it('keeps loading true until overlapping cart requests all finish', () => {
+    service.load().subscribe();
+    service.add({ listingId: cart.items[0].listingId, quantity: 1 }).subscribe();
+
+    const load = httpMock.expectOne('/api/v1/cart');
+    const add = httpMock.expectOne('/api/v1/cart/items');
+    expect(service.loading()).toBeTrue();
+
+    load.flush(cart);
+    expect(service.loading()).toBeTrue();
+
+    add.flush({ ...cart, version: 2 });
+    expect(service.loading()).toBeFalse();
+  });
+
   it('posts listing and quantity when adding a business item', () => {
     service.add({ listingId: cart.items[0].listingId, quantity: 2 }).subscribe();
 
@@ -107,5 +123,118 @@ describe('CartService', () => {
     httpMock.expectOne('/api/v1/cart/validate').flush(validation);
 
     expect(service.validation()).toBeNull();
+  });
+
+  it('keeps the add-update-reload-validate-repair-remove-clear journey explicit', () => {
+    const listingId = cart.items[0].listingId;
+    const addedCart = {
+      ...cart,
+      version: 1,
+      totalQuantity: 1,
+      totals: [{ currency: 'USD', amount: 5 }],
+      items: [{ ...cart.items[0], quantity: 1 }],
+    };
+    const reloadedCart = {
+      ...cart,
+      version: 2,
+      totalQuantity: 3,
+      totals: [{ currency: 'USD', amount: 15 }],
+      items: [{ ...cart.items[0], quantity: 3 }],
+    };
+    const updatedCart = {
+      ...cart,
+      version: 3,
+      totalQuantity: 4,
+      totals: [{ currency: 'USD', amount: 20 }],
+      items: [{ ...cart.items[0], quantity: 4 }],
+    };
+    const priceChanged: CartValidation = {
+      ...validation,
+      cartVersion: 3,
+      checkoutReady: false,
+      validatedTotals: [],
+      items: [{
+        listingId,
+        title: cart.items[0].title,
+        thumbnailUrl: cart.items[0].thumbnailUrl,
+        requestedQuantity: 4,
+        availableQuantity: 6,
+        observedPrice: 5,
+        currentPrice: 7,
+        observedCurrency: 'USD',
+        currentCurrency: 'USD',
+        status: 'PRICE_CHANGED',
+        issues: [{
+          code: 'CART_PRICE_CHANGED',
+          message: 'The price changed.',
+          action: 'ACCEPT_CURRENT_PRICE',
+        }],
+      }],
+    };
+    const repairedCart = {
+      ...cart,
+      version: 4,
+      totalQuantity: 4,
+      totals: [{ currency: 'USD', amount: 28 }],
+      items: [{ ...cart.items[0], quantity: 4, observedPrice: 7 }],
+    };
+    const emptyCart = {
+      ...cart,
+      version: 5,
+      itemCount: 0,
+      totalQuantity: 0,
+      totals: [],
+      items: [],
+    };
+
+    service.add({ listingId, quantity: 1 }).subscribe();
+    const add = httpMock.expectOne('/api/v1/cart/items');
+    expect(add.request.method).toBe('POST');
+    expect(add.request.body).toEqual({ listingId, quantity: 1 });
+    add.flush(addedCart);
+    expect(service.count()).toBe(1);
+
+    service.load().subscribe();
+    const reload = httpMock.expectOne('/api/v1/cart');
+    expect(reload.request.method).toBe('GET');
+    reload.flush(reloadedCart);
+    expect(service.count()).toBe(3);
+
+    service.update(listingId, { quantity: 4 }).subscribe();
+    const update = httpMock.expectOne(`/api/v1/cart/items/${listingId}`);
+    expect(update.request.method).toBe('PATCH');
+    expect(update.request.body).toEqual({ quantity: 4 });
+    update.flush(updatedCart);
+    expect(service.validation()).toBeNull();
+
+    service.validate().subscribe();
+    const validate = httpMock.expectOne('/api/v1/cart/validate');
+    expect(validate.request.method).toBe('POST');
+    expect(validate.request.body).toBeNull();
+    validate.flush(priceChanged);
+
+    expect(service.validation()).toEqual(priceChanged);
+    expect(service.count()).toBe(4);
+    httpMock.expectNone('/api/v1/cart/items');
+    httpMock.expectNone(`/api/v1/cart/items/${listingId}`);
+
+    service.add({ listingId, quantity: 4 }).subscribe();
+    const repair = httpMock.expectOne('/api/v1/cart/items');
+    expect(repair.request.body).toEqual({ listingId, quantity: 4 });
+    repair.flush(repairedCart);
+    expect(service.validation()).toBeNull();
+    expect(service.cart()?.totals[0].amount).toBe(28);
+
+    service.remove(listingId).subscribe();
+    const remove = httpMock.expectOne(`/api/v1/cart/items/${listingId}`);
+    expect(remove.request.method).toBe('DELETE');
+    remove.flush(emptyCart);
+    expect(service.count()).toBe(0);
+
+    service.clear().subscribe();
+    const clear = httpMock.expectOne('/api/v1/cart');
+    expect(clear.request.method).toBe('DELETE');
+    clear.flush({ ...emptyCart, version: 6 });
+    expect(service.cart()?.items).toEqual([]);
   });
 });

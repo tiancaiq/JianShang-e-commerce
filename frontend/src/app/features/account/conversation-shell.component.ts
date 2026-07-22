@@ -6,7 +6,10 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ChatListingSummary, ChatMessage, ConversationListItem, ConversationSummary } from '../../core/models/chat.model';
 import { ChatService } from '../../core/services/chat.service';
-import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import {
+  AGENT_CUSTOMER_SERVICE_ENABLED,
+  AGENT_DISCOVERY_ENABLED,
+} from '../agent/agent-customer-service.capability';
 
 @Component({
   selector: 'app-conversation-shell',
@@ -34,7 +37,7 @@ import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.
               (ngModelChange)="conversationQuery.set($event)" />
           </label>
 
-          @if (aiAssistantEnabled) {
+          @if (agentEntryEnabled) {
             <button
               type="button"
               class="conversation-row agent-row"
@@ -43,10 +46,10 @@ import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.
               <span class="avatar-initials agent-initials">AI</span>
               <span class="conversation-copy">
                 <span class="row-title">
-                  <strong>Marketplace agent</strong>
+                  <strong>Marketplace discovery</strong>
                   <small>AI assistant</small>
                 </span>
-                <span class="row-subtitle">Ask about a listing</span>
+                <span class="row-subtitle">Find items or ask about a listing</span>
               </span>
             </button>
           }
@@ -87,7 +90,7 @@ import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.
         </aside>
 
         <article class="thread-panel">
-          @if (aiAssistantEnabled && agentSelected()) {
+          @if (agentEntryEnabled && agentSelected()) {
             <div class="thread-placeholder agent-placeholder">
               <span class="agent-large-icon">AI</span>
               <strong>Opening marketplace help…</strong>
@@ -880,6 +883,10 @@ import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.
 export class ConversationShellComponent implements OnInit {
   readonly defaultNotice = 'Payment and delivery are arranged directly by participants.';
   readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
+  readonly aiDiscoveryEnabled = inject(AGENT_DISCOVERY_ENABLED);
+  get agentEntryEnabled(): boolean {
+    return this.aiAssistantEnabled || this.aiDiscoveryEnabled;
+  }
 
   private readonly chatService = inject(ChatService);
   private readonly route = inject(ActivatedRoute);
@@ -937,7 +944,7 @@ export class ConversationShellComponent implements OnInit {
 
   /** Navigates to the reserved Agent route without treating it as a Chat Service conversation. */
   selectAgent(): void {
-    if (!this.aiAssistantEnabled) {
+    if (!this.agentEntryEnabled) {
       return;
     }
     this.agentSelected.set(true);

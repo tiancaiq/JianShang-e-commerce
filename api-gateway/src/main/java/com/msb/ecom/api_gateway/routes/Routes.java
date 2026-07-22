@@ -44,17 +44,30 @@ public class Routes {
         @Value("${service.agent.url}")
         private String agentServiceUrl;
 
+        @Value("${service.notification.url}")
+        private String notificationServiceUrl;
+
         @Bean
         @Order(0)
         @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent", havingValue = "true")
         public RouterFunction<ServerResponse> agentServiceRoute() {
                 return route("agent_service")
-                                .route(RequestPredicates.path("/api/v1/agent/**"),
+                                .route(RequestPredicates.path("/api/v1/agent/listing-proposals")
+                                                .or(RequestPredicates.path("/api/v1/agent/listing-proposals/**")),
                                                 http(agentServiceUrl))
                                 .before(removeRequestHeader("X-User-Id"))
                                 .before(removeRequestHeader("X-Actor-User-Id"))
                                 .before(removeRequestHeader("X-Keycloak-Sub"))
                                 .before(removeRequestHeader("X-Roles"))
+                                .before(removeRequestHeader("Connection"))
+                                .before(removeRequestHeader("Keep-Alive"))
+                                .before(removeRequestHeader("Proxy-Authenticate"))
+                                .before(removeRequestHeader("Proxy-Authorization"))
+                                .before(removeRequestHeader("TE"))
+                                .before(removeRequestHeader("Trailer"))
+                                .before(removeRequestHeader("Transfer-Encoding"))
+                                .before(removeRequestHeader("Upgrade"))
+                                .before(removeRequestHeader("HTTP2-Settings"))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("agentServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
@@ -66,7 +79,52 @@ public class Routes {
         @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent", havingValue = "false",
                         matchIfMissing = true)
         public RouterFunction<ServerResponse> disabledAgentServiceRoute() {
-                return disabledRoute("disabled_agent_service", RequestPredicates.path("/api/v1/agent/**"));
+                return disabledRoute(
+                                "disabled_agent_service",
+                                RequestPredicates.path("/api/v1/agent/sessions")
+                                                .or(RequestPredicates.path("/api/v1/agent/sessions/**"))
+                                                .or(RequestPredicates.path("/api/v1/agent/listing-proposals"))
+                                                .or(RequestPredicates.path("/api/v1/agent/listing-proposals/**")));
+        }
+
+        /**
+         * Keeps discovery independently gated so listing Agent activation cannot
+         * expose the broader query-first Product/tool boundary.
+         */
+        @Bean
+        @Order(-1)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent-discovery", havingValue = "true")
+        public RouterFunction<ServerResponse> agentDiscoveryServiceRoute() {
+                return route("agent_discovery_service")
+                                .route(RequestPredicates.path("/api/v1/agent/discovery/**"),
+                                                http(agentServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .before(removeRequestHeader("Connection"))
+                                .before(removeRequestHeader("Keep-Alive"))
+                                .before(removeRequestHeader("Proxy-Authenticate"))
+                                .before(removeRequestHeader("Proxy-Authorization"))
+                                .before(removeRequestHeader("TE"))
+                                .before(removeRequestHeader("Trailer"))
+                                .before(removeRequestHeader("Transfer-Encoding"))
+                                .before(removeRequestHeader("Upgrade"))
+                                .before(removeRequestHeader("HTTP2-Settings"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("agentServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(-1)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "agent-discovery", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledAgentDiscoveryServiceRoute() {
+                return disabledRoute(
+                                "disabled_agent_discovery_service",
+                                RequestPredicates.path("/api/v1/agent/discovery/**"));
         }
 
         @Bean
@@ -167,14 +225,16 @@ public class Routes {
         }
 
         @Bean
-        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart-checkout", havingValue = "true")
-        public RouterFunction<ServerResponse> orderServiceRoute() {
-                return route("order_service")
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart", havingValue = "true")
+        public RouterFunction<ServerResponse> cartOrderServiceRoute() {
+                return route("cart_order_service")
                                 .route(RequestPredicates.path("/api/v1/cart")
-                                                .or(RequestPredicates.path("/api/v1/cart/**"))
-                                                .or(RequestPredicates.path("/api/v1/checkouts"))
-                                                .or(RequestPredicates.path("/api/v1/checkouts/**")),
+                                                .or(RequestPredicates.path("/api/v1/cart/**")),
                                                 http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
                                 .filter(tokenRelay())
                                 .filter(circuitBreaker("orderServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
@@ -182,13 +242,37 @@ public class Routes {
         }
 
         @Bean
-        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart-checkout", havingValue = "false",
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "cart", havingValue = "false",
                         matchIfMissing = true)
-        public RouterFunction<ServerResponse> disabledOrderServiceRoute() {
-                return disabledRoute("disabled_order_service",
+        public RouterFunction<ServerResponse> disabledCartOrderServiceRoute() {
+                return disabledRoute("disabled_cart_order_service",
                                 RequestPredicates.path("/api/v1/cart")
-                                                .or(RequestPredicates.path("/api/v1/cart/**"))
-                                                .or(RequestPredicates.path("/api/v1/checkouts"))
+                                                .or(RequestPredicates.path("/api/v1/cart/**")));
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "checkout", havingValue = "true")
+        public RouterFunction<ServerResponse> checkoutOrderServiceRoute() {
+                return route("checkout_order_service")
+                                .route(RequestPredicates.path("/api/v1/checkouts")
+                                                .or(RequestPredicates.path("/api/v1/checkouts/**")),
+                                                http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "checkout", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledCheckoutOrderServiceRoute() {
+                return disabledRoute("disabled_checkout_order_service",
+                                RequestPredicates.path("/api/v1/checkouts")
                                                 .or(RequestPredicates.path("/api/v1/checkouts/**")));
         }
 
@@ -218,6 +302,39 @@ public class Routes {
                 return disabledRoute("disabled_business_order_service",
                                 RequestPredicates.path("/api/v1/businesses/*/orders")
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/orders/**")));
+        }
+
+        /**
+         * Relays the authenticated buyer notification-center API without accepting
+         * browser-supplied actor identity headers.
+         */
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "notifications", havingValue = "true")
+        public RouterFunction<ServerResponse> notificationServiceRoute() {
+                return route("notification_service")
+                                .route(RequestPredicates.path("/api/v1/notifications")
+                                                .or(RequestPredicates.path("/api/v1/notifications/**")),
+                                                http(notificationServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("notificationServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "notifications", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledNotificationServiceRoute() {
+                return disabledRoute(
+                                "disabled_notification_service",
+                                RequestPredicates.path("/api/v1/notifications")
+                                                .or(RequestPredicates.path("/api/v1/notifications/**")));
         }
 
         @Bean

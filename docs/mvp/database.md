@@ -778,6 +778,36 @@ filesort, so forward-only Order Service V4 adds
 `idx_business_order_all_queue (business_id, created_at, id)`. V1 through V3
 are unchanged.
 
+Order Service Flyway V5 (`V2-SHP-01A`) adds a nonnegative optimistic `version`
+and replaces the named fulfillment check with exactly
+`PENDING_ACCEPTANCE|ACCEPTED`. Acceptance uses one conditional update by
+business ID, business-order ID, expected version, pending state, and
+`cancellation_status=NONE`; it never updates the buyer `orders.status`.
+
+### `business_order_acceptance_commands`
+
+V5 stores the durable `ACCEPT_BUSINESS_ORDER` command, actor user ID, business
+and business-order IDs, idempotency key, canonical SHA-256 request hash,
+in-progress/completed state, original result version/time, and P7D expiry.
+Unique `(actor_user_id, business_id, operation, idempotency_key)` serializes
+same-key concurrency. `(expires_at, id)` supports bounded lazy retention
+purging.
+
+### `business_order_status_history`
+
+V5 adds append-only business-group transition history separate from buyer
+`order_status_history`. Each row records the group/business IDs,
+`PENDING_ACCEPTANCE -> ACCEPTED`, new group version, `BUSINESS_ACCEPTED`,
+internal actor user ID, correlation ID, durable command causation ID, and
+creation time. Unique `(business_order_id, business_order_version)` prevents a
+second history row for the same transition version.
+
+The group update, history row, one version-1 `business_order.accepted`
+`order_outbox_events` row, and completed command result commit atomically.
+The event aggregate and partition identity are the business-order ID. Payload
+is limited to event identity/version/time, business-order ID, parent order ID,
+business ID, `ACCEPTED`, and business-order version.
+
 ### `order_items`
 
 Immutable listing snapshot tied to `business_order_id`.
@@ -960,9 +990,31 @@ visibility field.
 
 ### `notifications`
 
-User, type, title, safe route, event ID, read time, and created time.
+Notification Service owns this schema. `V2-NOT-01A` stores an opaque recipient
+user ID, stable `ORDER_CONFIRMED` type, `ORDER_CONFIRMED_V1` message key,
+bounded `{orderId}` arguments, allowlisted `/account` route, source event
+identity/type/version/time/hash, nullable read time, optimistic version,
+local/test retention metadata, and creation/update times.
 
-Unique `(user_id, source_event_id, type)`.
+Unique `(recipient_user_id, source_event_id, type)`. `V2-NOT-01B` uses the
+existing recipient-created index for stable `(created_at DESC,id DESC)` pages
+and the recipient-unread index for owned read commands. Mark-one sets
+`read_at` once and preserves it on replay; mark-all updates only the resolved
+recipient's unread rows. `V2-NOT-01C` adds no schema and keeps the UI
+projection to notification ID, type, message key, validated bounded args,
+allowlisted route, read state, and timestamps. There is no cross-service
+foreign key and no source envelope, email, address, payment, provider data,
+source hash, raw JSON, or consumer metadata in the UI/API projection.
+
+### `notification_source_events`
+
+Durable `(consumer_name, source_event_id)` deduplication with source
+type/version/hash, processing state/outcome, bounded safe error code,
+source/correlation times, attempt count, and P180D local/test retention
+metadata. Supported creation and notification projection commit atomically.
+Same-ID/same-hash replay is safe; same-ID/different-hash conflicts. Unsupported
+events and identifiable poison are terminally rejected. Purge is unavailable
+and disabled pending legal and operations approval.
 
 ### `notification_preferences`
 

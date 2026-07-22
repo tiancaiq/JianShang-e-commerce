@@ -92,6 +92,9 @@ class BuyerOrderControllerTests {
                 .andExpect(jsonPath("$.groups[0].items[0].listingId").value(id(5)))
                 .andExpect(jsonPath("$.groups[0].items[0].policyVersion")
                         .value("LOCAL_DEMO_V1"))
+                .andExpect(jsonPath("$.version").value(0))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("ETag", "\"0\""))
                 .andExpect(jsonPath("$.shippingAddress.recipientName").value("Buyer"))
                 .andReturn().getResponse().getContentAsString();
 
@@ -104,8 +107,7 @@ class BuyerOrderControllerTests {
                         "catalogVersion",
                         "sellerOrderNumber",
                         "platformFee",
-                        "shipment",
-                        "\"version\"");
+                        "shipment");
     }
 
     @Test
@@ -161,6 +163,7 @@ class BuyerOrderControllerTests {
                 "SUCCEEDED",
                 amount("25.0000"),
                 "USD",
+                0,
                 now,
                 now,
                 List.of(new BuyerOrderDetailResponse.Group(

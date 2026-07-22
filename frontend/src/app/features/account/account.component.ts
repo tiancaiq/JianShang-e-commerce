@@ -10,6 +10,7 @@ import { IndividualSellerService } from '../../core/services/individual-seller.s
 import { ListingService } from '../../core/services/listing.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { environment } from '../../../environments/environment';
+import { NOTIFICATION_CENTER_ENABLED } from './notification-center.capability';
 
 @Component({
   selector: 'app-account',
@@ -107,6 +108,11 @@ import { environment } from '../../../environments/environment';
               <div class="skeleton-list" aria-label="Loading listings">
                 <span></span>
                 <span></span>
+              </div>
+            } @else if (sellerActivationRequired()) {
+              <div class="panel-empty">
+                <strong>Become a Seller</strong>
+                <a routerLink="/account/listings">Activate seller profile</a>
               </div>
             } @else if (listingsError()) {
               <p class="panel-error">{{ listingsError() }}</p>
@@ -251,6 +257,19 @@ import { environment } from '../../../environments/environment';
               <span>
                 <b>Addresses</b>
                 <small>Manage saved delivery addresses.</small>
+              </span>
+              <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
+            </a>
+          }
+
+          @if (notificationsEnabled) {
+            <a routerLink="/account/notifications" class="account-tile">
+              <span class="tile-icon green">
+                <svg viewBox="0 0 24 24"><path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.4-6.8V3a1.6 1.6 0 0 0-3.2 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2z"/></svg>
+              </span>
+              <span>
+                <b>Notifications</b>
+                <small>Review order updates from business purchases.</small>
               </span>
               <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
             </a>
@@ -1125,6 +1144,10 @@ import { environment } from '../../../environments/environment';
       background: linear-gradient(135deg, #8b5cf6, #c492ff);
     }
 
+    .tile-icon.green {
+      background: linear-gradient(135deg, #2aa887, #8b6fe8);
+    }
+
     .account-tile span:nth-child(2) {
       min-width: 0;
       display: grid;
@@ -1234,6 +1257,7 @@ import { environment } from '../../../environments/environment';
 export class AccountComponent implements OnInit {
   authService = inject(AuthService);
   readonly buyerAddressesEnabled = environment.features.buyerAddresses;
+  readonly notificationsEnabled = inject(NOTIFICATION_CENTER_ENABLED);
   private readonly router = inject(Router);
   private readonly listingService = inject(ListingService);
   private readonly chatService = inject(ChatService);
@@ -1261,6 +1285,9 @@ export class AccountComponent implements OnInit {
     .slice(0, 2));
   conversationPreview = computed(() => this.conversations().slice(0, 2));
   unreadCount = computed(() => this.conversations().filter(conversation => conversation.unread).length);
+  sellerActivationRequired = computed(() =>
+    !this.loadingSellerProfile() && !this.sellerProfileError() && this.sellerProfile()?.status !== 'ACTIVE'
+  );
 
   ngOnInit(): void {
     this.loadCurrentUser();

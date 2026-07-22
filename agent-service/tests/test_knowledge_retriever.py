@@ -14,6 +14,7 @@ from msb_agent_service.embedding_provider import (
     EmbeddingProviderError,
 )
 from msb_agent_service.knowledge_retriever import (
+    CategoryGuidanceVersionScope,
     KnowledgeRetrievalError,
     KnowledgeRetrievalErrorCode,
     KnowledgeRetrievalLimits,
@@ -105,6 +106,17 @@ class ListingKnowledgeRetrievalRequestTest(unittest.TestCase):
 
         self.assertEqual("desk details", parsed.query)
         self.assertEqual("en", parsed.language)
+
+    def test_accepts_zero_listing_version_from_product_snapshots(self) -> None:
+        parsed = request(listingVersion="0")
+
+        self.assertEqual("0", parsed.listing_version)
+
+    def test_category_guidance_versions_stay_positive(self) -> None:
+        with self.assertRaises(ValidationError):
+            CategoryGuidanceVersionScope.model_validate(
+                {"language": "en", "sourceVersion": "0"}
+            )
 
     def test_rejects_non_listing_sources_and_untrusted_shapes(self) -> None:
         with self.assertRaises(ValidationError):

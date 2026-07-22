@@ -2163,7 +2163,17 @@ already validated while creating the payment intent. The event handler then:
   order transaction; and
 - atomically creates one order per checkout/payment, one business group per
   business, immutable item/address/history snapshots, checkout completion,
-  processed-event completion, and version-1 `order.confirmed` outbox row.
+  processed-event completion, the unchanged version-1 `order.confirmed` outbox
+  row, and a notification-compatible version-2 row.
+
+`V2-NOT-01A` adds a second, backward-compatible internal
+`order.confirmed` version-2 outbox event. Version 1 remains unchanged and is
+unsupported by Notification Service. The version-2 payload retains the
+version-1 fields and adds only `recipientUserId`, resolved from persisted
+`orders.buyer_id`. Outbox aggregate ID and future transport partition key are
+the order ID; payload `orderId` must match. Correlation and payment-event
+causation IDs remain bounded outbox metadata. No email, address, display name,
+provider data, arbitrary title/body, or route is accepted.
 
 Concurrent duplicates observe the active bounded lease, completed replay
 returns the existing order, and abandoned/retryable work can resume safely.
@@ -2374,6 +2384,62 @@ POST /webhooks/shipping
 Shipment create request includes carrier, tracking number, and item quantities.
 State-changing commands require idempotency.
 
+`V2-SHP-01A` defines the first command as authenticated and independently
+default disabled through `business-orders.acceptance-enabled=false`. Disabled
+requests return `404 BUSINESS_ORDER_ACCEPTANCE_NOT_AVAILABLE` before actor
+resolution, Auth lookup, Order persistence, or outbox work. No gateway or
+frontend route is added.
+
+`POST /api/v1/businesses/{businessId}/orders/{businessOrderId}/accept` accepts
+no body and requires active matching membership with `ORDER_FULFILL`. Auth maps
+the current `OWNER` role to this permission and does not map it to `MANAGER`.
+Missing membership/permission/group and cross-business access all return `404
+BUSINESS_ORDER_NOT_FOUND`; Auth throttling/outage returns `503
+BUSINESS_ORDER_ACCEPTANCE_DEPENDENCY_UNAVAILABLE`.
+
+Headers:
+
+```text
+If-Match: 0
+Idempotency-Key: seller-accept-0001
+```
+
+`If-Match` accepts plain or quoted nonnegative long values. Missing/malformed
+values return `400 BUSINESS_ORDER_VERSION_REQUIRED`. `Idempotency-Key` must
+match `[A-Za-z0-9._:-]{8,128}`; missing/malformed values return `400
+BUSINESS_ORDER_IDEMPOTENCY_KEY_REQUIRED`. Path IDs are canonical uppercase
+ULIDs; malformed values return `400 BUSINESS_ORDER_ID_INVALID`.
+
+The SQL-owned group must belong to the path business, be
+`PENDING_ACCEPTANCE`, have cancellation status `NONE`, have a parent payment
+status of `SUCCEEDED`, and match the expected version. Stale versions return
+`409 BUSINESS_ORDER_VERSION_CONFLICT`; a correct-version state conflict
+returns `409 BUSINESS_ORDER_STATE_CONFLICT`; an unpaid parent returns `409
+BUSINESS_ORDER_NOT_PAID`.
+
+Success is `200` with quoted ETag for the new version and exactly:
+
+```json
+{
+  "businessOrderId": "01K...",
+  "fulfillmentStatus": "ACCEPTED",
+  "version": 1,
+  "updatedAt": "2026-07-20T01:00:00Z"
+}
+```
+
+Idempotency is unique by actor user ID, business ID,
+`ACCEPT_BUSINESS_ORDER`, and key. Its SHA-256 request hash covers operation,
+business ID, business-order ID, and expected version. Same hash replays the
+original body/ETag; a different hash returns `409
+BUSINESS_ORDER_IDEMPOTENCY_CONFLICT`. Unexpected persistence failure returns
+`503 BUSINESS_ORDER_ACCEPTANCE_UNAVAILABLE`.
+
+The transition increments only the business-group version, writes immutable
+group history and one version-1 `business_order.accepted` outbox event, and
+completes the durable idempotency record in one transaction. It does not
+change the buyer order, create a shipment, or call payment/inventory.
+
 ## 12. Reviews (V3)
 
 ```text
@@ -2404,10 +2470,82 @@ Individual reputation response includes:
 
 ## 13. Notifications (V2)
 
+`V2-NOT-01A` has no HTTP surface. A direct/fake consumer accepts only the
+strict `order.confirmed` version-2 envelope and is disabled by default before
+parsing or persistence. It canonicalizes and hashes the complete envelope and
+payload, durably deduplicates by `(consumerName,eventId)`, creates at most one
+`ORDER_CONFIRMED` notification per recipient/event, rejects event-ID hash
+conflicts, durably rejects unsupported type/version, and classifies malformed
+input as nonretryable poison. The stored projection uses message key
+`ORDER_CONFIRMED_V1`, bounded `{orderId}` arguments, and allowlisted route
+`/account`; the source envelope is never stored.
+
+`V2-NOT-01B` adds these default-off authenticated routes:
+
 ```text
-GET   /notifications?cursor=&limit=
-POST  /notifications/{notificationId}/read
-POST  /notifications/read-all
+GET   /api/v1/notifications?cursor=&limit=
+POST  /api/v1/notifications/{notificationId}/read
+POST  /api/v1/notifications/read-all
+```
+
+`notifications.read-api.enabled=false` is checked before bearer, cursor,
+path, body, Auth, or repository work. Disabled routes return `404
+NOTIFICATION_READ_API_NOT_AVAILABLE`. The service accepts only a bounded
+`Authorization: Bearer ...` header and relays that exact value plus the
+correlation ID to Auth Service `GET /api/v1/users/me`. It requires the returned
+internal user ID to be canonical and status `ACTIVE`; it never trusts user or
+actor headers, query values, paths, or request bodies.
+
+List uses an opaque versioned cursor bound to `(created_at DESC,id DESC)`, a
+default limit of 20, and a permitted limit of 1 through 50. Response:
+
+```json
+{
+  "data": {
+    "items": [{
+      "id": "01K...",
+      "type": "ORDER_CONFIRMED",
+      "messageKey": "ORDER_CONFIRMED_V1",
+      "presentationArgs": {"orderId": "01K..."},
+      "safeRoute": "/account",
+      "read": false,
+      "readAt": null,
+      "createdAt": "2026-07-20T12:00:00Z"
+    }],
+    "page": {"nextCursor": null, "hasMore": false}
+  }
+}
+```
+
+No response exposes recipient IDs, source event identity/hash/consumer,
+optimistic version, raw JSON, address, payment, or provider fields. Corrupt
+stored arguments fail closed. Mark-one and mark-all accept no body and return
+`204`; mark-one is idempotent and preserves the first `readAt`, while missing
+and cross-user notification IDs both return `404 NOTIFICATION_NOT_FOUND`.
+Mark-all returns no affected-row count.
+
+Stable errors include `NOTIFICATION_AUTHENTICATION_REQUIRED` (401),
+`NOTIFICATION_ACCESS_DENIED` (403), `NOTIFICATION_CURSOR_INVALID`,
+`NOTIFICATION_LIMIT_INVALID`, `NOTIFICATION_ID_INVALID`,
+`NOTIFICATION_BODY_NOT_ALLOWED` (400), `NOTIFICATION_NOT_FOUND` (404), and
+`NOTIFICATION_IDENTITY_UNAVAILABLE`, `NOTIFICATION_DATA_UNAVAILABLE`, or
+`NOTIFICATION_READ_UNAVAILABLE` (503). Validation precedence is feature gate,
+bearer shape, query/path/body, Auth resolution, then recipient-owned SQL.
+
+`V2-NOT-01C` adds no new Notification Service API. It introduces an
+independent default-off gateway feature,
+`msb.gateway.features.notifications=false`, for `/api/v1/notifications/**`.
+Disabled gateway routing returns an authenticated hidden 404 without upstream
+work. Enabled routing requires normal authentication, relays bearer and
+correlation headers, strips browser-supplied identity headers, enforces CSRF
+for POST commands, and uses the standard circuit-breaker fallback. The Angular
+notification center is also false by default; when enabled it calls only the
+three NOT-01B routes, renders only `ORDER_CONFIRMED_V1`, allowlists `/account`,
+and fails closed for unsafe routes, corrupt args, or internal fields.
+
+These preference routes remain deferred:
+
+```text
 GET   /notification-preferences
 PATCH /notification-preferences
 ```

@@ -63,6 +63,7 @@ def candidate(
 def model_request(
     *,
     question: str = "Was the chain replaced?",
+    source_version: str = "12",
     title: str = "Used bicycle",
     transaction_notice: str = (
         "Payment and delivery are arranged directly by participants."
@@ -76,7 +77,7 @@ def model_request(
         question=question,
         listing=ListingToolResult(
             listingId=LISTING,
-            sourceVersion="12",
+            sourceVersion=source_version,
             title=title,
             transactionNotice=transaction_notice,
         ),
@@ -85,7 +86,7 @@ def model_request(
                 chunkId="chunk-1",
                 sourceType="LISTING",
                 sourceId=LISTING,
-                sourceVersion="12",
+                sourceVersion=source_version,
                 contentHash="a" * 64,
                 listingId=LISTING,
                 visibility="PUBLIC",
@@ -101,7 +102,7 @@ def model_request(
             AnswerSource(
                 sourceType="LISTING",
                 sourceId=LISTING,
-                sourceVersion="12",
+                sourceVersion=source_version,
                 label="Current listing",
             ),
         ),
@@ -204,6 +205,22 @@ class OpenAICustomerServiceModelAdapterTest(
         self.assertNotIn("tools", call)
         self.assertEqual("openai", model.provider_name)
         self.assertEqual("offline-test-model", model.model_name)
+
+    async def test_accepts_zero_listing_source_version_at_provider_boundary(self) -> None:
+        responses = FakeResponses(output=candidate(source_version="0"))
+        model = adapter(responses)
+
+        result = await model.generate(
+            model_request(source_version="0"),
+            correlation_id="adapter-zero-version",
+        )
+
+        self.assertEqual("0", result.answer.sources[0].source_version)
+        serialized = responses.parse_calls[0]["input"][0]["content"][0]["text"]
+        self.assertEqual(
+            "0",
+            json.loads(serialized)["listing"]["sourceVersion"],
+        )
 
     async def test_redacts_private_data_before_the_provider_boundary(self) -> None:
         responses = FakeResponses()

@@ -4,9 +4,11 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { CartService } from '../../core/services/cart.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ListingService } from '../../core/services/listing.service';
 import { publicListing, publicListingImage } from '../../testing/listing-test-fixtures';
+import { CART_ENABLED } from '../cart/cart.capability';
 import { PublicListingDetailComponent } from './public-listing-detail.component';
 
 describe('PublicListingDetailComponent', () => {
@@ -14,6 +16,7 @@ describe('PublicListingDetailComponent', () => {
   let component: PublicListingDetailComponent;
   let listingService: jasmine.SpyObj<ListingService>;
   let chatService: jasmine.SpyObj<ChatService>;
+  let cartService: jasmine.SpyObj<CartService>;
   let authService: { isAuthenticated: jasmine.Spy; login: jasmine.Spy };
   let router: Router;
 
@@ -131,6 +134,23 @@ describe('PublicListingDetailComponent', () => {
       currentUser: true,
       createdAt: '2026-07-04T12:01:00Z',
     }));
+    cartService = jasmine.createSpyObj<CartService>('CartService', ['add']);
+    cartService.add.and.returnValue(of({
+      version: 1,
+      expiresAt: '2026-08-16T00:00:00Z',
+      itemCount: 1,
+      totalQuantity: 1,
+      totals: [{ currency: 'USD', amount: 12 }],
+      items: [{
+        listingId: listing.id,
+        title: listing.title,
+        thumbnailUrl: null,
+        quantity: 1,
+        observedPrice: 12,
+        currency: 'USD',
+        addedAt: '2026-07-21T00:00:00Z',
+      }],
+    }));
     authService = jasmine.createSpyObj('AuthService', ['isAuthenticated', 'login']);
     authService.isAuthenticated.and.returnValue(true);
     await TestBed.configureTestingModule({
@@ -140,7 +160,9 @@ describe('PublicListingDetailComponent', () => {
         provideRouter([]),
         { provide: ListingService, useValue: listingService },
         { provide: ChatService, useValue: chatService },
+        { provide: CartService, useValue: cartService },
         { provide: AuthService, useValue: authService },
+        { provide: CART_ENABLED, useValue: false },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => listing.id } } } },
       ],
     }).compileComponents();
@@ -361,5 +383,87 @@ describe('PublicListingDetailComponent', () => {
 
     const storeLink = fixture.nativeElement.querySelector('a[href="/stores/mochi-store"]');
     expect(storeLink).not.toBeNull();
+  });
+
+  it('renders the cart purchase box for enabled business listings and adds one item', () => {
+    const businessListing = publicListing({
+      sellerType: 'BUSINESS',
+      sellerDisplayName: 'Mochi Store',
+      storeId: '01S00000000000000000000001',
+      storeSlug: 'mochi-store',
+      storeName: 'Mochi Store',
+      businessVerified: true,
+      title: 'Store plush',
+      priceAmount: 12,
+      quantity: 13,
+      transactionNotice: null,
+    });
+    listingService.getPublicListing.and.returnValue(of(businessListing));
+    Object.defineProperty(component, 'cartEnabled', { value: true });
+
+    fixture.detectChanges();
+    const input = fixture.nativeElement.querySelector('.business-purchase-box input') as HTMLInputElement;
+    input.value = '3';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('.add-cart-button').click();
+    fixture.detectChanges();
+
+    expect(cartService.add).toHaveBeenCalledOnceWith({
+      listingId: businessListing.id,
+      quantity: 3,
+    });
+    expect(fixture.nativeElement.textContent).toContain('Store item');
+    expect(fixture.nativeElement.textContent).toContain('12.00 USD');
+    expect(fixture.nativeElement.textContent).toContain('Added to cart.');
+    expect(fixture.nativeElement.querySelector('.cart-status')?.getAttribute('role')).toBe('status');
+    expect(fixture.nativeElement.querySelector('a[href="/cart"]')).not.toBeNull();
+    expect(chatService.startListingConversation).not.toHaveBeenCalled();
+  });
+
+  it('uses the marketplace login return flow for guest add-to-cart attempts', () => {
+    listingService.getPublicListing.and.returnValue(of(publicListing({
+      sellerType: 'BUSINESS',
+      storeName: 'Mochi Store',
+      storeSlug: 'mochi-store',
+      priceAmount: 12,
+    })));
+    authService.isAuthenticated.and.returnValue(false);
+    Object.defineProperty(component, 'cartEnabled', { value: true });
+
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('.add-cart-button').click();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('marketplace', router.url);
+    expect(cartService.add).not.toHaveBeenCalled();
+  });
+
+  it('never renders cart controls for individual listings even when cart is enabled', () => {
+    Object.defineProperty(component, 'cartEnabled', { value: true });
+
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.business-purchase-box')).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Add to cart');
+    expect(fixture.nativeElement.textContent).toContain('Message seller');
+  });
+
+  it('does not replay an uncertain failed add-to-cart mutation', () => {
+    listingService.getPublicListing.and.returnValue(of(publicListing({
+      sellerType: 'BUSINESS',
+      storeName: 'Mochi Store',
+      priceAmount: 12,
+    })));
+    cartService.add.and.returnValue(throwError(() => ({ status: 503 })));
+    Object.defineProperty(component, 'cartEnabled', { value: true });
+
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('.add-cart-button').click();
+    fixture.detectChanges();
+
+    expect(cartService.add).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.textContent).toContain('Cart update could not finish.');
+    expect(fixture.nativeElement.querySelector('.cart-status')?.getAttribute('role')).toBe('alert');
+    expect(fixture.nativeElement.querySelector('a[href="/cart"]')).toBeNull();
   });
 });

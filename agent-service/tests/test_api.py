@@ -3,7 +3,7 @@ import unittest
 import httpx
 
 from msb_agent_service.api import create_app
-from msb_agent_service.config import AgentPersistenceSettings
+from msb_agent_service.config import AgentApiSettings, AgentPersistenceSettings
 from msb_agent_service.config import (
     KnowledgeIndexSettings,
     KnowledgeIngestionSettings,
@@ -11,6 +11,11 @@ from msb_agent_service.config import (
 )
 from msb_agent_service.knowledge_index import KnowledgeReadinessStatus
 from msb_agent_service.knowledge_ingestion_runtime import KnowledgeIngestionStatus
+from msb_agent_service.customer_service_api import (
+    AnswerDraft,
+    AnswererMetadata,
+)
+from msb_agent_service.agent_persistence import AgentResolutionType
 
 
 class HealthApiTest(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +44,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "categoryGuidanceIntake": "DISABLED",
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
+                "marketplaceDiscoveryApi": "DISABLED",
             },
             response.json(),
         )
@@ -59,6 +65,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "categoryGuidanceIntake": "DISABLED",
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
+                "marketplaceDiscoveryApi": "DISABLED",
             },
             response.json(),
         )
@@ -119,12 +126,29 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/agent/sessions/01ARZ3NDEKTSV4RRFFQ69G5FAY",
                 headers={"X-Correlation-Id": "disabled-agent-test"},
             )
+            create = await client.post(
+                "/api/v1/agent/sessions",
+                headers={"X-Correlation-Id": "disabled-agent-create-test"},
+                json={
+                    "sessionType": "LISTING_CUSTOMER_SERVICE",
+                    "subject": {
+                        "type": "LISTING",
+                        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+                    },
+                },
+            )
 
         self.assertEqual(404, response.status_code)
         self.assertEqual("AGENT_FEATURE_DISABLED", response.json()["error"]["code"])
         self.assertEqual(
             "disabled-agent-test",
             response.json()["error"]["correlationId"],
+        )
+
+        self.assertEqual(404, create.status_code)
+        self.assertEqual(
+            "AGENT_FEATURE_DISABLED",
+            create.json()["error"]["code"],
         )
 
     async def test_openapi_uses_approved_agent_session_path_parameter(self) -> None:
@@ -218,6 +242,90 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(repository.validated)
             self.assertEqual("READY", response.json()["agentPersistence"])
 
+        self.assertTrue(repository.closed)
+
+    async def test_enabled_generation_uses_managed_production_composition_path(
+        self,
+    ) -> None:
+        class FakeRepository:
+            validated = False
+            closed = False
+
+            async def validate_schema(self) -> None:
+                self.validated = True
+
+            async def close(self) -> None:
+                self.closed = True
+
+        class FakeAnswerer:
+            metadata = AnswererMetadata(
+                prompt_version="listing-customer-service-v1",
+                model_provider="offline",
+                model_name="offline",
+            )
+
+            async def answer(self, **kwargs):
+                return AnswerDraft(
+                    body="Offline",
+                    resolution_type=AgentResolutionType.UNKNOWN,
+                    sources=(),
+                    actions=(),
+                )
+
+        class FakeRuntime:
+            answerer = FakeAnswerer()
+            closed = False
+
+            async def close(self) -> None:
+                self.closed = True
+
+        repository = FakeRepository()
+        runtime = FakeRuntime()
+        factory_calls = 0
+
+        async def persistence_factory(settings, metrics):
+            return repository
+
+        def runtime_factory(settings, supplied_repository, client, registry):
+            nonlocal factory_calls
+            factory_calls += 1
+            self.assertIs(repository, supplied_repository)
+            return runtime
+
+        settings = Settings(
+            openai_api_key="offline-placeholder",
+            agent_persistence=AgentPersistenceSettings(
+                enabled=True,
+                mysql_password="offline-placeholder",
+            ),
+            agent_api=AgentApiSettings(
+                enabled=True,
+                orchestration_enabled=True,
+                retrieval_enabled=True,
+                provider_enabled=True,
+                auth_service_url="http://auth-service:8085",
+                product_service_url="http://product-service:8091",
+                product_service_token="offline-placeholder",
+            ),
+            knowledge=KnowledgeIndexSettings(
+                enabled=True,
+                url="http://opensearch:9200",
+                embedding_provider="openai",
+                embedding_model="text-embedding-3-small",
+                embedding_dimensions=1536,
+            ),
+        )
+        app = create_app(
+            settings,
+            persistence_repository_factory=persistence_factory,
+            customer_service_runtime_factory=runtime_factory,
+        )
+
+        async with app.router.lifespan_context(app):
+            self.assertEqual(1, factory_calls)
+            self.assertTrue(repository.validated)
+
+        self.assertTrue(runtime.closed)
         self.assertTrue(repository.closed)
 
 

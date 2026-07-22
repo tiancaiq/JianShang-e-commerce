@@ -11,6 +11,7 @@ import { MarketplaceLayoutComponent } from './marketplace-layout.component';
 describe('MarketplaceLayoutComponent', () => {
   let fixture: ComponentFixture<MarketplaceLayoutComponent>;
   let authenticated = false;
+  let sessionState: { authenticated: boolean; user: unknown };
   let cartService: jasmine.SpyObj<CartService>;
   let conversationRead: Subject<string>;
 
@@ -65,7 +66,7 @@ describe('MarketplaceLayoutComponent', () => {
               createdAt: '2026-01-01T00:00:00Z',
               updatedAt: '2026-01-01T00:00:00Z',
             } : null,
-            ensureSession: () => of({ authenticated: false, user: null }),
+            ensureSession: () => of(sessionState),
             login: jasmine.createSpy('login'),
             loginWithPopup: jasmine.createSpy('loginWithPopup').and.returnValue(of({ authenticated: false, user: null })),
             loginWithGooglePopup: jasmine.createSpy('loginWithGooglePopup').and.returnValue(of({ authenticated: false, user: null })),
@@ -91,6 +92,7 @@ describe('MarketplaceLayoutComponent', () => {
 
   beforeEach(() => {
     authenticated = false;
+    sessionState = { authenticated: false, user: null };
   });
 
   it('does not expose admin navigation on the public marketplace', () => {
@@ -158,10 +160,48 @@ describe('MarketplaceLayoutComponent', () => {
 
   it('does not load or reset cart state while the deferred capability is disabled', () => {
     authenticated = true;
+    sessionState = { authenticated: true, user: null };
     fixture.detectChanges();
 
     expect(cartService.load).not.toHaveBeenCalled();
     expect(cartService.reset).not.toHaveBeenCalled();
+  });
+
+  it('shows an authenticated cart link with a quantity badge when the cart capability is enabled', () => {
+    authenticated = true;
+    sessionState = { authenticated: true, user: null };
+    cartService.count.and.returnValue(7);
+    Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
+      configurable: true,
+      value: true,
+    });
+
+    fixture.detectChanges();
+
+    const cartLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+      .find(link => link.getAttribute('href') === '/cart') as HTMLAnchorElement | undefined;
+
+    expect(cartLink).toBeTruthy();
+    expect(cartLink?.getAttribute('aria-label')).toBe('Cart, 7 items');
+    expect(cartLink?.textContent).toContain('Cart');
+    expect(cartLink?.textContent).toContain('7');
+    expect(cartService.load).toHaveBeenCalledTimes(1);
+    expect(cartService.reset).not.toHaveBeenCalled();
+  });
+
+  it('resets cart state without loading it when the cart capability is enabled but the session is signed out', () => {
+    authenticated = false;
+    sessionState = { authenticated: false, user: null };
+    Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
+      configurable: true,
+      value: true,
+    });
+
+    fixture.detectChanges();
+
+    expect(cartService.load).not.toHaveBeenCalled();
+    expect(cartService.reset).toHaveBeenCalledTimes(1);
+    expect((fixture.nativeElement as HTMLElement).querySelector('a[href="/cart"]')).toBeNull();
   });
 
   it('navigates to the inbox from an ordinary click', () => {
@@ -183,6 +223,7 @@ describe('MarketplaceLayoutComponent', () => {
   it('starts logout once from the direct header action', () => {
     const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
     authenticated = true;
+    sessionState = { authenticated: true, user: null };
     fixture.detectChanges();
 
     const logoutButton = (fixture.nativeElement as HTMLElement)
@@ -194,6 +235,26 @@ describe('MarketplaceLayoutComponent', () => {
     expect(authService.logout).toHaveBeenCalledWith('marketplace');
     expect(authService.logout).toHaveBeenCalledTimes(1);
     expect(cartService.reset).not.toHaveBeenCalled();
+  });
+
+  it('clears the cart badge state once when cart-enabled logout starts', () => {
+    const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
+    authenticated = true;
+    sessionState = { authenticated: true, user: null };
+    Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
+      configurable: true,
+      value: true,
+    });
+    fixture.detectChanges();
+
+    const logoutButton = (fixture.nativeElement as HTMLElement)
+      .querySelector<HTMLButtonElement>('button[aria-label="Logout"]');
+
+    logoutButton?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    logoutButton?.click();
+
+    expect(authService.logout).toHaveBeenCalledOnceWith('marketplace');
+    expect(cartService.reset).toHaveBeenCalledTimes(1);
   });
 
   it('shows signed-out confirmation when returning to marketplace after logout', () => {
@@ -255,6 +316,23 @@ describe('MarketplaceLayoutComponent', () => {
       password: 'password-123',
       displayName: 'New Buyer',
     });
+  });
+
+  it('shows a credential error when marketplace-native login is rejected', () => {
+    const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
+    authService.nativeLogin.and.returnValue(of({ authenticated: false, user: null }));
+    fixture.detectChanges();
+
+    fixture.componentInstance.openAuthDialog();
+    fixture.componentInstance.authEmail = 'buyer@example.com';
+    fixture.componentInstance.authPassword = 'wrong-password';
+    fixture.componentInstance.submitNativeAuth();
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+
+    expect(text).toContain('Email or password is incorrect.');
+    expect(text).not.toContain('Account is ready.');
   });
 
   it('keeps Google login hidden until the provider is configured', () => {

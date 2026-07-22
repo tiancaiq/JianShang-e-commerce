@@ -464,10 +464,10 @@ Implement one slice at a time in this order:
 | V2-CHK-01 | `CHK-01`, `CHK-02` | Checkout snapshots, totals, expiry, and reservation orchestration; implementation-ready plan complete, product decisions pending approval |
 | V2-PAY-01 | `PAY-01`, `PAY-02` | Default-off provider-neutral intent, deterministic fake adapter, verified HMAC webhook, immutable payment events, order-owned checkout adapter, and bounded outbox dispatcher contract; PAY-01A/B/C/D and PAY/ORD boundary cleanup complete, transport and activation deferred |
 | V2-ORD-01 | `ORD-01`, `PAY-03` | Payment-succeeded confirmation foundation and PAY/ORD boundary cleanup complete: default-off strict v1 handler, durable dedup/lease, inventory commit, immutable multi-business order and `order.confirmed`; live transport and recovery/reconciliation deferred |
-| V2-ORD-02 | `ORD-02`, `ORD-03` | ORD-02A buyer reads, ORD-02B business queue/detail API, and ORD-02C default-off business portal UI/gateway boundary complete; mandatory ORD-02 cleanup is next |
+| V2-ORD-02 | `ORD-02`, `ORD-03` | ORD-02A buyer reads, ORD-02B business queue/detail API, ORD-02C default-off business portal UI/gateway boundary, and V2-ORD-CLEAN-P0-01 read-surface cleanup complete |
 | V2-ORD-03 | `ORD-04` | Cancellation, refund, and inventory compensation |
-| V2-SHP-01 | `SHP-01` through `SHP-04` | Fulfillment and shipment lifecycle |
-| V2-NOT-01 | V2 notifications | Event-driven buyer and business notifications |
+| V2-SHP-01 | `SHP-01` through `SHP-04` | SHP-01A paid business-group acceptance contract approved and implementation verification pending; shipments remain deferred |
+| V2-NOT-01 | V2 notifications | NOT-01A persistence/fake consumer, NOT-01B default-off authenticated read API, and NOT-01C default-off gateway/account notification center are source-complete with local disposable MySQL verification unavailable for A/B; transport, other event classes, badge counts, email, preferences, purge, and activation deferred |
 
 Every implementation slice includes forward-only Flyway migrations when
 needed, backend authorization, OpenAPI/client changes, the smallest complete
@@ -480,7 +480,8 @@ businesses cannot enter a checkout or fulfillment dead end.
 Reference:
 `docs/v2/commerce/v2-ord-02b-business-fulfillment-queue-plan.md`.
 
-The current business lane is `3/3` after completed `V2-ORD-02A/B/C`:
+The business lane reset to `0/3` after completed
+`V2-ORD-CLEAN-P0-01`:
 
 1. `V2-ORD-02B` added default-disabled Auth/Order backend support for
    `ORDER_VIEW`-scoped business fulfillment queue/detail reads and
@@ -489,10 +490,17 @@ The current business lane is `3/3` after completed `V2-ORD-02A/B/C`:
 2. `V2-ORD-02C` added the management-style business portal queue/detail UI
    over only the green 02B contract, with independent default-off Angular and
    gateway gates. It advanced the lane to `3/3`.
-3. Mandatory business-only cleanup runs before any acceptance or shipment
-   command and resets the lane to `0/3`.
+3. `V2-ORD-CLEAN-P0-01` re-audited SQL tenant isolation, finance omission,
+   V3/V4 queue-index intent, and default-off Angular/gateway behavior, and
+   corrected malformed timestamp cursor and Auth dependency error handling.
+   It reset the lane from `3/3` to `0/3`.
 4. `V2-SHP-01A/B/C` then implement group acceptance, partial shipments, and
-   shipped/buyer aggregate visibility as separate slices.
+   shipped/buyer aggregate visibility as separate slices after PM dispatch.
+
+`V2-SHP-01A` now has an authoritative default-off command, V5 optimistic group
+version/idempotency/history contract, and version-1
+`business_order.accepted` outbox envelope. See
+`docs/v2/commerce/v2-shp-01a-accept-paid-business-fulfillment-group.md`.
 
 Reference:
 `docs/v2/commerce/v2-ord-02c-business-fulfillment-ui.md`.

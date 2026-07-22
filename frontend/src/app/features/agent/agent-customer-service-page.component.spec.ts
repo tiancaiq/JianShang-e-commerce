@@ -2,9 +2,14 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
+import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ListingService } from '../../core/services/listing.service';
-import { AGENT_CUSTOMER_SERVICE_ENABLED } from './agent-customer-service.capability';
+import {
+  AGENT_CUSTOMER_SERVICE_ENABLED,
+  AGENT_DISCOVERY_ENABLED,
+} from './agent-customer-service.capability';
+import { AgentMarketplaceDiscoveryService } from './agent-marketplace-discovery.service';
 import { AgentCustomerService } from './agent-customer-service.service';
 import { AgentCustomerServicePageComponent } from './agent-customer-service-page.component';
 
@@ -44,6 +49,7 @@ describe('AgentCustomerServicePageComponent', () => {
       page: { nextCursor: null, hasMore: false },
     }));
     const chatService = jasmine.createSpyObj<ChatService>('ChatService', ['startListingConversation']);
+    const authService = jasmine.createSpyObj<AuthService>('AuthService', ['login']);
 
     await TestBed.configureTestingModule({
       imports: [AgentCustomerServicePageComponent],
@@ -52,6 +58,7 @@ describe('AgentCustomerServicePageComponent', () => {
         provideRouter([]),
         { provide: AGENT_CUSTOMER_SERVICE_ENABLED, useValue: true },
         { provide: AgentCustomerService, useValue: agentService },
+        { provide: AuthService, useValue: authService },
         { provide: ListingService, useValue: listingService },
         { provide: ChatService, useValue: chatService },
         {
@@ -92,5 +99,50 @@ describe('AgentCustomerServicePageComponent', () => {
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  });
+});
+
+describe('AgentCustomerServicePageComponent discovery landing', () => {
+  it('uses the existing Agent destination without starting any request before submit', async () => {
+    const discoveryService = jasmine.createSpyObj<AgentMarketplaceDiscoveryService>(
+      'AgentMarketplaceDiscoveryService',
+      ['createOrResumeSession', 'getSession', 'getMessages', 'sendMessage'],
+    );
+
+    await TestBed.configureTestingModule({
+      imports: [AgentCustomerServicePageComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        { provide: AGENT_DISCOVERY_ENABLED, useValue: true },
+        { provide: AGENT_CUSTOMER_SERVICE_ENABLED, useValue: true },
+        { provide: AgentMarketplaceDiscoveryService, useValue: discoveryService },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: {
+              paramMap: { get: () => null },
+              queryParamMap: { get: () => null },
+            },
+          },
+        },
+      ],
+    }).compileComponents();
+
+    const discoveryFixture = TestBed.createComponent(AgentCustomerServicePageComponent);
+    discoveryFixture.detectChanges();
+
+    expect(discoveryFixture.nativeElement.querySelector('h1')?.textContent)
+      .toContain('Marketplace discovery');
+    expect(discoveryFixture.nativeElement.querySelector(
+      'app-agent-marketplace-discovery',
+    )).not.toBeNull();
+    expect(discoveryFixture.nativeElement.querySelector(
+      'app-agent-customer-service-thread',
+    )).toBeNull();
+    expect(discoveryService.createOrResumeSession).not.toHaveBeenCalled();
+    expect(discoveryService.getSession).not.toHaveBeenCalled();
+    expect(discoveryService.getMessages).not.toHaveBeenCalled();
+    expect(discoveryService.sendMessage).not.toHaveBeenCalled();
   });
 });

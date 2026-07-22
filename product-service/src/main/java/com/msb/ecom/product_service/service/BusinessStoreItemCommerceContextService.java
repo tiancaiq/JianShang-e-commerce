@@ -6,6 +6,7 @@ import com.msb.ecom.product_service.dto.BusinessStoreItemCommerceContextResponse
 import com.msb.ecom.product_service.dto.BusinessStoreItemSearchRequest;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.model.ListingDependencyUnavailableException;
 import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.repository.BusinessStoreItemSearchCriteria;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
@@ -17,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class BusinessStoreItemCommerceContextService {
@@ -25,14 +29,17 @@ public class BusinessStoreItemCommerceContextService {
 
     private final ListingDraftRepository listingDraftRepository;
     private final ListingMediaRepository listingMediaRepository;
+    private final AuthServiceClient authServiceClient;
     private final String internalServiceToken;
 
     public BusinessStoreItemCommerceContextService(
             ListingDraftRepository listingDraftRepository,
             ListingMediaRepository listingMediaRepository,
+            AuthServiceClient authServiceClient,
             @Value("${commerce.internal-service-token}") String internalServiceToken) {
         this.listingDraftRepository = listingDraftRepository;
         this.listingMediaRepository = listingMediaRepository;
+        this.authServiceClient = authServiceClient;
         this.internalServiceToken = internalServiceToken;
     }
 
@@ -53,8 +60,9 @@ public class BusinessStoreItemCommerceContextService {
         String nextCursor = hasMore && !rows.isEmpty()
                 ? BusinessStoreItemSearchRequests.encodeCursor(rows.get(rows.size() - 1))
                 : null;
+        Map<String, StoreProvenance> provenances = storeProvenances(rows);
         return new BusinessStoreItemCommerceContextPageResponse(
-                rows.stream().map(BusinessStoreItemCommerceContextResponse::from).toList(),
+                rows.stream().map(row -> response(row, provenances.get(row.businessId()))).toList(),
                 new BusinessStoreItemCommerceContextPageResponse.PageMetadata(nextCursor, hasMore));
     }
 
@@ -102,10 +110,82 @@ public class BusinessStoreItemCommerceContextService {
     }
 
     private BusinessStoreItemCommerceContextResponse response(ListingDraftResponse listing) {
+        return response(listing, storeProvenance(listing));
+    }
+
+    private BusinessStoreItemCommerceContextResponse response(
+            ListingDraftResponse listing,
+            StoreProvenance provenance) {
         String thumbnailUrl = listingMediaRepository.findPublicImagesByListingId(listing.id()).stream()
                 .findFirst()
                 .map(image -> image.url())
                 .orElse(null);
-        return BusinessStoreItemCommerceContextResponse.from(listing, thumbnailUrl);
+        return BusinessStoreItemCommerceContextResponse.from(
+                listing,
+                thumbnailUrl,
+                provenance == null ? null : provenance.storeName(),
+                provenance == null ? null : provenance.storeSlug(),
+                provenance != null && provenance.businessVerified(),
+                provenance == null ? null : provenance.publicCity(),
+                provenance == null ? null : provenance.publicRegion());
+    }
+
+    private StoreProvenance storeProvenance(ListingDraftResponse listing) {
+        if (!"BUSINESS".equals(listing.sellerType()) || listing.businessId() == null) {
+            return null;
+        }
+        return storeProvenances(List.of(listing)).get(listing.businessId());
+    }
+
+    // Projects only Auth-owned public store labels into the internal cart catalog view.
+    private Map<String, StoreProvenance> storeProvenances(List<ListingDraftResponse> listings) {
+        Set<String> businessIds = listings.stream()
+                .filter(listing -> "BUSINESS".equals(listing.sellerType()))
+                .map(ListingDraftResponse::businessId)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toSet());
+        if (businessIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> expectedStoreIds = listings.stream()
+                .filter(listing -> "BUSINESS".equals(listing.sellerType()))
+                .filter(listing -> listing.businessId() != null && listing.storeId() != null)
+                .collect(Collectors.toMap(
+                        ListingDraftResponse::businessId,
+                        ListingDraftResponse::storeId,
+                        (first, ignored) -> first));
+        try {
+            AuthServiceClient.AdminIdentityLabels labels =
+                    authServiceClient.lookupPublicSellerLabels(Set.of(), businessIds);
+            if (labels.businesses() == null) {
+                return Map.of();
+            }
+            return labels.businesses().stream()
+                    .filter(label -> label.id() != null && expectedStoreIds.get(label.id()) != null)
+                    .filter(label -> expectedStoreIds.get(label.id()).equals(label.storeId()))
+                    .collect(Collectors.toMap(
+                            AuthServiceClient.BusinessIdentityLabel::id,
+                            this::storeProvenance,
+                            (first, ignored) -> first));
+        } catch (AuthServiceClient.DependencyUnavailableException exception) {
+            throw new ListingDependencyUnavailableException("Public business store labels are unavailable.", exception);
+        }
+    }
+
+    private StoreProvenance storeProvenance(AuthServiceClient.BusinessIdentityLabel label) {
+        return new StoreProvenance(
+                label.storeName(),
+                label.storeSlug(),
+                label.verified(),
+                label.publicCity(),
+                label.publicRegion());
+    }
+
+    private record StoreProvenance(
+            String storeName,
+            String storeSlug,
+            boolean businessVerified,
+            String publicCity,
+            String publicRegion) {
     }
 }

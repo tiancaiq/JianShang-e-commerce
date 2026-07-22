@@ -19,8 +19,46 @@ public interface ProductCommerceClient {
             BigDecimal priceAmount,
             String currency,
             String status,
-            String thumbnailUrl
+            String thumbnailUrl,
+            String storeName,
+            String storeSlug,
+            Boolean businessVerified,
+            String publicCity,
+            String publicRegion
     ) {
+        public ProductContext(
+                String listingId,
+                String businessId,
+                String storeId,
+                String sellerType,
+                String title,
+                String sku,
+                String condition,
+                long version,
+                BigDecimal priceAmount,
+                String currency,
+                String status,
+                String thumbnailUrl) {
+            this(
+                    listingId,
+                    businessId,
+                    storeId,
+                    sellerType,
+                    title,
+                    sku,
+                    condition,
+                    version,
+                    priceAmount,
+                    currency,
+                    status,
+                    thumbnailUrl,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+        }
+
         public ProductContext(
                 String listingId,
                 String businessId,
@@ -43,7 +81,12 @@ public interface ProductCommerceClient {
                     priceAmount,
                     currency,
                     status,
-                    thumbnailUrl);
+                    thumbnailUrl,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
         }
     }
 }

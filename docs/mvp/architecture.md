@@ -346,8 +346,15 @@ The payment service never receives raw card data.
 
 ### 4.8 Notification service (V2)
 
-Archived V2 tutorial stub: `notification-service`. It is not part of the
-active MVP Maven build or CI validation.
+`V2-NOT-01A` reconstructs the archived `notification-service` in place and
+returns it to the Maven reactor and migration CI as a default-off V2 module.
+The first boundary persists buyer `ORDER_CONFIRMED` in-app notifications from
+strict direct/fake `order.confirmed` version-2 events. `V2-NOT-01B` adds a
+default-off authenticated read API that resolves the active application user
+through Auth Service `GET /api/v1/users/me` using only the relayed bearer and
+correlation ID. `V2-NOT-01C` adds the default-off gateway boundary and buyer
+account notification center over that read API. Kafka, email, preferences,
+polling, badge counts, and runtime activation remain deferred.
 
 Responsibilities:
 

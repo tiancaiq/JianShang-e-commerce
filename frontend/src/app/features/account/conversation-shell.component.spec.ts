@@ -230,6 +230,22 @@ describe('ConversationShellComponent', () => {
     expect(chatService.getMessages).not.toHaveBeenCalled();
   });
 
+  it('uses the same single Agent destination when discovery alone is enabled', () => {
+    Object.defineProperty(component, 'aiDiscoveryEnabled', { value: true });
+    fixture.detectChanges();
+    chatService.getConversation.calls.reset();
+    chatService.getMessages.calls.reset();
+
+    const row = fixture.nativeElement.querySelector('.agent-row') as HTMLButtonElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain('Marketplace discovery');
+    row.click();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(chatService.getConversation).not.toHaveBeenCalled();
+    expect(chatService.getMessages).not.toHaveBeenCalled();
+  });
+
   it('opens a direct conversation route', () => {
     paramMap.next(convertToParamMap({ conversationId }));
 

@@ -27,7 +27,8 @@ LOGGER = logging.getLogger(__name__)
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _FIXED_ID_PATTERN = re.compile(r"^[0-9A-Z]{26}$")
 _LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
-_VERSION_PATTERN = re.compile(r"^[1-9][0-9]{0,18}$")
+_LISTING_VERSION_PATTERN = re.compile(r"^(?:0|[1-9][0-9]{0,18})$")
+_CATEGORY_VERSION_PATTERN = re.compile(r"^[1-9][0-9]{0,18}$")
 
 
 @dataclass(frozen=True)
@@ -104,8 +105,8 @@ class ListingKnowledgeRetrievalRequest(BaseModel):
     @field_validator("listing_version")
     @classmethod
     def valid_version(cls, value: str) -> str:
-        if _VERSION_PATTERN.fullmatch(value) is None:
-            raise ValueError("listingVersion must be a positive decimal version")
+        if _LISTING_VERSION_PATTERN.fullmatch(value) is None:
+            raise ValueError("listingVersion must be a decimal listing version")
         return value
 
     @field_validator("query")
@@ -161,8 +162,8 @@ class KnowledgePassage(BaseModel):
     @field_validator("source_version")
     @classmethod
     def valid_source_version(cls, value: str) -> str:
-        if _VERSION_PATTERN.fullmatch(value) is None:
-            raise ValueError("sourceVersion must be a positive decimal version")
+        if _LISTING_VERSION_PATTERN.fullmatch(value) is None:
+            raise ValueError("sourceVersion must be a decimal listing version")
         return value
 
     @field_validator("content_hash")
@@ -215,7 +216,7 @@ class CategoryGuidanceVersionScope(BaseModel):
     @field_validator("source_version")
     @classmethod
     def valid_version(cls, value: str) -> str:
-        if _VERSION_PATTERN.fullmatch(value) is None:
+        if _CATEGORY_VERSION_PATTERN.fullmatch(value) is None:
             raise ValueError("sourceVersion must be a positive decimal version")
         return value
 
@@ -315,7 +316,7 @@ class CategoryGuidancePassage(BaseModel):
     @field_validator("source_version")
     @classmethod
     def valid_source_version(cls, value: str) -> str:
-        if _VERSION_PATTERN.fullmatch(value) is None:
+        if _CATEGORY_VERSION_PATTERN.fullmatch(value) is None:
             raise ValueError("sourceVersion must be a positive decimal version")
         return value
 

@@ -246,8 +246,11 @@ management-style business portal behind independent default-off Angular and
 gateway gates. It adds no fulfillment mutations. See
 `docs/v2/commerce/v2-ord-02c-business-fulfillment-ui.md`.
 
-`V2-ORD-02C` advances the business lane to `3/3`. The lane is now paused for
-mandatory business-only cleanup before `V2-SHP-01A`.
+`V2-ORD-02C` advanced the business lane to `3/3`.
+`V2-ORD-CLEAN-P0-01` completed on 2026-07-20 and reset it to `0/3` after
+re-auditing read isolation, finance omission, cursor bounds, dependency-error
+mapping, default-off UI/gateway behavior, and the V3/V4 query indexes. The lane
+is paused before `V2-SHP-01A`.
 
 ## 9. Deferred Fulfillment Sequence
 

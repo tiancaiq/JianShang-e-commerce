@@ -1,10 +1,18 @@
 package com.msb.ecom.order_service.controller;
 
+import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
+import com.msb.ecom.order_service.dto.BusinessOrderAcceptanceResponse;
 import com.msb.ecom.order_service.dto.BusinessOrderDetailResponse;
 import com.msb.ecom.order_service.dto.BusinessOrderPageResponse;
+import com.msb.ecom.order_service.service.BusinessOrderAcceptanceService;
 import com.msb.ecom.order_service.service.BusinessOrderService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,9 +22,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class BusinessOrderController {
 
     private final BusinessOrderService service;
+    private final BusinessOrderAcceptanceService acceptanceService;
 
-    public BusinessOrderController(BusinessOrderService service) {
+    public BusinessOrderController(
+            BusinessOrderService service,
+            BusinessOrderAcceptanceService acceptanceService) {
         this.service = service;
+        this.acceptanceService = acceptanceService;
     }
 
     @GetMapping
@@ -33,5 +45,23 @@ public class BusinessOrderController {
             @PathVariable String businessId,
             @PathVariable String businessOrderId) {
         return service.detail(businessId, businessOrderId);
+    }
+
+    @PostMapping("/{businessOrderId}/accept")
+    public ResponseEntity<BusinessOrderAcceptanceResponse> accept(
+            @PathVariable String businessId,
+            @PathVariable String businessOrderId,
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest request) {
+        BusinessOrderAcceptanceResponse response = acceptanceService.accept(
+                businessId,
+                businessOrderId,
+                ifMatch,
+                idempotencyKey,
+                CorrelationIdFilter.current(request));
+        return ResponseEntity.ok()
+                .eTag(Long.toString(response.version()))
+                .body(response);
     }
 }

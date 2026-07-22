@@ -71,6 +71,14 @@ class CartServiceTests {
         var response = service.add(LISTING_ID, 2);
 
         assertThat(response.totalQuantity()).isEqualTo(2);
+        assertThat(response.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.storeName()).isEqualTo("Acme Trading Store");
+                    assertThat(item.storeSlug()).isEqualTo("acme-trading-store");
+                    assertThat(item.businessVerified()).isTrue();
+                    assertThat(item.publicCity()).isEqualTo("Irvine");
+                    assertThat(item.publicRegion()).isEqualTo("CA");
+                });
         assertThat(response.totals()).singleElement()
                 .satisfies(total -> {
                     assertThat(total.currency()).isEqualTo("USD");
@@ -124,10 +132,18 @@ class CartServiceTests {
                 "01S00000000000000000000001",
                 "BUSINESS",
                 "Store item",
+                "SKU-STORE-ITEM",
+                "NEW",
+                7,
                 new BigDecimal("12.50"),
                 "USD",
                 status,
-                null);
+                null,
+                "Acme Trading Store",
+                "acme-trading-store",
+                true,
+                "Irvine",
+                "CA");
     }
 
     private InventoryAvailabilityClient.Availability availability(int available) {

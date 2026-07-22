@@ -9,7 +9,7 @@ import { MarketplaceNavbarComponent } from '../../features/marketplace/component
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 import { ToastService } from '../../core/services/toast.service';
 import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
-import { environment } from '../../../environments/environment';
+import { CART_ENABLED } from '../../features/cart/cart.capability';
 
 @Component({
   selector: 'app-marketplace-layout',
@@ -19,6 +19,7 @@ import { environment } from '../../../environments/environment';
     <div class="marketplace-shell" [class.account-dashboard-shell]="isAccountDashboardView()">
       <app-marketplace-navbar
         [authenticated]="authService.isAuthenticated()"
+        [cartEnabled]="cartEnabled"
         [cartCount]="cartEnabled ? cartService.count() : 0"
         [currentUser]="authService.user()"
         (loginRequested)="openAuthDialog()"
@@ -333,7 +334,7 @@ import { environment } from '../../../environments/environment';
 export class MarketplaceLayoutComponent implements OnInit {
   authService = inject(AuthService);
   cartService = inject(CartService);
-  readonly cartEnabled = environment.features.cart;
+  readonly cartEnabled = inject(CART_ENABLED);
   private toastService = inject(ToastService);
   private router = inject(Router);
   authDialogOpen = signal(false);
@@ -412,9 +413,12 @@ export class MarketplaceLayoutComponent implements OnInit {
     const authFlow = this.authMode() === 'login'
       ? this.authService.nativeLogin({ email, password })
       : this.authService.nativeRegister({ email, password, displayName });
+    const unauthenticatedMessage = this.authMode() === 'login'
+      ? 'Email or password is incorrect.'
+      : 'Account could not be created. Try again.';
 
     authFlow.pipe(take(1)).subscribe({
-      next: state => this.finishAuthAttempt(state.authenticated, 'Account is ready.'),
+      next: state => this.finishAuthAttempt(state.authenticated, unauthenticatedMessage),
       error: error => {
         this.authDialogBusy.set(false);
         this.authDialogError.set(this.nativeAuthErrorMessage(error));

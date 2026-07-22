@@ -8,6 +8,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -30,6 +31,7 @@ class NativeAuthServiceTests {
 
     private final ClientRegistrationRepository registrations = mock(ClientRegistrationRepository.class);
     private final OAuth2AuthorizedClientService authorizedClients = mock(OAuth2AuthorizedClientService.class);
+    private final OAuth2AuthorizedClientRepository authorizedClientRepository = mock(OAuth2AuthorizedClientRepository.class);
     private final JwtDecoderFactory<ClientRegistration> decoders = mock(JwtDecoderFactory.class);
     private final SecurityContextRepository securityContexts = mock(SecurityContextRepository.class);
     private final HttpServletRequest servletRequest = mock(HttpServletRequest.class);
@@ -139,6 +141,7 @@ class NativeAuthServiceTests {
         return new NativeAuthService(
                 registrations,
                 authorizedClients,
+                authorizedClientRepository,
                 decoders,
                 securityContexts,
                 new ObjectMapper(),

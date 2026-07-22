@@ -56,6 +56,13 @@ Completed:
 - `AI-RAG-02E-CATEGORY` Agent Service category-guidance adapter.
 - `AI-CS-01A` Agent Service persistence foundation.
 - `AI-CS-01B` authenticated Agent Service APIs.
+- `AI-CS-01C/01C-2/01D/01E` listing-only orchestration, provider binding,
+  default-off gateway/UI integration, deterministic offline evaluation, and
+  release blocking.
+- `AI-CS-02B/02C` pinned Python LangChain Core runtime composition plus
+  explicit default-off demo configuration, followed by bounded BFF
+  session/CSRF and validation-diagnostic stabilization and
+  `AI-CS-CLEAN-P0-03`.
 - Existing Angular `Marketplace agent` placeholders in the floating chat and
   `/account/messages` UI.
 - Existing BFF authentication and correlation handling.
@@ -67,7 +74,8 @@ Completed:
   typed Responses abstraction.
 - `AI-LIST-01C` Product-authorized owned-draft listing media adapter and
   completed AI-LIST boundary cleanup.
-- `AI-LIST-02` approved seller proposal review and confirmed-application plan.
+- `AI-LIST-02A/B/C` authenticated proposal review, seller-controlled UI, and
+  confirmed versioned Product application, followed by mandatory cleanup.
 
 Pending:
 
@@ -75,9 +83,9 @@ Pending:
 - Customer-service production evidence and approved cohort activation; source
   orchestration, gateway/UI integration, and offline release gates are
   complete but remain default-off.
-- `AI-LIST-02A/B/C` authenticated proposal API, seller review UI, and
-  confirmed versioned Product application.
-- Optional LangChain integration through a separate dependency decision.
+- Query-first `AI-DISC` contract reconciliation; no discovery feature is
+  implemented or approved yet.
+- Any richer LangChain or LangGraph behavior beyond the bounded Core adapter.
 - Report classification and automated operations.
 
 No future task should commit an API key or place it in source code, shared
@@ -700,8 +708,10 @@ Required outcomes:
 
 ### 12. AI-LC-01 LangChain integration
 
-LangChain is intentionally introduced after the first end-to-end RAG path is
-working and measurable.
+The original `AI-LC-01A` dependency attempt stopped cleanly while LangChain was
+absent. The later approved `AI-CS-02B` slice installed only
+`langchain-core==1.4.9` and completed the smallest typed Runnable adapter after
+the measurable offline RAG baseline.
 
 The initial implementation must expose replaceable boundaries:
 
@@ -712,7 +722,12 @@ EmbeddingProvider
 ModelProvider
 ```
 
-The LangChain slice may add:
+The completed adapter preserves the existing external APIs, authorization,
+source filters, answer contracts, MySQL authority, and offline eval baseline.
+LangChain types remain internal to Agent composition, and the adapter is
+constructed only after every default-off generation gate passes.
+
+Possible future, separately approved work may add:
 
 - query rewriting;
 - multiple retriever composition;
@@ -725,16 +740,9 @@ The LangChain slice may add:
 LangGraph may be added only when explicit state graphs, branching, resumable
 work, or human-review checkpoints remove demonstrated complexity.
 
-The LangChain migration must preserve existing external APIs, authorization,
-source filters, answer contracts, and eval baselines. Do not place LangChain
-types in application API contracts or persistence schemas.
-
-Suggested implementation-task prompt:
-
-> Implement AI-LC-01 only after AI-CS-01E has an approved evaluation baseline.
-> Add LangChain behind the existing orchestration and retrieval interfaces.
-> Preserve behavior and compare retrieval, grounding, latency, and cost against
-> the baseline before selecting the default implementation.
+No LangGraph dependency, memory, checkpointer, tool discovery, query rewriting,
+reranking, or retrieval fallback was added. Those remain new behavior and
+require a separate measured slice.
 
 ### 13. AI-LIST-01 seller image-to-listing proposal
 
@@ -825,14 +833,13 @@ Implement as three bounded slices:
    authoritative writer, and no submit, approval, activation, or publication
    follows automatically.
 
-The lane starts at `0/3`; 02A/02B/02C reach `3/3` and trigger mandatory
-AI-only cleanup before any limited cohort or successor.
-
-`AI-LIST-02A` is complete. Agent Flyway V6 and the default-off authenticated
-proposal create/get/dismiss API enforce strict actor/listing/media/version
-scope, DB-coordinated idempotency, hidden ownership, 24-hour content expiry,
-90-day safe tombstones, and no Product write. The lane is now `1/3`;
-`AI-LIST-02B/C` remain unstarted.
+`AI-LIST-02A/B/C` and `AI-LIST-CLEAN-P0-02` are complete. Agent Flyway V6 and
+the default-off authenticated proposal API enforce strict actor/listing/media/
+version scope, DB-coordinated idempotency, hidden ownership, 24-hour content
+expiry, 90-day safe tombstones, and no automatic Product write. The seller UI
+applies only explicitly selected final values through the existing Product
+PATCH plus `If-Match`, never auto-retries a stale write, and never submits or
+publishes. The mandatory cleanup reset the AI lane to `0/3`.
 
 Live activation remains blocked by multimodal quality, latency, cost, privacy,
 kill-switch, rollback, and explicit rollout evidence. LangChain remains
@@ -955,11 +962,39 @@ Each implementation task must report:
 - whether any live provider request was made;
 - confirmation that unrelated worktree changes were preserved.
 
+## Approved Next Local Baseline: AI-DISC-01A
+
+`AI-DISC-01A` is the approved query-first discovery direction, but it is not
+implemented by `AI-CS-CLEAN-P0-03`. Its later bounded implementation must:
+
+- use the official LangChain v1 `langchain.agents.create_agent` API, not a
+  deprecated LangGraph prebuilt helper;
+- use strict `ToolStrategy(DiscoveryTurnResult)` structured output and only
+  typed, allowlisted Product tools;
+- keep application state server-owned, use an ephemeral ReAct run per request,
+  and preserve MySQL as the authoritative cross-turn state;
+- never persist or expose chain-of-thought;
+- enforce `ModelCallLimitMiddleware` at five model calls, a whole-turn
+  `ToolCallLimitMiddleware` at six tool calls, `SEARCH_INDIVIDUAL` at two
+  calls, and `GET_LISTING` at five calls;
+- enforce an eight-second provider budget and twelve-second whole-turn budget;
+- allow only search, detail, clarify, recommend, no-results, and refuse
+  outcomes, followed by deterministic final guardrails; and
+- detail-revalidate every recommendation and return three through five
+  recommendations when enough eligible results exist.
+
+The full pinned `langchain` dependency may be added only inside the separately
+assigned `AI-DISC-01A` slice. That slice starts with offline fakes and no live
+provider, Product, or OpenSearch runtime traffic.
+
 ## Recommended Next Task
 
-`AI-LIST-CLEAN-P0-01` is complete and the AI lane is 0/3. Pause for a separate
-PM assignment. Do not resume dependency-blocked `AI-LC-01A`, activate either
-listing-proposal gate, add seller UI/API or proposal application, or
-automatically begin another roadmap feature. Policy, safety, and FAQ sources
-remain deferred pending their moderation/support owners, and category
-retrieval remains disabled pending explicit rollout approval.
+`AI-CS-CLEAN-P0-03` is complete locally and the AI lane is `0/3`. Pause for a
+separate PM assignment. The recorded next direction is a query-first
+`AI-DISC-01A` local baseline under the exact boundary above; it is approved
+direction only, not implemented or release-approved by this cleanup. Source
+changes are verified locally and deployed in explicit batches owned by a
+separate task. Do not activate Agent/listing-proposal gates, start a live
+cohort, add LangGraph behavior, or automatically begin another roadmap
+feature. Policy, safety, and FAQ sources remain deferred pending their owners,
+and category retrieval remains disabled pending explicit rollout approval.

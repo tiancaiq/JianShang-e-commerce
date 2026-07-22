@@ -11,7 +11,13 @@ public interface AuthServiceClient {
 
     CurrentUser requireCurrentUser(String bearerToken);
 
+    // Resolves REP-01A actors while preserving authentication versus Auth dependency failures.
+    CurrentUser requireCurrentUserForReport(String bearerToken);
+
     BusinessMembershipAuthorization requireBusinessListingPermission(String bearerToken, String businessId);
+
+    // Distinguishes authoritative non-editable membership from authentication and dependency failures.
+    BusinessListingPermissionDecision checkBusinessListingPermission(String bearerToken, String businessId);
 
     BusinessStoreContextAuthorization requireBusinessStoreContext(String bearerToken, String businessId);
 
@@ -50,6 +56,23 @@ public interface AuthServiceClient {
             String status,
             List<String> permissions
     ) {
+    }
+
+    enum BusinessListingPermissionDecision {
+        EDITABLE,
+        NOT_EDITABLE
+    }
+
+    final class AuthenticationException extends RuntimeException {
+        public AuthenticationException() {
+            super("Authenticated user is required.");
+        }
+    }
+
+    final class DependencyUnavailableException extends RuntimeException {
+        public DependencyUnavailableException() {
+            super("Auth service is unavailable.");
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

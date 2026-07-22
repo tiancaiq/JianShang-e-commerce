@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "ai-disc-01c-offline-fixture-v1",
+  "fixtureVersion": "ai-disc-01c-baseline-v1",
+  "seed": 20260721,
+  "evaluatedAt": "2026-07-21T12:00:00Z",
+  "runtimeSwitches": {
+    "globalKillSwitchEngaged": true,
+    "discoveryCapabilityEnabled": false,
+    "orchestrationEnabled": false,
+    "productToolsEnabled": false,
+    "providerEnabled": false,
+    "gatewayEnabled": false,
+    "frontendEnabled": false
+  },
+  "productionEvidence": {
+    "quality": "UNKNOWN",
+    "latency": "UNKNOWN",
+    "cost": "UNKNOWN"
+  },
+  "approvals": {
+    "privacy": "UNKNOWN",
+    "policy": "UNKNOWN",
+    "rollout": "UNKNOWN"
+  },
+  "cases": [
+    {
+      "id": "broad-sleep-comfort",
+      "scenario": "BROAD_SLEEP_COMFORT",
+      "expectedOutcome": "RECOMMEND",
+      "turns": 1,
+      "expectedRecommendationCount": 3,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 320
+    },
+    {
+      "id": "clarification-refinement",
+      "scenario": "CLARIFICATION_REFINEMENT",
+      "expectedOutcome": "RECOMMEND",
+      "turns": 2,
+      "expectedRecommendationCount": 3,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 280
+    },
+    {
+      "id": "budget-city-county-condition",
+      "scenario": "HARD_FILTERS",
+      "expectedOutcome": "RECOMMEND",
+      "turns": 2,
+      "expectedRecommendationCount": 4,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 4,
+      "simulatedLatencyMs": 410
+    },
+    {
+      "id": "stale-removed-ineligible",
+      "scenario": "STALE_REMOVED_INELIGIBLE",
+      "expectedOutcome": "NO_RESULTS",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 360
+    },
+    {
+      "id": "missing-public-facts",
+      "scenario": "MISSING_FACTS",
+      "expectedOutcome": "RECOMMEND",
+      "turns": 1,
+      "expectedRecommendationCount": 3,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 330
+    },
+    {
+      "id": "prompt-media-injection-privacy",
+      "scenario": "INJECTION_PRIVACY",
+      "expectedOutcome": "HANDOFF",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 120
+    },
+    {
+      "id": "medical-claim-boundary",
+      "scenario": "MEDICAL_BOUNDARY",
+      "expectedOutcome": "REFUSE",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 0,
+      "expectedSearchCalls": 0,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 8
+    },
+    {
+      "id": "empty-search-no-results",
+      "scenario": "NO_RESULTS",
+      "expectedOutcome": "NO_RESULTS",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 2,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 170
+    },
+    {
+      "id": "fake-product-outage",
+      "scenario": "PRODUCT_OUTAGE",
+      "expectedOutcome": "UNAVAILABLE",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 1,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 2000
+    },
+    {
+      "id": "whole-turn-timeout",
+      "scenario": "WHOLE_TURN_TIMEOUT",
+      "expectedOutcome": "TIMED_OUT",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 1,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 12000
+    },
+    {
+      "id": "explicit-cancellation",
+      "scenario": "CANCELLATION",
+      "expectedOutcome": "CANCELLED",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 1,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 40
+    },
+    {
+      "id": "malformed-structured-output",
+      "scenario": "MALFORMED_MODEL_OUTPUT",
+      "expectedOutcome": "REJECTED",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 1,
+      "expectedSearchCalls": 0,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 80
+    },
+    {
+      "id": "model-tool-call-limits",
+      "scenario": "CALL_LIMITS",
+      "expectedOutcome": "LIMIT_REJECTED",
+      "turns": 1,
+      "expectedRecommendationCount": 0,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 2,
+      "expectedDetailCalls": 0,
+      "simulatedLatencyMs": 520
+    },
+    {
+      "id": "replay-idempotency-ranking",
+      "scenario": "REPLAY_IDEMPOTENCY",
+      "expectedOutcome": "REPLAYED",
+      "turns": 2,
+      "expectedRecommendationCount": 3,
+      "expectedModelCalls": 3,
+      "expectedSearchCalls": 1,
+      "expectedDetailCalls": 3,
+      "simulatedLatencyMs": 310
+    }
+  ]
+}

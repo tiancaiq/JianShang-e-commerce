@@ -18,6 +18,11 @@ class SettingsTest(unittest.TestCase):
             settings = Settings.from_env()
 
         self.assertFalse(settings.agent_api.enabled)
+        self.assertFalse(settings.agent_api.kill_switch_enabled)
+        self.assertFalse(settings.agent_api.orchestration_enabled)
+        self.assertFalse(settings.agent_api.retrieval_enabled)
+        self.assertFalse(settings.agent_api.provider_enabled)
+        self.assertFalse(settings.agent_api.generation_enabled)
         self.assertIsNone(settings.agent_api.auth_service_url)
         self.assertIsNone(settings.agent_api.product_service_token)
 
@@ -36,6 +41,45 @@ class SettingsTest(unittest.TestCase):
                 product_service_url="http://product-service:8091",
                 product_service_token="secret",
             ).validate(persistence_enabled=True)
+
+    def test_customer_service_generation_requires_api_and_every_gate(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "AGENT_CUSTOMER_SERVICE_API_ENABLED",
+        ):
+            AgentApiSettings(orchestration_enabled=True).validate(
+                persistence_enabled=False
+            )
+
+        partial = AgentApiSettings(
+            enabled=True,
+            orchestration_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            product_service_url="http://product-service:8091",
+            product_service_token="secret",
+        )
+        partial.validate(persistence_enabled=True)
+        self.assertFalse(partial.generation_enabled)
+
+        enabled = AgentApiSettings(
+            enabled=True,
+            orchestration_enabled=True,
+            retrieval_enabled=True,
+            provider_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            product_service_url="http://product-service:8091",
+            product_service_token="secret",
+        )
+        enabled.validate(persistence_enabled=True)
+        self.assertTrue(enabled.generation_enabled)
+        self.assertFalse(
+            enabled.__class__(
+                **{
+                    **enabled.__dict__,
+                    "kill_switch_enabled": True,
+                }
+            ).generation_enabled
+        )
 
     def test_listing_proposal_api_and_generation_flags_are_default_off(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

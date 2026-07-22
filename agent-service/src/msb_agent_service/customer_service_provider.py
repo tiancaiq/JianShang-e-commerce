@@ -48,7 +48,7 @@ class ProviderListingInput(_StrictModel):
     listing_id: str = Field(alias="listingId", min_length=1, max_length=160)
     source_version: str = Field(
         alias="sourceVersion",
-        pattern=r"^[1-9][0-9]{0,19}$",
+        pattern=r"^(?:0|[1-9][0-9]{0,19})$",
     )
     title: str = Field(min_length=1, max_length=180)
     transaction_notice: str = Field(
@@ -64,7 +64,7 @@ class ProviderPassageInput(_StrictModel):
     source_id: str = Field(alias="sourceId", min_length=1, max_length=160)
     source_version: str = Field(
         alias="sourceVersion",
-        pattern=r"^[1-9][0-9]{0,19}$",
+        pattern=r"^(?:0|[1-9][0-9]{0,19})$",
     )
     ordinal: int = Field(ge=0, le=100_000)
     section_label: str = Field(

@@ -21,6 +21,15 @@ model execution, and evaluation fixtures. `AI-CS-01C-2` binds that model
 interface to the existing Responses provider through a strict redacted adapter,
 but does not install it in the application runtime. `AI-CS-01E-A` adds a
 deterministic zero-network offline evaluation runner and strict report schema.
+`AI-CS-02B` adds the pinned `langchain-core==1.4.9` typed Runnable adapter
+behind the existing answerer and composes it only when every application-owned
+generation gate passes. It adds no framework type to HTTP or persistence
+contracts and no LangChain memory or checkpointer.
+`AI-DISC-01A` additionally pins `langchain==1.3.14` for the official v1
+`langchain.agents.create_agent` API. Discovery uses an ephemeral graph per
+request with strict structured output and bounded model/tool middleware;
+MySQL remains the only cross-turn authority and no chain-of-thought is
+persisted or exposed.
 `AI-LIST-01A` adds an unwired, default-off image-to-listing proposal contract
 over an actor-scoped media protocol and injected fake vision transport. Its
 strict output is review-only and cannot write, submit, or publish a listing.
@@ -112,6 +121,10 @@ service does not load or create `.env` files.
 | `AGENT_KNOWLEDGE_INGESTION_ENABLED` | No | `false` | Start durable Kafka intake after schema validation |
 | `AGENT_PERSISTENCE_ENABLED` | No | `false` | Validate and expose readiness for internal agent persistence |
 | `AGENT_CUSTOMER_SERVICE_API_ENABLED` | No | `false` | Enable authenticated customer-service routes; requires persistence and service dependencies |
+| `AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED` | No | `false` | Emergency generation stop; `true` overrides every generation gate |
+| `AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED` | No | `false` | Permit bounded listing customer-service orchestration |
+| `AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED` | No | `false` | Permit listing-only knowledge retrieval |
+| `AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED` | No | `false` | Permit provider execution after every preceding gate passes |
 | `AUTH_SERVICE_URL` | When customer-service API is enabled | none | Resolve the app-owned actor from the BFF-relayed bearer token |
 | `AGENT_API_DEPENDENCY_TIMEOUT_SECONDS` | No | `5` | Bounded Auth/Product dependency timeout |
 | `AGENT_MESSAGE_PAGE_DEFAULT_LIMIT` | No | `50` | Default message page size |
@@ -166,12 +179,13 @@ settings, and embedding identity. When ingestion is enabled, startup validates
 the externally migrated MySQL schema and connects the Kafka consumer; readiness
 reports `knowledgeIngestion` as `READY` only while its intake task is running.
 When agent persistence is enabled, startup validates the externally migrated
-V4 tables plus the V5 correlation-width update and readiness reports
-`agentPersistence=READY`. Customer-service
-routes additionally require their own feature flag. The source-level provider
-binding is not constructed by `create_app`; until a later activation slice
-explicitly installs the AI-CS-01C bounded answerer, enabling that flag reports
-`customerServiceApi=ORCHESTRATION_DEFERRED` and answer execution fails closed.
+Agent schema through V6 and readiness reports `agentPersistence=READY`.
+Customer-service
+routes additionally require their API and generation gates. Production
+composition is constructed only after the API, orchestration, retrieval, and
+provider gates are true and the kill switch is clear. Otherwise no production
+retriever, embedding provider, model provider, or LangChain adapter is
+constructed, and answer execution fails closed.
 When the processor is enabled, startup also requires the exact
 `openai`/`text-embedding-3-small`/`1536` index identity and an API key. Neither
 endpoint makes an OpenAI request. Prometheus metrics are available at
@@ -314,9 +328,13 @@ FastAPI never applies migrations. For the optional local `ai` profile:
 ```powershell
 docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai run --rm agent-migrations migrate
 docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai up -d agent-opensearch
-docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai up agent-index-bootstrap
-docker compose --env-file .env --env-file .env.local -p msb-ecom -f docker-compose.demo.yml --profile ai up -d --build agent-service
+docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai-bootstrap run --rm agent-index-bootstrap
+docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai up -d --build agent-service
 ```
+
+The tracked Agent Service dependency waits for successful Agent migrations and
+healthy OpenSearch before startup. Index bootstrap remains a separate explicit
+operation and is never an Agent startup dependency.
 
 The Product Service outbox publisher and Kafka broker must already be
 available on the same Compose network. The processor remains disabled by

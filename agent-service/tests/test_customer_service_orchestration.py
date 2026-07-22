@@ -97,10 +97,10 @@ def begin(question: str, *, retry_count: int = 0) -> BeginInvocation:
     return BeginInvocation(BeginInvocationResult.CREATED, invocation, message)
 
 
-def listing() -> ListingContext:
+def listing(source_version: str = "12") -> ListingContext:
     return ListingContext(
         listing_id=LISTING,
-        source_version="12",
+        source_version=source_version,
         title="Used bicycle",
         thumbnail_url=None,
         transaction_notice="Payment and delivery are arranged directly by participants.",
@@ -246,6 +246,37 @@ class ListingCustomerServiceOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("LISTING",), request.source_types)
         self.assertFalse(hasattr(model.requests[0], "actor_user_id"))
         self.assertIn("untrusted data", model.requests[0].instructions)
+
+    async def test_accepts_zero_listing_source_version_from_product_context(self) -> None:
+        answer = ModelAnswerCandidate(
+            body="The listing says the radio has a warm dial light.",
+            resolutionType="ANSWERED",
+            sources=[
+                {
+                    "sourceType": "LISTING",
+                    "sourceId": LISTING,
+                    "sourceVersion": "0",
+                    "label": "Current listing",
+                }
+            ],
+            actions=[],
+        )
+        orchestrator, _, retriever, model = self.orchestrator(
+            retriever=FakeRetriever(passages=(passage(source_version="0"),)),
+            model=FakeModel(answer=answer),
+        )
+
+        result = await orchestrator.answer(
+            begin=begin("What condition is this in?"),
+            actor_user_id=ACTOR,
+            listing=listing(source_version="0"),
+            correlation_id="correlation-zero-version",
+        )
+
+        self.assertEqual(AgentResolutionType.ANSWERED, result.resolution_type)
+        self.assertEqual("0", retriever.requests[0].listing_version)
+        self.assertEqual("0", model.requests[0].listing.source_version)
+        self.assertEqual("0", result.sources[0]["sourceVersion"])
 
     async def test_retry_uses_new_audit_sequences_without_overwriting_prior_attempt(self) -> None:
         orchestrator, repository, _, _ = self.orchestrator()

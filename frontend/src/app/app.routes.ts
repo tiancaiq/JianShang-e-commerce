@@ -2,6 +2,9 @@ import { Route, Routes } from '@angular/router';
 import { adminGuard } from './core/guards/admin.guard';
 import { authGuard } from './core/guards/auth.guard';
 import { environment } from '../environments/environment';
+import { BUSINESS_ORDERS_DEFAULT_ENABLED } from './features/business/business-orders.capability';
+import { NOTIFICATION_CENTER_DEFAULT_ENABLED } from './features/account/notification-center.capability';
+import { CART_DEFAULT_ENABLED } from './features/cart/cart.capability';
 
 // Keeps deferred components available for explicit tests without exposing them in the MVP route tree.
 export function sellerInventoryRoute(enabled: boolean): Route {
@@ -72,6 +75,16 @@ export function buyerAddressesRoute(enabled: boolean): Route {
   : { path: 'account/addresses', redirectTo: '/account', pathMatch: 'full' };
 }
 
+export function notificationCenterRoute(enabled: boolean): Route {
+  return enabled ? {
+      path: 'account/notifications',
+      canActivate: [authGuard],
+      loadComponent: () => import('./features/account/notification-center.component')
+        .then(m => m.NotificationCenterComponent),
+    }
+  : { path: 'account/notifications', redirectTo: '/account', pathMatch: 'full' };
+}
+
 export function categoryGuidanceRoute(enabled: boolean): Route {
   return enabled ? {
       path: 'category-guidance',
@@ -82,8 +95,11 @@ export function categoryGuidanceRoute(enabled: boolean): Route {
 }
 
 // Keeps the reserved agent paths ahead of :conversationId while defaulting to a network-silent redirect.
-export function agentMessageRoutes(enabled: boolean): Routes {
-  if (!enabled) {
+export function agentMessageRoutes(
+  customerServiceEnabled: boolean,
+  discoveryEnabled = false,
+): Routes {
+  if (!customerServiceEnabled && !discoveryEnabled) {
     return [
       { path: 'account/messages/agent/:sessionId', redirectTo: '/account/messages', pathMatch: 'full' },
       { path: 'account/messages/agent', redirectTo: '/account/messages', pathMatch: 'full' },
@@ -130,7 +146,7 @@ export const routes: Routes = [
       { path: 'store/items/new', loadComponent: () => import('./features/listings/listing-draft-form.component').then(m => m.ListingDraftFormComponent) },
       { path: 'store/items/:listingId/edit', loadComponent: () => import('./features/listings/listing-draft-form.component').then(m => m.ListingDraftFormComponent) },
       sellerInventoryRoute(environment.features.sellerInventory),
-      ...businessOrderRoutes(environment.features.businessOrders),
+      ...businessOrderRoutes(BUSINESS_ORDERS_DEFAULT_ENABLED),
       { path: 'account', loadComponent: () => import('./features/business/business-account.component').then(m => m.BusinessAccountComponent) },
       { path: 'profile', redirectTo: '/seller/account', pathMatch: 'full' },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -182,16 +198,20 @@ export const routes: Routes = [
       { path: 'marketplace', loadComponent: () => import('./features/marketplace/marketplace-home.component').then(m => m.MarketplaceHomeComponent) },
       { path: 'stores', loadComponent: () => import('./features/stores/business-stores.component').then(m => m.BusinessStoresComponent) },
       { path: 'stores/:storeSlug', loadComponent: () => import('./features/stores/public-store-profile.component').then(m => m.PublicStoreProfileComponent) },
-      cartRoute(environment.features.cart),
+      cartRoute(CART_DEFAULT_ENABLED),
       checkoutReviewRoute(environment.features.buyerCheckout),
       checkoutDetailRoute(environment.features.buyerCheckout),
       { path: 'sell', redirectTo: 'account/listings', pathMatch: 'full' },
       { path: 'account', canActivate: [authGuard], loadComponent: () => import('./features/account/account.component').then(m => m.AccountComponent) },
       { path: 'account/profile', canActivate: [authGuard], loadComponent: () => import('./features/account/profile.component').then(m => m.ProfileComponent) },
       buyerAddressesRoute(environment.features.buyerAddresses),
+      notificationCenterRoute(NOTIFICATION_CENTER_DEFAULT_ENABLED),
       { path: 'account/liked', canActivate: [authGuard], loadComponent: () => import('./features/account/liked-listings.component').then(m => m.LikedListingsComponent) },
       { path: 'account/seller-profile', canActivate: [authGuard], loadComponent: () => import('./features/seller/individual-seller-activation.component').then(m => m.IndividualSellerActivationComponent) },
-      ...agentMessageRoutes(environment.features.aiAssistant),
+      ...agentMessageRoutes(
+        environment.features.aiAssistant,
+        environment.features.aiDiscovery,
+      ),
       { path: 'account/messages', canActivate: [authGuard], loadComponent: () => import('./features/account/conversation-shell.component').then(m => m.ConversationShellComponent) },
       { path: 'account/messages/:conversationId', canActivate: [authGuard], loadComponent: () => import('./features/account/conversation-shell.component').then(m => m.ConversationShellComponent) },
       { path: 'account/listings', canActivate: [authGuard], loadComponent: () => import('./features/listings/account-listings-entry.component').then(m => m.AccountListingsEntryComponent) },

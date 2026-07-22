@@ -19,6 +19,7 @@ ACTIVE_MVP_SERVICE_ROOTS = {
     "api-gateway": "api_gateway",
     "auth-service": "auth_service",
     "chat-service": "chat_service",
+    "notification-service": "notification_service",
     "product-service": "product_service",
 }
 
@@ -32,12 +33,14 @@ COMMON_ROOTS = {
 SERVICE_DATABASE_NAMES = {
     "auth-service": {"auth_service", "identity"},
     "chat-service": {"chat"},
+    "notification-service": {"notification_service"},
     "product-service": {"catalog", "marketplace", "product-service", "product_service"},
 }
 
 SERVICE_FLYWAY_LOCATIONS = {
     "auth-service": "classpath:db/migration/identity",
     "chat-service": "classpath:db/migration/chat",
+    "notification-service": "classpath:db/migration/notifications",
     "product-service": "classpath:db/migration/catalog",
 }
 

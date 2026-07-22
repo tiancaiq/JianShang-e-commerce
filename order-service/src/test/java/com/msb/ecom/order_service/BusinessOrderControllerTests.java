@@ -3,9 +3,11 @@ package com.msb.ecom.order_service;
 import com.msb.ecom.common.web.autoconfigure.CommonWebAutoConfiguration;
 import com.msb.ecom.order_service.config.SecurityConfig;
 import com.msb.ecom.order_service.controller.BusinessOrderController;
+import com.msb.ecom.order_service.dto.BusinessOrderAcceptanceResponse;
 import com.msb.ecom.order_service.dto.BusinessOrderDetailResponse;
 import com.msb.ecom.order_service.dto.BusinessOrderPageResponse;
 import com.msb.ecom.order_service.model.BusinessOrderException;
+import com.msb.ecom.order_service.service.BusinessOrderAcceptanceService;
 import com.msb.ecom.order_service.service.BusinessOrderService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,10 +22,13 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,12 +45,20 @@ class BusinessOrderControllerTests {
     @MockitoBean
     BusinessOrderService service;
 
+    @MockitoBean
+    BusinessOrderAcceptanceService acceptanceService;
+
     @Test
     void businessRoutesRequireAuthentication() throws Exception {
         mockMvc.perform(get("/api/v1/businesses/{businessId}/orders", BUSINESS_ID))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get(
                         "/api/v1/businesses/{businessId}/orders/{businessOrderId}",
+                        BUSINESS_ID,
+                        BUSINESS_ORDER_ID))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(
+                        "/api/v1/businesses/{businessId}/orders/{businessOrderId}/accept",
                         BUSINESS_ID,
                         BUSINESS_ORDER_ID))
                 .andExpect(status().isUnauthorized());
@@ -137,6 +150,51 @@ class BusinessOrderControllerTests {
                 .andExpect(jsonPath("$.error.code").value("BUSINESS_ORDER_NOT_FOUND"))
                 .andExpect(jsonPath("$.error.correlationId")
                         .value("business-order-correlation"));
+    }
+
+    @Test
+    void acceptForwardsHeadersAndReturnsOnlyApprovedBodyAndQuotedEtag()
+            throws Exception {
+        when(acceptanceService.accept(
+                anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new BusinessOrderAcceptanceResponse(
+                        BUSINESS_ORDER_ID,
+                        "ACCEPTED",
+                        1,
+                        now()));
+
+        String body = mockMvc.perform(post(
+                        "/api/v1/businesses/{businessId}/orders/{businessOrderId}/accept",
+                        BUSINESS_ID,
+                        BUSINESS_ORDER_ID)
+                        .with(jwt())
+                        .header("If-Match", "\"0\"")
+                        .header("Idempotency-Key", "accept-key-001")
+                        .header("X-Correlation-Id", "accept-correlation"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"1\""))
+                .andExpect(jsonPath("$.businessOrderId").value(BUSINESS_ORDER_ID))
+                .andExpect(jsonPath("$.fulfillmentStatus").value("ACCEPTED"))
+                .andExpect(jsonPath("$.version").value(1))
+                .andExpect(jsonPath("$.updatedAt").value(now().toString()))
+                .andReturn().getResponse().getContentAsString();
+
+        verify(acceptanceService).accept(
+                BUSINESS_ID,
+                BUSINESS_ORDER_ID,
+                "\"0\"",
+                "accept-key-001",
+                "accept-correlation");
+        assertThat(body).doesNotContain(
+                "buyer",
+                "orderId",
+                "payment",
+                "provider",
+                "address",
+                "actor",
+                "idempotency",
+                "history",
+                "outbox");
     }
 
     private BusinessOrderPageResponse page(BigDecimal finance) {

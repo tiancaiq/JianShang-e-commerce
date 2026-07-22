@@ -115,6 +115,7 @@ public class BuyerOrderService {
                 order.paymentStatus(),
                 order.totalAmount(),
                 order.currency(),
+                order.version(),
                 order.createdAt(),
                 order.updatedAt(),
                 order.groups().stream().map(group -> new BuyerOrderDetailResponse.Group(

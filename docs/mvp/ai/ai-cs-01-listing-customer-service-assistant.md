@@ -15,10 +15,70 @@ the machine-enforced release-gate evaluator and offline-observability contract.
 `AI-CS-01E-C` adds the default-off public-listing context picker and explicit
 listing-detail launch. The mandatory `AI-CS-CLEAN-P0-02` evaluation,
 release-gate, and listing-context cleanup is complete, and the AI lane is reset
-to 0/3. Runtime construction, external activation, live evaluation, dashboards,
-cohorts, and rollout remain unimplemented.
+to 0/3. `AI-CS-02B` adds the Python LangChain Core v1 adapter and
+default-off production composition behind the existing Agent-owned interfaces.
+`AI-CS-02C` adds only the explicit, tracked `demo-ai` build and default-off
+Compose/runbook contract. Subsequent bounded session/CSRF stabilization and
+privacy-safe create-session diagnostics are reconciled by
+`AI-CS-CLEAN-P0-03`, resetting the AI lane to 0/3. No runtime was activated.
+Live evaluation, dashboards, cohorts, and rollout remain unimplemented.
 
 Release: V3.
+
+## AI-CS-02B Python LangChain Core Runtime Boundary
+
+The approved runtime dependency is exactly `langchain-core==1.4.9`. The full
+`langchain` package and LangGraph are not required because this slice uses only
+typed `RunnableLambda` and `RunnableSequence` composition. The adapter:
+
+- remains behind the existing `QuestionAnswerer`;
+- delegates authorization, Product eligibility, filtered retrieval, provider
+  calls, grounding, citation validation, redaction, budgets, cancellation,
+  errors, metrics, and tool audits to the existing application-owned code;
+- adds no LangChain type to external DTOs, persistence, BFF contracts, or
+  OpenAPI;
+- uses no LangChain memory, checkpointer, tool discovery, agent executor, or
+  tracing transport;
+- preserves MySQL as the only session, message, invocation, and replay
+  authority.
+
+Production composition binds the existing OpenSearch listing retriever,
+OpenAI embedding/provider adapters, listing-only orchestrator, and LangChain
+adapter only when all of these Agent-owned gates pass:
+
+- `AGENT_CUSTOMER_SERVICE_API_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED=false`;
+- `AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED=true`;
+- `AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED=true`.
+
+All gates remain false by default. Create and send operations fail before
+actor resolution, Product reads, invocation persistence, retrieval, or
+provider execution when generation is disabled or kill-switched. Existing
+owned session and history reads remain available through the authenticated API
+boundary when the API itself is enabled.
+
+The current Product projection still limits trusted current facts to listing
+identity/version, title, thumbnail, seller type, eligibility, and transaction
+notice. The runtime may ground answers in approved listing passages, title,
+and transaction notice only. It must return uncertainty or seller handoff for
+price, exact or coarse location, quantity, condition, negotiability, or other
+facts that the approved projection does not supply.
+
+Official API basis:
+
+- Python LangChain v1
+  [Runnable composition](https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.RunnableSequence.html)
+  and asynchronous `ainvoke`;
+- `langchain-core`
+  [typed `with_types` boundaries](https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.Runnable.html);
+- no LangGraph state machine because the application-owned orchestration is
+  already deterministic and bounded.
+
+No migration, gateway, frontend, Product, Auth, runtime flag, provider key, or
+external OpenSearch change is part of AI-CS-02B. Offline evaluation parity
+must remain exact, zero-provider, zero-token, zero-cost, and release
+`BLOCKED`.
 
 ## Goal
 
@@ -496,6 +556,14 @@ Logs and traces include correlation ID, agent session ID, actor app user ID,
 subject listing ID, prompt/tool/schema/model versions, and result status. Raw
 prompts, message bodies, tool payloads, storage URLs, email, phone, and exact
 location are excluded from unrestricted logs and traces.
+
+Create-session request-validation diagnostics are a narrower pre-handler
+exception: they retain only correlation ID, bounded error count, fixed
+location/error categories, allowlisted top-level/subject key presence, and the
+runtime type and length (never the value) of `subject.id`. Their metric labels
+are fixed and contain no arbitrary field name, request value, actor, listing,
+session, header, cookie, token, prompt, or upstream response. The public
+`400 VALIDATION_ERROR` envelope remains unchanged.
 
 ## Test And Evaluation Plan
 
@@ -1102,3 +1170,67 @@ action was added. All capability states remain false by default. Production
 quality, latency, cost, and rollout approvals remain external blockers. This
 resets the AI lane from 3/3 to 0/3; no `AI-LC-01`, rollout, or successor slice
 starts automatically.
+
+## AI-CS-CLEAN-P0-03 LangChain Chat And Stabilization Cleanup Report
+
+Completed locally on 2026-07-20 as the mandatory behavior-preserving cleanup
+after `AI-CS-02B`, `AI-CS-02C`, `AI-CS-STAB-P1-01`, and
+`AI-CS-STAB-P1-03`:
+
+- kept `langchain-core==1.4.9` behind the existing `QuestionAnswerer` and
+  application-owned retrieval/provider boundaries, with no LangChain type,
+  memory, or checkpointer in HTTP, BFF, OpenAPI, or MySQL persistence;
+- retained strict default-off generation precedence and the existing MySQL
+  session/message/invocation authority;
+- made the demo Agent Service wait for successful Agent migrations and healthy
+  OpenSearch while keeping index bootstrap a separate explicit operation;
+- kept the normal production/development frontend network-silent and
+  `demo-ai` as the only explicit UI opt-in;
+- retained coalesced BFF session/CSRF warmup before Agent writes, exact
+  idempotency keys, no automatic replay after an uncertain POST, and the
+  existing login-return path for known authentication expiry;
+- consolidated validation diagnostic categories with their metric allowlists,
+  reduced expected invalid-request diagnostics to informational severity, and
+  retained only bounded fixed categories, allowlisted key presence, correlation
+  ID, and `subject.id` runtime type/length without values;
+- aligned the frontend create-session regression with the real Product listing
+  ID `01D00000000000000000000101` and preserved the exact strict request
+  contract.
+
+The malformed deployed browser request that motivated the temporary diagnostic
+slice has not been reproduced from current local source. The diagnostics remain
+privacy-safe evidence for one separately approved deployed browser attempt;
+they are not a contract relaxation or rollout evidence.
+
+Verification:
+
+- focused LangChain/runtime/customer-service/config/demo Agent tests: 52
+  passed;
+- full default Agent suite: 321 passed with 15 expected opt-in
+  MySQL/OpenSearch integration skips, plus Python compilation and dependency
+  consistency checks;
+- focused Agent customer-service Angular tests: 33 passed; full Angular suite:
+  426 passed; normal production and explicit `demo-ai` builds passed;
+- full gateway/shared offline package: 80 tests passed, including the existing
+  Agent bearer relay, spoof-header stripping, correlation, authentication, and
+  default-off route regressions;
+- normal, `ai`, and `ai-bootstrap` Compose configurations validated with
+  automatic environment-file loading disabled and without starting services;
+- scoped diff/whitespace, credential-pattern, dependency-boundary,
+  default-off, and unsafe-log/cardinality checks passed. No provider request
+  occurred.
+
+One existing shared Auth boundary remains deliberately unchanged:
+`AuthService` converts a BFF session-load transport failure into an
+unauthenticated snapshot. Agent writes still fail closed with zero Agent POST,
+but that preflight cannot distinguish a temporary Auth outage from a signed-out
+session without a separately approved shared Auth contract change.
+
+This repository follows a local-first, batched-deployment policy: source,
+tests, and cleanup are completed before a separate task owns deployment,
+environment values, and browser verification. All committed capability flags
+remain false and release remains `BLOCKED`. The AI lane resets from `3/3` to
+`0/3` and pauses. The next approved direction is the separately dispatched,
+local-only `AI-DISC-01A` baseline recorded in the general AI roadmap; no
+discovery code, dependency, runtime, or completion status is added by this
+cleanup.

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "ai-list-offline-release-gate-input-v1",
+  "decisionAt": "2026-07-20T00:00:00Z",
+  "targetStage": "INTERNAL",
+  "reportGeneratedAt": "2026-07-20T00:00:00Z",
+  "reportEvidenceSha256": null,
+  "switches": {
+    "globalKillSwitchEngaged": false,
+    "proposalCapability": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "mediaTool": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "providerExecution": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "agentApi": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "gatewayExposure": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    },
+    "frontendEntry": {
+      "enabled": false,
+      "killSwitchEngaged": false
+    }
+  },
+  "productionEvidence": {
+    "quality": {
+      "status": "UNKNOWN",
+      "source": "UNKNOWN"
+    },
+    "latency": {
+      "status": "UNKNOWN",
+      "source": "UNKNOWN"
+    },
+    "cost": {
+      "status": "UNKNOWN",
+      "source": "UNKNOWN"
+    }
+  },
+  "approvals": {
+    "privacy": {
+      "approved": false
+    },
+    "policy": {
+      "approved": false
+    },
+    "internalRollout": {
+      "approved": false
+    },
+    "smallCohortRollout": {
+      "approved": false
+    },
+    "widerRollout": {
+      "approved": false
+    }
+  }
+}

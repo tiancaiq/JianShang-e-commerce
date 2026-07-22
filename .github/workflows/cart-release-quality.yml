@@ -1,0 +1,359 @@
+name: Cart Release Quality
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: cart-release-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-cart-mysql:
+    name: Product Cart MySQL Projection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run Product cart projection suites
+        run: |
+          set -euo pipefail
+          echo "Required Product cart tests:"
+          echo "- ListingDraftApiTests#internalCommerceContextReturnsBoundedCatalogFactsWithServiceAuthentication"
+          echo "- ListingDraftApiTests#internalCommerceContextTreatsAuthLabelOutageAsRetryableDependencyFailure"
+          echo "- ListingDraftApiTests#businessStoreListingsSearchHidesItemsWhenBusinessStoreIsNotPublicActive"
+          echo "- ListingDraftApiTests#businessStoreListingsSearchFailsClosedWhenBusinessVisibilityLookupIsUnavailable"
+          chmod +x ./mvnw
+          ./mvnw -B -pl product-service -am \
+            "-Dtest=ListingDraftApiTests#internalCommerceContextReturnsBoundedCatalogFactsWithServiceAuthentication+internalCommerceContextTreatsAuthLabelOutageAsRetryableDependencyFailure+businessStoreListingsSearchHidesItemsWhenBusinessStoreIsNotPublicActive+businessStoreListingsSearchFailsClosedWhenBusinessVisibilityLookupIsUnavailable" \
+            "-Dsurefire.failIfNoSpecifiedTests=false" \
+            test
+
+      - name: Verify Product cart tests executed
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required = {
+              "internalCommerceContextReturnsBoundedCatalogFactsWithServiceAuthentication",
+              "internalCommerceContextTreatsAuthLabelOutageAsRetryableDependencyFailure",
+              "businessStoreListingsSearchHidesItemsWhenBusinessStoreIsNotPublicActive",
+              "businessStoreListingsSearchFailsClosedWhenBusinessVisibilityLookupIsUnavailable",
+          }
+          seen = set()
+          for path in pathlib.Path("product-service/target/surefire-reports").glob("TEST-*.xml"):
+              root = ET.parse(path).getroot()
+              for case in root.iter("testcase"):
+                  seen.add(case.attrib.get("name"))
+          missing = sorted(required - seen)
+          if missing:
+              print("Missing required Product cart test execution:", ", ".join(missing))
+              sys.exit(1)
+          print("Executed Product cart tests:", ", ".join(sorted(required)))
+          PY
+
+  order-cart-redis:
+    name: Order Cart Redis And Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Require executable Redis concurrency and idempotency coverage
+        run: |
+          python - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path("order-service/src/test/java/com/msb/ecom/order_service/repository/RedisCartRepositoryTests.java")
+          source = path.read_text(encoding="utf-8")
+          methods = set(re.findall(r"\bvoid\s+([A-Za-z0-9_]+)\s*\(", source))
+          required = {
+              "mutationsAreAtomicVersionedAndExpiring",
+              "concurrentMutationsAreAtomicVersionedAndIsolated",
+              "sameListingRetryIsDeterministicAndVersioned",
+          }
+          missing = sorted(required - methods)
+          if missing:
+              print(f"{path} is missing executable cart release gate tests:")
+              for name in missing:
+                  print(f"- {name}")
+              print("Do not treat textual source terms as Redis concurrency/idempotency evidence.")
+              sys.exit(1)
+          print("Redis cart release gate methods present:", ", ".join(sorted(required)))
+          PY
+
+      - name: Run Order cart Redis and validation suites
+        run: |
+          set -euo pipefail
+          echo "Required Order cart tests:"
+          echo "- RedisCartRepositoryTests"
+          echo "- CartServiceTests"
+          echo "- CartValidationServiceTests"
+          echo "- CartControllerTests"
+          echo "- CartAssessmentServiceWiringTests"
+          echo "- CheckoutCalculationServiceTests#localDemoBuildsIndependentSnapshotsForSameCurrencyMultiBusinessCart"
+          echo "- RedisCartRepositoryTests#concurrentMutationsAreAtomicVersionedAndIsolated"
+          echo "- RedisCartRepositoryTests#sameListingRetryIsDeterministicAndVersioned"
+          chmod +x ./mvnw
+          ./mvnw -B -pl order-service -am \
+            "-Dtest=RedisCartRepositoryTests,CartServiceTests,CartValidationServiceTests,CartControllerTests,CartAssessmentServiceWiringTests,CheckoutCalculationServiceTests#localDemoBuildsIndependentSnapshotsForSameCurrencyMultiBusinessCart" \
+            "-Dsurefire.failIfNoSpecifiedTests=false" \
+            test
+
+      - name: Verify Order cart tests executed
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required_classes = {
+              "com.msb.ecom.order_service.repository.RedisCartRepositoryTests",
+              "com.msb.ecom.order_service.service.CartServiceTests",
+              "com.msb.ecom.order_service.service.CartValidationServiceTests",
+              "com.msb.ecom.order_service.CartControllerTests",
+              "com.msb.ecom.order_service.service.CartAssessmentServiceWiringTests",
+          }
+          required_methods = {
+              "localDemoBuildsIndependentSnapshotsForSameCurrencyMultiBusinessCart",
+              "mutationsAreAtomicVersionedAndExpiring",
+              "concurrentMutationsAreAtomicVersionedAndIsolated",
+              "sameListingRetryIsDeterministicAndVersioned",
+          }
+          seen_classes = set()
+          seen_methods = set()
+          for path in pathlib.Path("order-service/target/surefire-reports").glob("TEST-*.xml"):
+              root = ET.parse(path).getroot()
+              for case in root.iter("testcase"):
+                  seen_classes.add(case.attrib.get("classname"))
+                  seen_methods.add(case.attrib.get("name"))
+          missing_classes = sorted(required_classes - seen_classes)
+          missing_methods = sorted(required_methods - seen_methods)
+          if missing_classes or missing_methods:
+              print("Missing Order cart test classes:", ", ".join(missing_classes))
+              print("Missing Order cart test methods:", ", ".join(missing_methods))
+              sys.exit(1)
+          print("Executed Order cart classes:", ", ".join(sorted(required_classes)))
+          print("Executed Order cart methods:", ", ".join(sorted(required_methods)))
+          PY
+
+  gateway-cart-boundary:
+    name: Gateway Cart Boundary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run focused gateway cart suites
+        run: |
+          set -euo pipefail
+          echo "Required Gateway cart tests:"
+          echo "- CartRouteIntegrationTests"
+          echo "- ApiGatewayApplicationTests#deferredCartRouteIsNotRegisteredByDefault"
+          echo "- ApiGatewayApplicationTests#deferredCheckoutRouteIsNotRegisteredByDefault"
+          echo "- DeferredRoutesEnabledTests"
+          chmod +x ./mvnw
+          ./mvnw -B -pl api-gateway -am \
+            "-Dtest=CartRouteIntegrationTests,ApiGatewayApplicationTests#deferredCartRouteIsNotRegisteredByDefault+deferredCheckoutRouteIsNotRegisteredByDefault,DeferredRoutesEnabledTests" \
+            "-Dsurefire.failIfNoSpecifiedTests=false" \
+            test
+
+      - name: Run full gateway package
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B -pl api-gateway -am package
+
+      - name: Verify gateway cart tests executed
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required_classes = {
+              "com.msb.ecom.api_gateway.CartRouteIntegrationTests",
+              "com.msb.ecom.api_gateway.DeferredRoutesEnabledTests",
+          }
+          required_methods = {
+              "deferredCartRouteIsNotRegisteredByDefault",
+              "deferredCheckoutRouteIsNotRegisteredByDefault",
+          }
+          seen_classes = set()
+          seen_methods = set()
+          for path in pathlib.Path("api-gateway/target/surefire-reports").glob("TEST-*.xml"):
+              root = ET.parse(path).getroot()
+              for case in root.iter("testcase"):
+                  seen_classes.add(case.attrib.get("classname"))
+                  seen_methods.add(case.attrib.get("name"))
+          missing_classes = sorted(required_classes - seen_classes)
+          missing_methods = sorted(required_methods - seen_methods)
+          if missing_classes or missing_methods:
+              print("Missing gateway cart test classes:", ", ".join(missing_classes))
+              print("Missing gateway cart test methods:", ", ".join(missing_methods))
+              sys.exit(1)
+          print("Executed gateway cart classes:", ", ".join(sorted(required_classes)))
+          print("Executed gateway cart methods:", ", ".join(sorted(required_methods)))
+          PY
+
+  frontend-cart:
+    name: Frontend Cart Builds And Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Require focused cart specs
+        run: |
+          set -euo pipefail
+          grep -RInE "stores the loaded cart|add-update-reload-validate-repair-remove-clear|bodyless validation" src/app/core/services/cart.service.spec.ts
+          grep -RInE "store packing cards|quantity and price warnings|does not auto-replay|cart-only mode|validation is unavailable|bounded from 1 through 999" src/app/features/cart/cart.component.spec.ts
+          grep -RInE "purchase box|guest add-to-cart|individual listings|uncertain failed add-to-cart" src/app/features/marketplace/public-listing-detail.component.spec.ts
+          grep -RInE "cart capability is disabled|authenticated cart link|resets cart state|clears the cart badge" src/app/layout/marketplace-layout/marketplace-layout.component.spec.ts
+          grep -RInE "cart-only build without exposing checkout|cartRoute" src/app/app.routes.spec.ts
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Build demo cart frontend
+        run: npm run build:demo-cart
+
+      - name: Run full frontend suite
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+
+  cart-static-safety:
+    name: Cart Static Safety
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout event SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Check whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-}"
+          if [ -z "$base" ]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          git diff --check "$base" HEAD
+
+      - name: Run architecture checks
+        run: python tools/architecture_checks.py
+
+      - name: Check default-off cart and checkout gates
+        run: |
+          set -euo pipefail
+          grep -RIn "cart: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts
+          grep -RIn "buyerCheckout: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts
+          grep -RIn "msb.gateway.features.cart=\${GATEWAY_FEATURE_CART:false}" api-gateway/src/main/resources/application.properties
+          grep -RIn "msb.gateway.features.checkout=\${GATEWAY_FEATURE_CHECKOUT:false}" api-gateway/src/main/resources/application.properties
+
+      - name: Check cart privacy and internal-field boundary
+        run: |
+          set -euo pipefail
+          boundary_paths="frontend/src/app/core/models/cart.model.ts frontend/src/app/features/cart/cart.component.ts order-service/src/main/java/com/msb/ecom/order_service/dto/CartItemResponse.java order-service/src/main/java/com/msb/ecom/order_service/dto/CartValidationItemResponse.java product-service/src/main/java/com/msb/ecom/product_service/dto/BusinessStoreItemCommerceContextResponse.java"
+          grep -RInE "storeName|storeSlug|businessVerified|publicCity|publicRegion" $boundary_paths
+          if grep -RInE "legalName|businessLegalName|supportEmail|supportPhone|member|staff|ownerUser|exactAddress|addressLine|paymentIntent|provider|outbox|idempotencyKey|hash|lease" $boundary_paths; then
+            echo "Cart response boundary exposes private/internal fields."
+            exit 1
+          fi
+
+      - name: Check cart migration boundary
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-}"
+          if [ -z "$base" ]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          changed="$(git diff --name-only "$base" HEAD -- '*/src/main/resources/db/migration/*' || true)"
+          if echo "$changed" | grep -i cart; then
+            echo "Cart release candidate must not add or alter cart Flyway migrations."
+            exit 1
+          fi
+          printf '%s\n' "$changed"
+
+      - name: Scan for high-confidence secrets
+        run: |
+          set -euo pipefail
+          pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{20,})'
+          if grep -RInE \
+            --exclude-dir=.git \
+            --exclude-dir=target \
+            --exclude-dir=node_modules \
+            --exclude=package-lock.json \
+            "$pattern" .; then
+            echo "High-confidence secret pattern found."
+            exit 1
+          fi

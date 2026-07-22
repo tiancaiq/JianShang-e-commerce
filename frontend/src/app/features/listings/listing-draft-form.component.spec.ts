@@ -8,6 +8,8 @@ import { BusinessStoreService } from '../../core/services/business-store.service
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
 import { listingDraft, listingImage } from '../../testing/listing-test-fixtures';
+import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import { ListingProposalApplicationCommand } from '../agent/agent-listing-proposal.model';
 import { ListingDraftFormComponent } from './listing-draft-form.component';
 
 describe('ListingDraftFormComponent', () => {
@@ -247,6 +249,7 @@ describe('ListingDraftFormComponent', () => {
         { provide: ToastService, useValue: toastService },
         { provide: Router, useValue: router },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => null } } } },
+        { provide: AGENT_CUSTOMER_SERVICE_ENABLED, useValue: false },
       ],
     }).compileComponents();
 
@@ -442,6 +445,188 @@ describe('ListingDraftFormComponent', () => {
     expect(component.canEditDraft()).toBeFalse();
     expect(component.pageTitle()).toBe('Pending review');
     expect(toastService.success).toHaveBeenCalledWith('Listing submitted for review.');
+  });
+
+  it('keeps the ordinary editor Agent-hidden and network-silent while the capability is disabled', () => {
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    component.isEditMode.set(true);
+    (component as unknown as { populateFromDraft: (listing: ListingDraft) => void })
+      .populateFromDraft({ ...draft, status: 'DRAFT', images: [{ ...image, uploadStatus: 'UPLOADED' }] });
+    fixture.detectChanges();
+
+    expect(component.listingProposalReviewEnabled).toBeFalse();
+    expect(fixture.nativeElement.querySelector('app-agent-listing-proposal-review')).toBeNull();
+  });
+
+  it('maps only Product-eligible attached images into the proposal boundary', () => {
+    fixture.detectChanges();
+    component.mediaItems.set([
+      { ...image, uploadStatus: 'UPLOADED', moderationStatus: 'NOT_SUBMITTED', contentType: 'image/png' },
+      {
+        ...image,
+        id: '01I00000000000000000000002',
+        mediaObjectId: '01M00000000000000000000002',
+        uploadStatus: 'UPLOADED',
+        moderationStatus: 'REJECTED',
+        contentType: 'image/png',
+      },
+      {
+        ...image,
+        id: '01I00000000000000000000003',
+        mediaObjectId: '01M00000000000000000000003',
+        uploadStatus: 'PENDING_UPLOAD',
+        moderationStatus: 'NOT_SUBMITTED',
+        contentType: 'image/webp',
+      },
+    ]);
+
+    const mapped = component.proposalReviewMedia();
+
+    expect(mapped.map(item => item.eligible)).toEqual([true, false, false]);
+    expect(mapped[0]).toEqual(jasmine.objectContaining({
+      mediaId: media.id,
+      altText: 'bike.png',
+    }));
+  });
+
+  it('allows proposal review only for marketplace DRAFT or CHANGES_REQUESTED edit state', () => {
+    (router as unknown as { url: string }).url = `/account/listings/${draft.id}/edit`;
+    fixture.detectChanges();
+    (component as unknown as { editListingId: string }).editListingId = draft.id;
+    component.isEditMode.set(true);
+    component.savedId.set(draft.id);
+
+    component.listingStatus.set('DRAFT');
+    expect(component.proposalReviewEligible()).toBeTrue();
+
+    component.listingStatus.set('CHANGES_REQUESTED');
+    expect(component.proposalReviewEligible()).toBeTrue();
+
+    component.listingStatus.set('ACTIVE');
+    expect(component.proposalReviewEligible()).toBeFalse();
+
+    (router as unknown as { url: string }).url = `/seller/store/items/${draft.id}/edit`;
+    component.listingStatus.set('DRAFT');
+    expect(component.proposalReviewEligible()).toBeFalse();
+  });
+
+  it('applies only explicitly selected seller-final fields with the proposal source version', () => {
+    const source = {
+      ...draft,
+      title: 'Loaded title',
+      description: 'Loaded description',
+      priceAmount: 250,
+      publicCity: 'Irvine',
+      negotiable: true,
+      quantity: 1,
+      version: 12,
+      images: [image],
+    };
+    const applied = {
+      ...source,
+      title: 'Seller final title',
+      version: 13,
+    };
+    enableProposalApplication(source);
+    listingService.updateDraft.and.returnValue(of(applied));
+    const command: ListingProposalApplicationCommand = {
+      proposalId: '01K00000000000000000000099',
+      listingId: draft.id,
+      sourceListingVersion: 12,
+      fields: { title: ' Seller final title ' },
+    };
+
+    component.applyListingProposal(command);
+
+    expect(listingService.updateDraft).toHaveBeenCalledOnceWith(
+      draft.id,
+      12,
+      jasmine.objectContaining({
+        title: 'Seller final title',
+        description: 'Loaded description',
+        categoryId: category.id,
+        price: { amount: 250, currency: source.currency },
+        negotiable: true,
+        quantity: 1,
+      }),
+    );
+    expect(listingService.submitForReview).not.toHaveBeenCalled();
+    expect(component.title).toBe('Seller final title');
+    expect(component.description).toBe('Loaded description');
+    expect(component.proposalApplicationState()).toBe('APPLIED');
+    expect(component.proposalAppliedVersion()).toBe(13);
+    expect(toastService.success)
+      .toHaveBeenCalledWith('Selected proposal fields applied to the listing draft.');
+  });
+
+  it('requires a real current category ID and never converts an AI category label', () => {
+    enableProposalApplication({ ...draft, version: 12, images: [image] });
+
+    component.applyListingProposal({
+      proposalId: '01K00000000000000000000099',
+      listingId: draft.id,
+      sourceListingVersion: 12,
+      fields: { categoryId: 'Bicycles' },
+    });
+
+    expect(listingService.updateDraft).not.toHaveBeenCalled();
+    expect(component.proposalApplicationState()).toBe('FAILED');
+    expect(component.proposalApplicationMessage()).toContain('current category');
+  });
+
+  it('does not apply while ordinary editor changes are unsaved', () => {
+    enableProposalApplication({ ...draft, version: 12, images: [image] });
+    component.price = 999;
+
+    component.applyListingProposal({
+      proposalId: '01K00000000000000000000099',
+      listingId: draft.id,
+      sourceListingVersion: 12,
+      fields: { title: 'Seller final title' },
+    });
+
+    expect(listingService.updateDraft).not.toHaveBeenCalled();
+    expect(component.proposalApplicationState()).toBe('FAILED');
+    expect(component.proposalApplicationMessage()).toContain('ordinary editor changes');
+  });
+
+  it('shows a stale Product conflict without retrying or marking the proposal applied', () => {
+    enableProposalApplication({ ...draft, version: 12, images: [image] });
+    listingService.updateDraft.and.returnValue(throwError(() => ({
+      status: 409,
+      error: { error: { code: 'LISTING_VERSION_CONFLICT' } },
+    })));
+
+    component.applyListingProposal({
+      proposalId: '01K00000000000000000000099',
+      listingId: draft.id,
+      sourceListingVersion: 12,
+      fields: { description: 'Seller final description' },
+    });
+
+    expect(listingService.updateDraft).toHaveBeenCalledTimes(1);
+    expect(component.proposalApplicationState()).toBe('CONFLICT');
+    expect(component.proposalApplicationMessage()).toContain('no automatic retry');
+    expect(component.proposalAppliedVersion()).toBeNull();
+    expect(listingService.submitForReview).not.toHaveBeenCalled();
+  });
+
+  it('keeps Product failure distinct from an applied local outcome', () => {
+    enableProposalApplication({ ...draft, version: 12, images: [image] });
+    listingService.updateDraft.and.returnValue(throwError(() => ({ status: 503 })));
+
+    component.applyListingProposal({
+      proposalId: '01K00000000000000000000099',
+      listingId: draft.id,
+      sourceListingVersion: 12,
+      fields: { title: 'Seller final title' },
+    });
+
+    expect(component.proposalApplicationState()).toBe('FAILED');
+    expect(component.proposalApplicationMessage()).toContain('Nothing is marked applied');
+    expect(component.proposalAppliedVersion()).toBeNull();
+    expect(listingService.submitForReview).not.toHaveBeenCalled();
   });
 
   it('enables submit after an updated draft response includes an attached image', () => {
@@ -771,6 +956,16 @@ describe('ListingDraftFormComponent', () => {
     component.condition = 'GOOD';
     component.price = 250;
     component.currency = 'usd';
+  }
+
+  function enableProposalApplication(source: ListingDraft): void {
+    (router as unknown as { url: string }).url = `/account/listings/${source.id}/edit`;
+    (component as unknown as { listingProposalReviewEnabled: boolean })
+      .listingProposalReviewEnabled = true;
+    (component as unknown as { editListingId: string }).editListingId = source.id;
+    component.isEditMode.set(true);
+    (component as unknown as { populateFromDraft: (listing: ListingDraft) => void })
+      .populateFromDraft(source);
   }
 
   function fileInputEvent(file: File): Event {

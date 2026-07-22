@@ -663,6 +663,10 @@ Approved slice order:
       `langchain-core` were absent from the Agent environment, declaration,
       lock state, and local cache. No dependency or source change was made;
       AI lane remained 0/3.
+    - A later explicit Python approval completed `AI-CS-02B` with pinned
+      `langchain-core==1.4.9` only. Typed Runnables remain behind the existing
+      Agent answerer/retrieval/provider interfaces, with no LangChain types in
+      APIs or persistence and no LangGraph, memory, or checkpointer.
 15. AI-LIST-01 seller image-to-listing content proposal.
     - `AI-LIST-01A` default-off proposal contract and offline orchestration
       implemented and verified on 2026-07-20. The Agent-owned strict schema,
@@ -696,7 +700,8 @@ Approved slice order:
     - Reference:
       `docs/mvp/ai/ai-list-01-seller-image-to-listing-proposal.md`
 16. AI-LIST-02 seller proposal review and confirmed application.
-    - Status: approved implementation plan; implementation has not started.
+    - Status: `AI-LIST-02A/B/C` and mandatory `AI-LIST-CLEAN-P0-02`
+      implemented and verified on 2026-07-20. AI lane reset to `0/3`.
     - Reference:
       `docs/mvp/ai/ai-list-02-seller-proposal-review-and-apply-plan.md`
     - `AI-LIST-02A` adds a default-disabled authenticated proposal
@@ -705,12 +710,17 @@ Approved slice order:
     - `AI-LIST-02B` adds the marketplace-account seller review UI, explicit
       selected-field confirmation, ordinary-editor fallback, and
       disabled/network-silent behavior.
+      Implemented with a strict proposal client, an accessible responsive
+      image/evidence review workbench, replay-safe retry/dismiss handling,
+      editable keep/edit/discard decisions, version warnings, and a disabled
+      non-mutating apply boundary.
     - `AI-LIST-02C` applies only seller-selected final values through the
       existing Product PATCH plus `If-Match`; Agent Service remains outside
       the authoritative write and no automatic submit/publish is allowed.
-    - The AI lane begins this sequence at `0/3`. Green 02A/02B/02C reaches
-      `3/3` and triggers mandatory AI-only cleanup before any rollout or report
-      successor.
+      Product success is authoritative, stale writes are never auto-retried,
+      and Agent outcome acknowledgement remains deferred.
+    - Mandatory cleanup preserved selected-field/category-ID/version
+      boundaries and reset the lane from `3/3` to `0/3`.
 17. REP-00 listing report domain and policy taxonomy.
 18. REP-01 listing report intake, evidence, and persistence.
 19. ADM-REP-01 user-reported listing queue and admin override paths.
@@ -1191,11 +1201,49 @@ Approved slice order:
      identity headers. It adds no fulfillment mutation.
    - Reference:
      `docs/v2/commerce/v2-ord-02c-business-fulfillment-ui.md`.
-   - Business lane is `3/3` and paused for mandatory business-only cleanup
-     before shipping.
+   - `V2-ORD-CLEAN-P0-01` completed on 2026-07-20: malformed cursor
+     timestamps now use bounded `400` contracts, Auth dependency throttling is
+     no longer hidden as membership denial, and the Angular route/navigation/
+     component boundary shares one default-off capability source. Existing
+     SQL isolation, finance omission, gateway header stripping, and V3/V4
+     query-index intent were preserved and re-audited without a migration.
+     The disposable MySQL rerun was unavailable because the local Docker
+     daemon was stopped; all feasible unit, controller, gateway, and frontend
+     suites remained green.
+   - Business lane reset from `3/3` to `0/3` and is paused before shipping.
 10. V2-ORD-03 cancellation, refund, and inventory compensation.
 11. V2-SHP-01 fulfillment and shipping.
+   - `V2-SHP-01A` has an approved authoritative default-off contract for
+     owner-only acceptance of a paid `PENDING_ACCEPTANCE` business group.
+     Forward-only Order V5 owns optimistic group versioning, durable P7D
+     command idempotency, append-only group history, and transactional
+     `business_order.accepted` outbox persistence. Source verification is
+     pending; the business lane remains `0/3` until green.
+   - Reference:
+     `docs/v2/commerce/v2-shp-01a-accept-paid-business-fulfillment-group.md`.
 12. V2-NOT-01 notifications.
+   - `V2-NOT-01A` reconstructs Notification Service for default-off,
+     Notification-owned MySQL persistence and a direct/fake
+     `order.confirmed` v2 buyer notification consumer. Order continues to
+     produce its unchanged v1 event and atomically adds recipient-bearing v2.
+   - `V2-NOT-01B` adds default-off authenticated list, mark-one-read, and
+     mark-all-read APIs using the existing Auth `/api/v1/users/me` bearer-relay
+     identity contract and Notification-owned recipient SQL isolation. Source
+     and offline tests are complete; the disposable MySQL gate remains
+     unavailable locally, so the business lane remains `0/3`.
+   - `V2-NOT-01C` adds an independent default-off gateway
+     `/api/v1/notifications/**` boundary and Angular account notification
+     center over the NOT-01B API. It remains local/source-only; NOT-01A/B
+     disposable MySQL verification is still mandatory before the business lane
+     can advance.
+   - Kafka, email, preferences, purge, polling, badge counts, and runtime
+     activation remain deferred.
+   - Reference:
+     `docs/v2/commerce/v2-not-01a-order-confirmed-in-app-notification.md`.
+   - Reference:
+     `docs/v2/commerce/v2-not-01b-authenticated-notification-read-api.md`.
+   - Reference:
+     `docs/v2/commerce/v2-not-01c-notification-center-ui-gateway.md`.
 
 ### V3
 
@@ -1220,12 +1268,12 @@ paths remain default-off.
 
 | Lane | Counter | Completed checkpoint | Next approved slice |
 |---|---:|---|---|
-| Business | `3/3` | `V2-ORD-02C` business fulfillment queue/detail UI | Mandatory ORD-02 business cleanup |
-| AI | `1/3` | Paused while business owned shared Angular/gateway surfaces | Resume only after Control Center releases shared ownership |
+| Business | `0/3` | `V2-ORD-CLEAN-P0-01` buyer/business order read-surface cleanup | Await PM dispatch before `V2-SHP-01A` |
+| AI | `0/3` | `AI-CS-CLEAN-P0-03` local LangChain/chat/demo/stabilization cleanup | Await separate dispatch for approved local-only `AI-DISC-01A` |
 
 Payment/provider activation, real money movement, live Kafka transport,
-LangChain installation, and autonomous AI actions remain outside this
-sequence.
+LangGraph behavior, live AI rollout, and autonomous AI actions remain outside
+this sequence.
 
 ### 8.2 Execution waves
 
@@ -1233,10 +1281,10 @@ sequence.
 |---|---|---|---|
 | 1 | `V2-ORD-02B` backend business queue/detail and permissions | `AI-LIST-02A` backend proposal session/review API | May run in parallel; Order/Auth and Agent/Product ownership are isolated |
 | 2A | `V2-ORD-02C` business portal queue/detail UI | Paused | Own shared Angular/gateway/browser surfaces |
-| 2B | Paused at business `3/3` | `AI-LIST-02B` marketplace seller proposal review UI | Starts only after 02C releases shared frontend/browser ownership |
-| 3A | Mandatory business cleanup across ORD-02A/B/C | AI remains source-isolated or paused if cleanup touches shared UI | No business successor before cleanup resets `3/3 -> 0/3` |
-| 3B | Begin Order-only `V2-SHP-01A` only after cleanup | `AI-LIST-02C` confirmed Product PATCH application | May overlap only when neither task owns the same frontend/gateway/Product files |
-| 4 | Continue `V2-SHP-01B/C`, then shipping cleanup | Mandatory AI-LIST-02 cleanup after AI reaches `3/3` | Preserve one bounded slice per lane and serialize browser/runtime work |
+| 2B | Completed at business `3/3` | `AI-LIST-02B` marketplace seller proposal review UI | Shared frontend/browser ownership remained serialized |
+| 3A | `V2-ORD-CLEAN-P0-01` complete; business reset to `0/3` and paused | `AI-LIST-02B` complete at `2/3` | No business successor without PM dispatch |
+| 3B | Begin Order-only `V2-SHP-01A` only after cleanup | `AI-LIST-02C` confirmed Product PATCH application completed | Ownership remained separate from Order-only work |
+| 4 | Continue `V2-SHP-01B/C`, then shipping cleanup | Mandatory AI-LIST-02 cleanup completed; later AI-CS local batch also cleaned | Preserve one bounded slice per lane and serialize browser/runtime work |
 
 ### 8.3 Business continuation after ORD-02
 
@@ -1249,22 +1297,34 @@ sequence.
 6. `V2-ORD-03B`: idempotent refund orchestration.
 7. `V2-ORD-03C`: idempotent inventory compensation.
 8. `V2-PAY-02A`: payment/order reconciliation and admin operations queue.
-9. `V2-NOT-01`: event-driven buyer/business notifications.
+9. `V2-NOT-01A`: buyer `ORDER_CONFIRMED` persistence and fake consumer.
+10. `V2-NOT-01B`: authenticated buyer read API.
+11. `V2-NOT-01C`: default-off notification center UI and gateway boundary.
+12. Later `V2-NOT-01` slices: transport, badge/count behavior, preferences,
+    email, then other approved buyer/business event classes.
 
 No real payment provider is activated until reconciliation, recovery,
 production legal/provider decisions, and explicit rollout approval are green.
 
 ### 8.4 AI continuation after AI-LIST-02
 
-1. Complete mandatory AI-LIST-02 cleanup.
-2. Collect real multimodal quality, latency, token, cost, and privacy evidence
-   through an explicitly approved limited cohort.
+1. `AI-LIST-02A/B/C` and mandatory cleanup are complete and default-off.
+2. `AI-CS-02B/02C` plus bounded BFF-session and validation-diagnostic
+   stabilization are source-complete and reconciled by
+   `AI-CS-CLEAN-P0-03`; all committed gates remain false.
 3. Keep proposal application seller-confirmed and Product-versioned in every
-   cohort.
-4. Reconsider `AI-LC-01` only through a separate dependency decision; absence
-   of LangChain does not block the current application-owned workflow.
-5. Resume `REP-00`, `REP-01`, and `ADM-REP-01` before any `AI-REP-01` shadow
-   classification.
+   future cohort. Production quality, latency, cost, privacy, and rollout
+   evidence remain unknown or unapproved.
+4. Source changes are verified locally and deployed/browser-tested only in
+   explicit batches owned by a separate task.
+5. The next approved local direction is `AI-DISC-01A`: official LangChain v1
+   `create_agent`, strict `ToolStrategy(DiscoveryTurnResult)`, typed allowlisted
+   Product tools, server-owned/MySQL-authoritative state, ephemeral per-request
+   ReAct, fixed model/tool/time budgets, deterministic final guardrails, and
+   three-to-five detail-revalidated recommendations. It has no implementation
+   or completion status yet and requires a separate assignment; the full
+   pinned `langchain` dependency belongs only to that future offline-fake
+   slice.
 6. Keep all automated report/listing operations disabled until shadow-mode
    quality, appeal, restoration, and explicit approval gates pass.
 

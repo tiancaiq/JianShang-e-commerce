@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/v1/orders")
@@ -27,7 +28,10 @@ public class BuyerOrderController {
     }
 
     @GetMapping("/{orderId}")
-    public BuyerOrderDetailResponse detail(@PathVariable String orderId) {
-        return service.detail(orderId);
+    public ResponseEntity<BuyerOrderDetailResponse> detail(@PathVariable String orderId) {
+        BuyerOrderDetailResponse response = service.detail(orderId);
+        return ResponseEntity.ok()
+                .eTag(Long.toString(response.version()))
+                .body(response);
     }
 }

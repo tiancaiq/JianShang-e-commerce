@@ -1,7 +1,7 @@
 # AI-LIST-02 Seller Proposal Review And Confirmed Application Plan
 
-Status: `AI-LIST-02A` implemented and verified on 2026-07-20;
-`AI-LIST-02B/C` not started. AI lane `1/3`.
+Status: `AI-LIST-02A/B/C` and mandatory `AI-LIST-CLEAN-P0-02`
+implemented and verified on 2026-07-20. AI lane reset to `0/3`.
 
 Release: V3.
 
@@ -55,13 +55,11 @@ The AI result is never submitted for moderation or published automatically.
 
 ## 3. Current Progress And Entry State
 
-The AI lane is at `1/3` after verified `AI-LIST-02A`.
+The AI lane is at `0/3` after verified `AI-LIST-CLEAN-P0-02`.
 
 Release remains blocked because:
 
 - Agent and Product media/proposal gates are false and unwired;
-- no review UI exists;
-- no confirmed application path exists;
 - live multimodal quality, latency, cost, and privacy evidence is unknown; and
 - no rollout approval or cohort exists.
 
@@ -158,6 +156,15 @@ routes to a non-mutating review confirmation until 02C is green.
 
 Green `AI-LIST-02B` advances the AI lane to `2/3`.
 
+Completion evidence: a standalone marketplace-account review workbench, strict
+Angular proposal client/parser, Product-compatible eligible-image selection,
+replay-safe create/dismiss behavior, evidence/confidence/unknown rendering,
+seller-controlled keep/edit/discard draft state, version warnings, outage
+fallback, accessibility/responsive coverage, and default-off network silence
+were implemented and verified on 2026-07-20. `Apply selected fields` remains
+disabled, and the slice adds no Product write, submit, publish, runtime
+activation, or gateway contract change.
+
 ### 4.3 AI-LIST-02C Confirmed Versioned Product Application
 
 Owner: existing Angular listing editor and Product Service PATCH contract.
@@ -171,14 +178,13 @@ After the seller explicitly confirms:
 3. Product Service rechecks the authenticated owner and editable state;
 4. Product performs its normal field/category validation;
 5. Product writes one ordinary listing version and history/audit context;
-6. a successful response updates the editor with the new version; and
-7. an optional Agent outcome acknowledgement records only proposal ID,
-   applied/dismissed/conflict outcome, resulting listing version, safe hashes,
-   and correlation ID.
+6. a successful response updates the editor with the new version and records
+   the applied outcome only in local UI state.
 
-The outcome acknowledgement is not authoritative and cannot make a failed
-Product write appear successful. It is replay-safe and contains no raw Product
-payload, media bytes, prompt, provider body, or unrestricted seller data.
+Agent outcome acknowledgement remains deferred because no approved wire or
+persistence contract exists. Product response state alone determines whether
+the UI may show an applied outcome; a failed Product write never appears
+successful.
 
 Version conflict returns the current listing to the seller for comparison.
 The system never retries a stale write automatically.
@@ -188,6 +194,24 @@ publish it, or infer fields outside the approved proposal schema.
 
 Green `AI-LIST-02C` advances the AI lane to `3/3` and immediately triggers the
 mandatory AI-only cleanup.
+
+Completion evidence: the default-off marketplace listing editor now requires
+a distinct exact-value confirmation, carries the proposal source version into
+the existing Product `PATCH`/`If-Match` flow, applies only explicitly selected
+title/description and seller-selected real category IDs, blocks application
+when ordinary editor changes are unsaved, updates the editor version only
+after Product success, and presents stale conflict without automatic retry.
+Product owner/editable-state/version/category authority is reused unchanged.
+No Agent endpoint, acknowledgement, migration, submit, publish, provider call,
+or runtime activation was added.
+
+Cleanup evidence: `AI-LIST-CLEAN-P0-02` corrected outcome precedence so an
+open confirmation cannot mask a Product failure or stale-version conflict,
+kept conflict retry locked until reload/compare, and added focused
+confirmation-focus and failure/conflict regressions. Selected-field,
+category-ID, manual-editor, default-off, privacy, and no-automatic-action
+boundaries remain unchanged. The AI lane reset from `3/3` to `0/3`; no
+successor was started.
 
 ## 5. API And Persistence Boundaries
 
@@ -283,7 +307,7 @@ operations.
 - selected fields only;
 - Product owner/editable-state enforcement;
 - `If-Match` success and stale conflict;
-- replay-safe outcome acknowledgement;
+- local Product-success outcome state, with Agent acknowledgement deferred;
 - Product failure cannot be reported as applied;
 - no automatic submit/publish;
 - normal listing editor still works without AI; and
@@ -315,9 +339,9 @@ AI remains unable to publish or submit listings in every cohort.
 `AI-LIST-02B` and `V2-ORD-02C` both touch Angular and gateway navigation, so
 they are serialized. Shared browser ownership is also serialized.
 
-`AI-LIST-02C` touches Product/Agent/Angular and does not overlap a later
-Order-only fulfillment-domain slice, but it must not run beside a business
-cleanup that includes frontend or gateway files.
+`AI-LIST-02C` changes the Angular editor while reusing Product and Agent
+contracts without backend behavior changes. It must not run beside a business
+cleanup that includes the same frontend or gateway files.
 
 No AI slice may activate payment, checkout, fulfillment, moderation, or
 authentication behavior.

@@ -273,6 +273,13 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.listingId", equalTo(listingId)))
                 .andExpect(jsonPath("$.businessId", equalTo(BUSINESS_ID)))
                 .andExpect(jsonPath("$.sellerType", equalTo("BUSINESS")))
+                .andExpect(jsonPath("$.storeId", equalTo(STORE_ID)))
+                .andExpect(jsonPath("$.storeName", equalTo("Acme Trading Store")))
+                .andExpect(jsonPath("$.storeSlug", equalTo("acme-trading-store")))
+                .andExpect(jsonPath("$.businessVerified", equalTo(true)))
+                .andExpect(jsonPath("$.publicCity", equalTo("Irvine")))
+                .andExpect(jsonPath("$.publicRegion", equalTo("Orange County")))
+                .andExpect(jsonPath("$.businessLegalName").doesNotExist())
                 .andExpect(jsonPath("$.sku", equalTo("SKU-COMMERCE-1")))
                 .andExpect(jsonPath("$.priceAmount", equalTo(59.99)))
                 .andExpect(jsonPath("$.currency", equalTo("USD")))
@@ -286,7 +293,8 @@ class ListingDraftApiTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.listingId", equalTo(listingId)))
                 .andExpect(jsonPath("$.businessId", equalTo(BUSINESS_ID)))
-                .andExpect(jsonPath("$.sellerType", equalTo("BUSINESS")));
+                .andExpect(jsonPath("$.sellerType", equalTo("BUSINESS")))
+                .andExpect(jsonPath("$.storeName", equalTo("Acme Trading Store")));
 
         mockMvc.perform(get(
                         "/api/v1/internal/businesses/{businessId}/store/items/{listingId}/commerce-context",
@@ -294,6 +302,31 @@ class ListingDraftApiTests {
                         listingId)
                         .header("X-Internal-Service-Token", "wrong-token"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void internalCommerceContextTreatsAuthLabelOutageAsRetryableDependencyFailure() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+
+        String createResponse = mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest("SKU-COMMERCE-2")))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String listingId = objectMapper.readTree(createResponse).get("id").asText();
+
+        when(authServiceClient.lookupPublicSellerLabels(anySet(), anySet()))
+                .thenThrow(new AuthServiceClient.DependencyUnavailableException());
+
+        mockMvc.perform(get(
+                        "/api/v1/internal/store/items/{listingId}/commerce-context",
+                        listingId)
+                        .header("X-Internal-Service-Token", "test-commerce-token"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_DEPENDENCY_UNAVAILABLE")));
     }
 
     @Test

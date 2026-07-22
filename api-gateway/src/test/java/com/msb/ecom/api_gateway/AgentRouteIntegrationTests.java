@@ -116,6 +116,18 @@ class AgentRouteIntegrationTests {
         org.assertj.core.api.Assertions.assertThat(REQUESTS.get()).isZero();
     }
 
+    @Test
+    void listingAgentFlagDoesNotExposeDiscoveryRoute() {
+        RestAssured.given()
+                .header("Authorization", "Bearer relayed-access-token")
+                .when()
+                .get("/api/v1/agent/discovery/sessions/01A00000000000000000000001")
+                .then()
+                .statusCode(404);
+
+        org.assertj.core.api.Assertions.assertThat(REQUESTS.get()).isZero();
+    }
+
     private static HttpServer startAgentUpstream() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -142,4 +154,3 @@ class AgentRouteIntegrationTests {
         exchange.close();
     }
 }
-

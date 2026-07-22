@@ -147,7 +147,7 @@ describe('AuthService', () => {
     expect(assign).toHaveBeenCalledOnceWith('/api/v1/auth/login?client=marketplace');
   });
 
-  it('uses the local gateway when a production-style local frontend has no gateway URL', async () => {
+  it('keeps production-style local frontend requests same-origin when no gateway URL is configured', async () => {
     const fakeDocument = {
       defaultView: {
         location: { origin: 'http://localhost:4200' },
@@ -160,7 +160,7 @@ describe('AuthService', () => {
     );
 
     const statePromise = firstValueFrom(serviceWithFakeDocument.ensureSession());
-    const sessionRequest = httpMock.expectOne('http://localhost:9000/api/v1/auth/session');
+    const sessionRequest = httpMock.expectOne('/api/v1/auth/session');
     expect(sessionRequest.request.method).toBe('GET');
     sessionRequest.flush({
       authenticated: false,
@@ -355,7 +355,7 @@ describe('AuthService', () => {
     expect(await statePromise).toEqual({ authenticated: false, user: null });
   });
 
-  it('posts native login through the gateway and refreshes the authenticated session before logout', async () => {
+  it('posts native login through the gateway and applies the authenticated response before logout', async () => {
     const statePromise = firstValueFrom(service.nativeLogin({
       email: 'buyer@example.com',
       password: 'password-123',
@@ -395,22 +395,6 @@ describe('AuthService', () => {
       },
     });
 
-    httpMock.expectOne('/api/v1/auth/session').flush({
-      authenticated: true,
-      user: {
-        subject: 'keycloak-sub-1',
-        email: 'buyer@example.com',
-        displayName: 'Buyer One',
-        roles: ['BUYER'],
-        expiresAt: '2026-06-16T12:00:00Z',
-      },
-      csrf: {
-        headerName: 'X-CSRF-TOKEN',
-        parameterName: '_csrf',
-        token: 'post-login-csrf-token',
-      },
-    });
-
     httpMock.expectOne('/api/v1/users/me').flush({
       data: {
         id: '01JY0000000000000000000000',
@@ -436,13 +420,13 @@ describe('AuthService', () => {
       candidate.getAttribute('action') === '/api/v1/auth/logout'
     );
     expect(form?.parentElement).toBe(document.body);
-    expect(form?.querySelector('input[name="_csrf"]')?.getAttribute('value')).toBe('post-login-csrf-token');
+    expect(form?.querySelector('input[name="_csrf"]')?.getAttribute('value')).toBe('csrf-token-2');
     expect(form?.querySelector('input[name="client"]')?.getAttribute('value')).toBe('marketplace');
     expect(submitSpy).toHaveBeenCalled();
     form?.remove();
   });
 
-  it('refreshes the gateway session before and after native registration so CSRF is current', async () => {
+  it('refreshes CSRF before native registration and applies the authenticated response', async () => {
     const statePromise = firstValueFrom(service.nativeRegister({
       email: 'new@example.com',
       password: 'password-123',
@@ -483,22 +467,6 @@ describe('AuthService', () => {
         headerName: 'X-CSRF-TOKEN',
         parameterName: '_csrf',
         token: 'csrf-token-2',
-      },
-    });
-
-    httpMock.expectOne('/api/v1/auth/session').flush({
-      authenticated: true,
-      user: {
-        subject: 'keycloak-sub-2',
-        email: 'new@example.com',
-        displayName: 'New Buyer',
-        roles: ['BUYER'],
-        expiresAt: '2026-06-16T12:00:00Z',
-      },
-      csrf: {
-        headerName: 'X-CSRF-TOKEN',
-        parameterName: '_csrf',
-        token: 'csrf-token-3',
       },
     });
 

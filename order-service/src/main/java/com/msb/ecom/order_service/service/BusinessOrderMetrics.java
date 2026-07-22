@@ -21,4 +21,11 @@ public class BusinessOrderMetrics {
                         "result", result.toLowerCase(Locale.ROOT))
                 .increment();
     }
+
+    public void accept(String result) {
+        registry.counter(
+                        "business.orders.acceptance",
+                        "result", result.toLowerCase(Locale.ROOT))
+                .increment();
+    }
 }

@@ -6,6 +6,7 @@ import {
   categoryGuidanceRoute,
   checkoutDetailRoute,
   checkoutReviewRoute,
+  notificationCenterRoute,
   routes,
   sellerInventoryRoute,
 } from './app.routes';
@@ -108,6 +109,10 @@ describe('app routes', () => {
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/addresses',
+      redirectTo: '/account',
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/notifications',
       redirectTo: '/account',
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
@@ -231,6 +236,24 @@ describe('app routes', () => {
     expect(detail?.loadComponent).toBeUndefined();
   });
 
+  it('allows a cart-only build without exposing checkout routes', () => {
+    const enabledCart = cartRoute(true);
+    const disabledCheckout = [
+      checkoutReviewRoute(false),
+      checkoutDetailRoute(false),
+    ];
+
+    expect(enabledCart.path).toBe('cart');
+    expect(enabledCart.canActivate).toContain(authGuard);
+    expect(enabledCart.loadComponent).toBeTruthy();
+
+    for (const route of disabledCheckout) {
+      expect(route.redirectTo).toBe('/marketplace');
+      expect(route.loadComponent).toBeUndefined();
+      expect(route.canActivate).toBeUndefined();
+    }
+  });
+
   it('keeps deferred components available only through explicit opt-in route construction', () => {
     const enabledRoutes = [
       sellerInventoryRoute(true),
@@ -239,6 +262,7 @@ describe('app routes', () => {
       checkoutDetailRoute(true),
       cartRoute(true),
       buyerAddressesRoute(true),
+      notificationCenterRoute(true),
       categoryGuidanceRoute(true),
       ...agentMessageRoutes(true),
     ];
@@ -249,9 +273,13 @@ describe('app routes', () => {
     }
     expect(cartRoute(true).canActivate).toContain(authGuard);
     expect(buyerAddressesRoute(true).canActivate).toContain(authGuard);
+    expect(notificationCenterRoute(true).canActivate).toContain(authGuard);
     expect(checkoutReviewRoute(true).canActivate).toContain(authGuard);
     expect(checkoutDetailRoute(true).canActivate).toContain(authGuard);
     expect(agentMessageRoutes(true).every(route => route.canActivate?.includes(authGuard))).toBeTrue();
+    expect(agentMessageRoutes(false, true).every(route =>
+      route.canActivate?.includes(authGuard),
+    )).toBeTrue();
     expect(businessOrderRoutes(true).every(route => route.loadComponent)).toBeTrue();
   });
 

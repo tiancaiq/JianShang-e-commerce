@@ -13,7 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -68,6 +70,13 @@ class BusinessOrderServiceTests {
         assertCode(() -> service.list(BUSINESS_ID, "pending_acceptance", null, null),
                 "BUSINESS_ORDER_STATUS_INVALID");
         assertCode(() -> service.list(BUSINESS_ID, null, "not+base64", null),
+                "BUSINESS_ORDER_CURSOR_INVALID");
+        assertCode(
+                () -> service.list(
+                        BUSINESS_ID,
+                        null,
+                        cursor("not-an-instant", BUSINESS_ORDER_ID),
+                        null),
                 "BUSINESS_ORDER_CURSOR_INVALID");
         assertCode(() -> service.list(BUSINESS_ID, null, null, "51"),
                 "BUSINESS_ORDER_LIMIT_INVALID");
@@ -236,6 +245,13 @@ class BusinessOrderServiceTests {
 
     private static BigDecimal amount(String value) {
         return new BigDecimal(value);
+    }
+
+    private static String cursor(String timestamp, String businessOrderId) {
+        String raw = "v1\t" + timestamp + "\t" + businessOrderId;
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String id(int value) {

@@ -30,11 +30,15 @@ import { ToastService } from '../../../core/services/toast.service';
         </a>
         @if (authenticated) {
           @if (cartEnabled) {
-            <a routerLink="/cart" routerLinkActive="active" class="cart-link">
+            <a
+              routerLink="/cart"
+              routerLinkActive="active"
+              class="cart-link"
+              [attr.aria-label]="cartAriaLabel()">
               <svg viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20.5 8H7.1l-.4-2H3V4zm6.5 13.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></svg>
               Cart
               @if (cartCount > 0) {
-                <span class="cart-count">{{ cartCount > 99 ? '99+' : cartCount }}</span>
+                <span class="cart-count" aria-live="polite">{{ cartCountLabel() }}</span>
               }
             </a>
           }
@@ -345,8 +349,8 @@ export class MarketplaceNavbarComponent {
   private authService = inject(AuthService);
   private cartService = inject(CartService);
   private toastService = inject(ToastService);
-  readonly cartEnabled = environment.features.cart;
   @Input() authenticated = false;
+  @Input() cartEnabled = false;
   @Input() cartCount = 0;
   @Input() currentUser: CurrentUser | null = null;
   @Output() loginRequested = new EventEmitter<void>();
@@ -365,6 +369,15 @@ export class MarketplaceNavbarComponent {
       .slice(0, 2)
       .map(part => part.charAt(0).toUpperCase())
       .join('') || 'A';
+  }
+
+  cartCountLabel(): string {
+    return this.cartCount > 99 ? '99+' : String(Math.max(0, this.cartCount));
+  }
+
+  cartAriaLabel(): string {
+    const count = Math.max(0, this.cartCount);
+    return count === 1 ? 'Cart, 1 item' : `Cart, ${count} items`;
   }
 
   avatarUrl(): string | null {

@@ -13,7 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -67,6 +69,9 @@ class BuyerOrderServiceTests {
     @Test
     void malformedCursorLimitAndOrderIdFailBeforeIdentityOrRepositoryAccess() {
         assertCode(() -> service.list("not+url-base64", null), "ORDER_CURSOR_INVALID");
+        assertCode(
+                () -> service.list(cursor("not-an-instant", ORDER_ID), null),
+                "ORDER_CURSOR_INVALID");
         assertCode(() -> service.list(null, "many"), "ORDER_LIMIT_INVALID");
         assertCode(() -> service.list(null, "0"), "ORDER_LIMIT_INVALID");
         assertCode(() -> service.list(null, "51"), "ORDER_LIMIT_INVALID");
@@ -158,6 +163,7 @@ class BuyerOrderServiceTests {
                 "SUCCEEDED",
                 amount("25.0000"),
                 "USD",
+                0,
                 createdAt,
                 createdAt,
                 List.of(new BuyerOrderView.Group(
@@ -197,6 +203,13 @@ class BuyerOrderServiceTests {
 
     private static BigDecimal amount(String value) {
         return new BigDecimal(value);
+    }
+
+    private static String cursor(String timestamp, String orderId) {
+        String raw = "v1\t" + timestamp + "\t" + orderId;
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String id(int value) {

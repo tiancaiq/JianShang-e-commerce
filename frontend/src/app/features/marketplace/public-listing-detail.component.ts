@@ -6,6 +6,7 @@ import { ChatMessage, ChatParticipantSummary, ConversationSummary } from '../../
 import { ListingEngagement, PublicListing } from '../../core/models/listing.model';
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
+import { CartService } from '../../core/services/cart.service';
 import { ListingService } from '../../core/services/listing.service';
 import { ListingImageGalleryComponent } from '../../shared/components/ui/listing-image-gallery.component';
 import {
@@ -16,6 +17,7 @@ import {
 import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profile-card.component';
 import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
 import { toAgentListingSelection } from '../agent/agent-listing-context.model';
+import { CART_ENABLED } from '../cart/cart.capability';
 
 @Component({
   selector: 'app-public-listing-detail',
@@ -116,6 +118,55 @@ import { toAgentListingSelection } from '../agent/agent-listing-context.model';
                   }
                 }
               } @else {
+                @if (cartEnabled) {
+                  <section class="business-purchase-box" aria-label="Business item purchase">
+                    <div class="packing-label">
+                      <span>Store item</span>
+                      <strong>{{ listing()?.storeName || ownerLabel(listing()) }}</strong>
+                    </div>
+                    <div class="purchase-price-row">
+                      <span>Price</span>
+                      <strong>{{ listing()?.priceAmount | number: '1.2-2' }} {{ listing()?.currency }}</strong>
+                    </div>
+                    <p class="purchase-store-line">
+                      {{ listing()?.businessVerified ? 'Verified business' : 'Business seller' }}
+                      @if (locationLabel(listing()) !== 'Not set') {
+                        <span> &middot; {{ locationLabel(listing()) }}</span>
+                      }
+                    </p>
+                    <label class="quantity-control">
+                      <span>Quantity</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="999"
+                        inputmode="numeric"
+                        [value]="cartQuantity()"
+                        [disabled]="addingToCart()"
+                        (input)="updateCartQuantity(quantityInput.value)"
+                        #quantityInput>
+                    </label>
+                    <button
+                      type="button"
+                      class="add-cart-button"
+                      [disabled]="addingToCart() || !cartQuantityValid()"
+                      (click)="addBusinessListingToCart()">
+                      {{ cartButtonLabel() }}
+                    </button>
+                    @if (cartStatus()) {
+                      <p
+                        class="cart-status"
+                        [class.error]="cartStatusType() === 'error'"
+                        [attr.role]="cartStatusType() === 'error' ? 'alert' : 'status'"
+                        aria-live="polite">
+                        {{ cartStatus() }}
+                      </p>
+                    }
+                    @if (cartAdded()) {
+                      <a class="go-cart-button" routerLink="/cart">Go to cart</a>
+                    }
+                  </section>
+                }
                 @if (listing()?.storeSlug) {
                   <a class="store-button" [routerLink]="['/stores', listing()?.storeSlug]">
                     View {{ listing()?.storeName || 'store' }}
@@ -549,6 +600,132 @@ import { toAgentListingSelection } from '../agent/agent-listing-context.model';
       color: #246558;
     }
 
+    .business-purchase-box {
+      display: grid;
+      gap: 0.85rem;
+      padding: 0.9rem;
+      border: 1px solid rgba(73, 42, 84, 0.14);
+      border-left: 4px solid #d89a2b;
+      border-radius: 8px;
+      background: #fffdf9;
+      box-shadow: inset 0 0 0 1px rgba(216, 154, 43, 0.08);
+    }
+
+    .packing-label {
+      display: grid;
+      gap: 0.2rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px dashed rgba(73, 42, 84, 0.2);
+    }
+
+    .packing-label span,
+    .purchase-price-row span,
+    .quantity-control span {
+      color: var(--market-muted);
+      font-size: 0.72rem;
+      font-weight: 950;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .packing-label strong {
+      color: var(--market-ink);
+      font-size: 1.05rem;
+      font-weight: 950;
+      overflow-wrap: anywhere;
+    }
+
+    .purchase-price-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .purchase-price-row strong {
+      color: var(--market-ink);
+      font-size: 1.25rem;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .purchase-store-line,
+    .cart-status {
+      margin: 0;
+      color: #5f536d;
+      font-size: 0.84rem;
+      font-weight: 800;
+      line-height: 1.45;
+    }
+
+    .quantity-control {
+      display: grid;
+      gap: 0.38rem;
+    }
+
+    .quantity-control input {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid rgba(73, 42, 84, 0.16);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--market-ink);
+      font: inherit;
+      font-weight: 850;
+      padding: 0 0.72rem;
+    }
+
+    .quantity-control input:focus {
+      outline: 2px solid rgba(216, 154, 43, 0.28);
+      outline-offset: 2px;
+    }
+
+    .add-cart-button,
+    .go-cart-button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      font: inherit;
+      font-weight: 950;
+      text-decoration: none;
+    }
+
+    .add-cart-button {
+      border: 1px solid #b87713;
+      background: #d89a2b;
+      color: #2d2135;
+      cursor: pointer;
+      box-shadow: 0 12px 22px rgba(156, 99, 16, 0.18);
+    }
+
+    .add-cart-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+      box-shadow: none;
+    }
+
+    .add-cart-button:focus-visible,
+    .go-cart-button:focus-visible {
+      outline: 2px solid rgba(190, 47, 118, 0.34);
+      outline-offset: 2px;
+    }
+
+    .go-cart-button {
+      border: 1px solid rgba(190, 47, 118, 0.24);
+      background: #fff7fb;
+      color: var(--market-accent-dark);
+    }
+
+    .cart-status {
+      color: #246558;
+    }
+
+    .cart-status.error {
+      color: #b4235a;
+    }
+
     .detail-support {
       display: none;
     }
@@ -934,9 +1111,11 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
   private readonly router = inject(Router);
   private readonly listingService = inject(ListingService);
   private readonly chatService = inject(ChatService);
+  private readonly cartService = inject(CartService);
   private readonly authService = inject(AuthService);
   private readonly document = inject(DOCUMENT);
   readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
+  readonly cartEnabled = inject(CART_ENABLED);
 
   listing = signal<PublicListing | null>(null);
   loading = signal(false);
@@ -955,6 +1134,11 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
   likedByMe = signal(false);
   engagementLoading = signal(false);
   engagementError = signal('');
+  cartQuantity = signal(1);
+  addingToCart = signal(false);
+  cartAdded = signal(false);
+  cartStatus = signal('');
+  cartStatusType = signal<'success' | 'error'>('success');
 
   ngOnInit(): void {
     const listingId = this.route.snapshot.paramMap.get('listingId') || '';
@@ -1022,6 +1206,9 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
       return '';
     }
     if (listing.sellerType === 'BUSINESS') {
+      if (this.cartEnabled) {
+        return 'Cart saves this business item for later review.';
+      }
       return 'Quantity shown is catalog information only. Purchasing tools are not available in MVP.';
     }
     return 'Payment and delivery are arranged directly between users. Meet in public and avoid sharing private addresses.';
@@ -1039,6 +1226,62 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
       return 'Saving...';
     }
     return this.likeCountLabel();
+  }
+
+  cartQuantityValid(): boolean {
+    return Number.isInteger(this.cartQuantity()) && this.cartQuantity() >= 1 && this.cartQuantity() <= 999;
+  }
+
+  updateCartQuantity(value: string): void {
+    const parsed = Number(value);
+    this.cartAdded.set(false);
+    this.cartStatus.set('');
+    if (!Number.isFinite(parsed)) {
+      this.cartQuantity.set(1);
+      return;
+    }
+    this.cartQuantity.set(Math.min(999, Math.max(1, Math.trunc(parsed))));
+  }
+
+  cartButtonLabel(): string {
+    if (!this.authService.isAuthenticated()) {
+      return 'Sign in to add';
+    }
+    return this.addingToCart() ? 'Adding...' : 'Add to cart';
+  }
+
+  addBusinessListingToCart(): void {
+    const listing = this.listing();
+    if (!this.cartEnabled || !listing || listing.sellerType !== 'BUSINESS' || this.addingToCart()) {
+      return;
+    }
+    this.cartAdded.set(false);
+    this.cartStatus.set('');
+    if (!this.authService.isAuthenticated()) {
+      this.authService.login('marketplace', this.router.url);
+      return;
+    }
+    if (!this.cartQuantityValid()) {
+      this.cartStatusType.set('error');
+      this.cartStatus.set('Choose a quantity from 1 to 999.');
+      return;
+    }
+    this.addingToCart.set(true);
+    this.cartService.add({
+      listingId: listing.id,
+      quantity: this.cartQuantity(),
+    }).pipe(finalize(() => this.addingToCart.set(false))).subscribe({
+      next: () => {
+        this.cartAdded.set(true);
+        this.cartStatusType.set('success');
+        this.cartStatus.set('Added to cart.');
+      },
+      error: error => {
+        this.cartAdded.set(false);
+        this.cartStatusType.set('error');
+        this.cartStatus.set(this.cartErrorMessage(error));
+      },
+    });
   }
 
   toggleLike(): void {
@@ -1215,6 +1458,23 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
 
   private conversationErrorCode(error: { error?: { error?: { code?: string } } }): string | undefined {
     return error?.error?.error?.code;
+  }
+
+  private cartErrorMessage(error: { status?: number; error?: { error?: { code?: string; message?: string } } }): string {
+    const code = error?.error?.error?.code;
+    if (error?.status === 401 || error?.status === 403) {
+      return 'Sign in again to add this item.';
+    }
+    if (code === 'CART_ITEM_NOT_ELIGIBLE') {
+      return 'This item cannot be added to cart.';
+    }
+    if (code === 'CART_INSUFFICIENT_STOCK') {
+      return 'That quantity is not available.';
+    }
+    if (code === 'CART_ITEM_LIMIT_EXCEEDED') {
+      return 'Your cart has reached its item limit.';
+    }
+    return 'Cart update could not finish. Check your cart before trying again.';
   }
 
 }

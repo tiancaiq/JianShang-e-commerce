@@ -411,6 +411,26 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void deferredAgentDiscoveryRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/agent/discovery/sessions/01A00000000000000000000001")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void deferredListingProposalRouteIsNotRegisteredByDefault() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.post("/api/v1/agent/listing-proposals")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
 	void deferredCategoryGuidanceRouteIsNotRegisteredByDefault() {
 		RestAssured.given()
 				.header("Authorization", "Bearer valid-token")

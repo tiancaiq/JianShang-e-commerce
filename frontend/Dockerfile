@@ -6,7 +6,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+ARG FRONTEND_BUILD_CONFIGURATION=production
+RUN npm run build -- --configuration "$FRONTEND_BUILD_CONFIGURATION"
 
 # ── Stage 2: Serve with Nginx ─────────────────────────────────
 FROM nginx:alpine

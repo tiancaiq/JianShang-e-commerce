@@ -128,11 +128,15 @@ jobs:
       - name: Run real MySQL integration tests
         env:
           RUN_MYSQL_INTEGRATION: "1"
-        run: >-
-          python -m unittest discover
-          -s agent-service/tests
-          -p "test_knowledge_jobs_integration.py"
-          -v
+        run: |
+          python -m unittest discover \
+            -s agent-service/tests \
+            -p "test_knowledge_jobs_integration.py" \
+            -v
+          python -m unittest discover \
+            -s agent-service/tests \
+            -p "test_discovery_persistence_integration.py" \
+            -v
 
   architecture:
     name: Architecture Guardrails
@@ -214,7 +218,7 @@ jobs:
       - name: Validate migration-owning services
         run: |
           chmod +x ./mvnw
-          ./mvnw -B -pl auth-service,product-service -am test
+          ./mvnw -B -pl auth-service,product-service,notification-service -am test
 
   dependencies:
     name: Dependency Scan

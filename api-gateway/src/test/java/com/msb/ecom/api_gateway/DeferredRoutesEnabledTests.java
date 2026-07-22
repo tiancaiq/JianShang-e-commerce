@@ -16,11 +16,13 @@ import static org.assertj.core.api.Assertions.assertThat;
         properties = {
                 "msb.gateway.features.agent=true",
                 "msb.gateway.features.category-guidance=true",
-                "msb.gateway.features.cart-checkout=true",
+                "msb.gateway.features.cart=true",
+                "msb.gateway.features.checkout=true",
                 "msb.gateway.features.inventory=true",
                 "msb.gateway.features.buyer-addresses=true",
                 "msb.gateway.features.payment=true",
-                "msb.gateway.features.business-orders=true"
+                "msb.gateway.features.business-orders=true",
+                "msb.gateway.features.notifications=true"
         })
 class DeferredRoutesEnabledTests {
 
@@ -34,18 +36,22 @@ class DeferredRoutesEnabledTests {
     void explicitlyEnabledDeferredRoutesRegisterWithTheGateway() {
         assertThat(applicationContext.containsBean("agentServiceRoute")).isTrue();
         assertThat(applicationContext.containsBean("categoryGuidanceServiceRoute")).isTrue();
-        assertThat(applicationContext.containsBean("orderServiceRoute")).isTrue();
+        assertThat(applicationContext.containsBean("cartOrderServiceRoute")).isTrue();
+        assertThat(applicationContext.containsBean("checkoutOrderServiceRoute")).isTrue();
         assertThat(applicationContext.containsBean("inventoryServiceRoute")).isTrue();
         assertThat(applicationContext.containsBean("buyerAddressServiceRoute")).isTrue();
         assertThat(applicationContext.containsBean("paymentServiceRoute")).isTrue();
         assertThat(applicationContext.containsBean("businessOrderServiceRoute")).isTrue();
+        assertThat(applicationContext.containsBean("notificationServiceRoute")).isTrue();
 
         assertThat(applicationContext.containsBean("disabledAgentServiceRoute")).isFalse();
         assertThat(applicationContext.containsBean("disabledCategoryGuidanceServiceRoute")).isFalse();
-        assertThat(applicationContext.containsBean("disabledOrderServiceRoute")).isFalse();
+        assertThat(applicationContext.containsBean("disabledCartOrderServiceRoute")).isFalse();
+        assertThat(applicationContext.containsBean("disabledCheckoutOrderServiceRoute")).isFalse();
         assertThat(applicationContext.containsBean("disabledInventoryServiceRoute")).isFalse();
         assertThat(applicationContext.containsBean("disabledBuyerAddressServiceRoute")).isFalse();
         assertThat(applicationContext.containsBean("disabledPaymentServiceRoute")).isFalse();
         assertThat(applicationContext.containsBean("disabledBusinessOrderServiceRoute")).isFalse();
+        assertThat(applicationContext.containsBean("disabledNotificationServiceRoute")).isFalse();
     }
 }

@@ -2,6 +2,11 @@ export interface CartItem {
   listingId: string;
   title: string;
   thumbnailUrl: string | null;
+  storeName?: string | null;
+  storeSlug?: string | null;
+  businessVerified?: boolean | null;
+  publicCity?: string | null;
+  publicRegion?: string | null;
   quantity: number;
   observedPrice: number;
   currency: string;
@@ -56,6 +61,11 @@ export interface CartValidationItem {
   listingId: string;
   title: string;
   thumbnailUrl: string | null;
+  storeName?: string | null;
+  storeSlug?: string | null;
+  businessVerified?: boolean | null;
+  publicCity?: string | null;
+  publicRegion?: string | null;
   requestedQuantity: number;
   availableQuantity: number | null;
   observedPrice: number;

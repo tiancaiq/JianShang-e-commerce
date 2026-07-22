@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ConversationListItem } from '../../core/models/chat.model';
 import { IndividualSellerProfile } from '../../core/models/individual-seller.model';
 import { ListingDraft } from '../../core/models/listing.model';
@@ -208,5 +208,23 @@ describe('AccountComponent', () => {
     expect(links.some(href => href.includes('cart'))).toBeFalse();
     expect(links.some(href => href.includes('addresses'))).toBeFalse();
     expect(links.some(href => href.includes('reviews'))).toBeFalse();
+  });
+
+  it('shows seller activation on the dashboard when inactive sellers cannot load listings', () => {
+    fixture.destroy();
+    individualSellerService.getMe.and.returnValue(throwError(() => ({ status: 404 })));
+    listingService.getMyListings.and.returnValue(throwError(() => ({ status: 403 })));
+    fixture = TestBed.createComponent(AccountComponent);
+
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const text = host.textContent || '';
+    const links = Array.from(host.querySelectorAll('a')).map(link => link.getAttribute('href'));
+
+    expect(text).toContain('Become a Seller');
+    expect(text).toContain('Activate seller profile');
+    expect(text).not.toContain('Listings could not be loaded.');
+    expect(links).toContain('/account/listings');
   });
 });

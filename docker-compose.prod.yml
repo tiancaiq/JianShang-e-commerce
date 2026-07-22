@@ -24,6 +24,7 @@ services:
       CATALOG_DB_USERNAME: ${CATALOG_DB_USERNAME:-root}
       CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       AUTH_SERVICE_URL: http://auth-service:8085
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
       LISTING_MEDIA_MAX_IMAGE_SIZE_BYTES: ${LISTING_MEDIA_MAX_IMAGE_SIZE_BYTES:-10485760}
@@ -121,6 +122,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${IDENTITY_DB_USERNAME:-root}
       SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       USER_AVATAR_STORAGE: ${USER_AVATAR_STORAGE:-${LISTING_MEDIA_STORAGE:-local-demo}}
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
       LISTING_MEDIA_SIGNED_URL_TTL: ${LISTING_MEDIA_SIGNED_URL_TTL:-PT15M}
@@ -151,6 +153,7 @@ services:
       CHAT_DB_USERNAME: ${CHAT_DB_USERNAME:-root}
       CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
       AUTH_SERVICE_URL: http://auth-service:8085
       PRODUCT_SERVICE_URL: http://product-service:8091
     depends_on:
@@ -174,6 +177,9 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:8082
       PAYMENT_SERVICE_URL: http://payment-service:8084
       AUTH_SERVICE_URL: http://auth-service:8085
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL:-http://agent-service:8086}
+      GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}
+      GATEWAY_FEATURE_AGENT_DISCOVERY: ${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
       KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}}
@@ -198,6 +204,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        FRONTEND_BUILD_CONFIGURATION: ${FRONTEND_BUILD_CONFIGURATION:-production}
     container_name: frontend
     ports:
       - "4200:4200"

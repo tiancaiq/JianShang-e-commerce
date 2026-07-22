@@ -32,3 +32,10 @@ docker compose -p msb-ecom -f docker-compose.demo.yml --profile ai up -d --build
 Deployment automation must run Flyway as a separate step and stop promotion
 when validation or migration fails. Do not enable `baselineOnMigrate`,
 `outOfOrder`, or schema-clean operations.
+
+`V7__create_marketplace_discovery_sessions.sql` extends the Agent-owned
+session/message/tool schema for default-off `MARKETPLACE_DISCOVERY` sessions.
+It keeps listing customer-service subjects mandatory, permits only discovery
+sessions to be subjectless, enforces one open discovery session per actor, and
+stores detail-revalidated recommendation snapshots without cross-service
+foreign keys.

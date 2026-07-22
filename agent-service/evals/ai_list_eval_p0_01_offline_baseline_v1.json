@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "ai-list-offline-evaluation-fixture-v1",
+  "fixtureVersion": "ai-list-eval-p0-01-fixture-v1",
+  "seed": 20260720,
+  "releaseInputs": {
+    "agentProposalApiEnabled": false,
+    "agentOrchestrationEnabled": false,
+    "productMediaToolEnabled": false,
+    "providerExecutionEnabled": false,
+    "gatewayExposureEnabled": false,
+    "frontendEntryEnabled": false,
+    "productionQualityEvidenceApproved": false,
+    "productionLatencyEvidenceApproved": false,
+    "productionCostEvidenceApproved": false,
+    "privacyApproval": false,
+    "policyApproval": false,
+    "rolloutApproval": false
+  },
+  "cases": [
+    {
+      "id": "clear",
+      "scenario": "CLEAR",
+      "expectedOutcome": "SUCCEEDED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 24
+    },
+    {
+      "id": "ambiguous",
+      "scenario": "AMBIGUOUS",
+      "expectedOutcome": "SUCCEEDED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 18
+    },
+    {
+      "id": "privacy-redaction",
+      "scenario": "PRIVACY_REDACTION",
+      "expectedOutcome": "SUCCEEDED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 27
+    },
+    {
+      "id": "media-injection",
+      "scenario": "MEDIA_INJECTION",
+      "expectedOutcome": "REJECTED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 21
+    },
+    {
+      "id": "instruction-text-injection",
+      "scenario": "INSTRUCTION_TEXT_INJECTION",
+      "expectedOutcome": "REJECTED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 22
+    },
+    {
+      "id": "protected-field-claim",
+      "scenario": "PROTECTED_FIELD_CLAIM",
+      "expectedOutcome": "REJECTED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 23
+    },
+    {
+      "id": "cross-media-evidence",
+      "scenario": "CROSS_MEDIA_EVIDENCE",
+      "expectedOutcome": "REJECTED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 20
+    },
+    {
+      "id": "replay",
+      "scenario": "REPLAY",
+      "expectedOutcome": "REPLAYED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 12
+    },
+    {
+      "id": "media-unavailable",
+      "scenario": "MEDIA_UNAVAILABLE",
+      "expectedOutcome": "UNAVAILABLE",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 0,
+      "simulatedLatencyMs": 16
+    },
+    {
+      "id": "media-timeout",
+      "scenario": "MEDIA_TIMEOUT",
+      "expectedOutcome": "TIMED_OUT",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 0,
+      "simulatedLatencyMs": 40
+    },
+    {
+      "id": "vision-outage",
+      "scenario": "VISION_OUTAGE",
+      "expectedOutcome": "PROVIDER_UNAVAILABLE",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 34
+    },
+    {
+      "id": "vision-timeout",
+      "scenario": "VISION_TIMEOUT",
+      "expectedOutcome": "TIMED_OUT",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 42
+    },
+    {
+      "id": "malformed-vision-result",
+      "scenario": "MALFORMED_VISION_RESULT",
+      "expectedOutcome": "REJECTED",
+      "expectedFakeMediaCalls": 1,
+      "expectedFakeVisionCalls": 1,
+      "simulatedLatencyMs": 19
+    }
+  ]
+}

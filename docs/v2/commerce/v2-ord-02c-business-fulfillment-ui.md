@@ -1,6 +1,6 @@
 # V2-ORD-02C Business Fulfillment Queue And Detail UI
 
-Status: implemented and source-verified on 2026-07-20.
+Status: implemented, source-verified, and cleanup-verified on 2026-07-20.
 
 Requirements: `ORD-03 View business orders`.
 
@@ -79,9 +79,11 @@ changes.
 
 ## 4. Completion Boundary
 
-`V2-ORD-02C` completes the third business slice and advances the lane from
-`2/3` to `3/3`. The business lane stops here. Mandatory ORD-02 business-only
-cleanup must run before `V2-SHP-01A` or any other business successor.
+`V2-ORD-02C` completed the third business slice and advanced the lane from
+`2/3` to `3/3`. `V2-ORD-CLEAN-P0-01` subsequently verified the buyer/business
+read boundary, corrected bounded cursor and Auth dependency behavior, unified
+the Angular order capability source, and reset the lane to `0/3`. The business
+lane remains paused before `V2-SHP-01A` or any other successor.
 
 Browser and VM verification remain deferred until the source reaches the
 approved GitHub/VM release path. No runtime activation or deployment occurred

@@ -144,9 +144,9 @@ public class PaymentSucceededOrderConfirmationHandler {
         } catch (RuntimeException exception) {
             retry(event, claim.claimToken(), "ORDER_PERSISTENCE_RETRY_REQUIRED", clock.instant());
             log.warn(
-                    "Order confirmation persistence will retry eventId={} checkoutId={} code={}",
-                    event.eventId(),
-                    event.checkoutId(),
+                    "Order confirmation persistence will retry eventRef={} checkoutRef={} code={}",
+                    logReference(event.eventId()),
+                    logReference(event.checkoutId()),
                     "ORDER_PERSISTENCE_RETRY_REQUIRED");
             return new OrderConfirmationResult(
                     OrderConfirmationResult.Outcome.RETRY_REQUIRED,
@@ -325,6 +325,22 @@ public class PaymentSucceededOrderConfirmationHandler {
                 event.correlationId(),
                 event.eventId(),
                 now);
+        String persistedBuyerId = orders.buyerIdByOrder(orderId)
+                .orElseThrow(() -> invariant("ORDER_RECIPIENT_AUTHORITY_MISSING"));
+        orders.insertNotificationOutboxV2(
+                ids.next(),
+                orderId,
+                OrderConfirmedV2PayloadFactory.serialize(
+                        objectMapper,
+                        orderId,
+                        persistedBuyerId,
+                        checkout,
+                        payment,
+                        groups.keySet().stream().toList(),
+                        now),
+                event.correlationId(),
+                event.eventId(),
+                now);
         if (checkouts.markCompleted(
                 checkout.id(), reservation.status(), reservation.version(), now) != 1) {
             throw invariant("CHECKOUT_STATE_CONFLICT");
@@ -342,10 +358,10 @@ public class PaymentSucceededOrderConfirmationHandler {
         orders.markCompleted(
                 properties.consumerName(), event.eventId(), claimToken, orderId, now);
         log.info(
-                "Confirmed paid order eventId={} checkoutId={} orderId={} businessCount={}",
-                event.eventId(),
-                checkout.id(),
-                orderId,
+                "Confirmed paid order eventRef={} checkoutRef={} orderRef={} businessCount={}",
+                logReference(event.eventId()),
+                logReference(checkout.id()),
+                logReference(orderId),
                 groups.size());
         return new OrderConfirmationResult(
                 OrderConfirmationResult.Outcome.CONFIRMED,
@@ -361,9 +377,9 @@ public class PaymentSucceededOrderConfirmationHandler {
         orders.markRejected(
                 properties.consumerName(), event.eventId(), claimToken, safeCode, now);
         log.warn(
-                "Rejected payment event eventId={} checkoutId={} code={}",
-                event.eventId(),
-                event.checkoutId(),
+                "Rejected payment event eventRef={} checkoutRef={} code={}",
+                logReference(event.eventId()),
+                logReference(event.checkoutId()),
                 safeCode);
         return Claim.stop(new OrderConfirmationResult(
                 OrderConfirmationResult.Outcome.REJECTED,
@@ -411,10 +427,23 @@ public class PaymentSucceededOrderConfirmationHandler {
         transactions.executeWithoutResult(status -> orders.markRetryable(
                 properties.consumerName(), event.eventId(), claimToken, safeCode, now));
         log.warn(
-                "Payment order confirmation will retry eventId={} checkoutId={} code={}",
-                event.eventId(),
-                event.checkoutId(),
+                "Payment order confirmation will retry eventRef={} checkoutRef={} code={}",
+                logReference(event.eventId()),
+                logReference(event.checkoutId()),
                 safeCode);
+    }
+
+    static String logReference(String value) {
+        if (value == null || value.isBlank()) {
+            return "unavailable";
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 6);
+        } catch (Exception exception) {
+            return "unavailable";
+        }
     }
 
     private String mismatchCode(

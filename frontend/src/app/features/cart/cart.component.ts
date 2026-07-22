@@ -1,9 +1,10 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, ElementRef, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable } from 'rxjs';
 import {
   Cart,
+  CartCurrencyTotal,
   CartItem,
   CartValidationAction,
   CartValidationItem,
@@ -26,94 +27,143 @@ import { environment } from '../../../environments/environment';
         <a routerLink="/stores">Continue shopping</a>
       </header>
 
+      <p
+        class="cart-live-region cart-status-focus"
+        tabindex="-1"
+        aria-live="polite"
+        [class.visible]="operationMsg()">
+        {{ operationMsg() }}
+      </p>
+
       @if (errorMsg()) {
-        <div class="cart-error" role="alert">{{ errorMsg() }}</div>
+        <div class="cart-error cart-status-focus" tabindex="-1" role="alert">{{ errorMsg() }}</div>
       }
 
       @if (loading() && !cartService.cart()) {
-        <div class="cart-empty">Loading cart...</div>
+        <div class="cart-empty" aria-live="polite">Loading cart...</div>
       } @else if (!cartService.cart()?.items?.length) {
         <div class="cart-empty">
           <strong>Your cart is empty</strong>
-          <p>Browse business items and add one you like.</p>
+          <p>Browse active business items and add one you like.</p>
           <a routerLink="/stores">Browse business items</a>
         </div>
       } @else {
         <div class="cart-layout">
-          <div class="cart-items" aria-label="Cart items">
+          <section class="cart-items" aria-labelledby="cart-items-heading">
+            <div class="section-title">
+              <h2 id="cart-items-heading">Items from business sellers</h2>
+              <span>{{ cartService.cart()?.totalQuantity }} total</span>
+            </div>
+
             @for (item of cartService.cart()?.items || []; track item.listingId) {
-              <article class="cart-item">
+              @let validation = validationItem(item.listingId);
+              <article
+                class="packing-card"
+                [class.needs-repair]="validation && validation.status !== 'READY'"
+                [class.ready]="validation?.status === 'READY'">
                 <a [routerLink]="['/listings', item.listingId]" class="item-image">
                   @if (imageUrl(item)) {
                     <img [src]="imageUrl(item)" [alt]="item.title" />
                   } @else {
-                    <span aria-hidden="true">B</span>
+                    <span aria-hidden="true">{{ fallbackInitial(item) }}</span>
                   }
                 </a>
 
-                <div class="item-copy">
-                  <a [routerLink]="['/listings', item.listingId]">{{ item.title }}</a>
-                  <span>{{ item.observedPrice | number: '1.2-2' }} {{ item.currency }} each</span>
-                  @if (validationItem(item.listingId); as validation) {
-                    @if (validation.currentPrice !== null
-                        && (validation.currentPrice !== item.observedPrice
-                          || validation.currentCurrency !== item.currency)) {
-                      <span class="current-price">
-                        Current:
-                        {{ validation.currentPrice | number: '1.2-2' }}
-                        {{ validation.currentCurrency }}
+                <div class="item-main">
+                  <div class="store-stamp">
+                    @if (storeSlug(item, validation)) {
+                      <a [routerLink]="['/stores', storeSlug(item, validation)]">{{ storeLabel(item, validation) }}</a>
+                    } @else {
+                      <span>{{ storeLabel(item, validation) }}</span>
+                    }
+                    @if (businessVerified(item, validation)) {
+                      <span class="verified">Verified</span>
+                    }
+                    @if (storeLocation(item, validation)) {
+                      <span>{{ storeLocation(item, validation) }}</span>
+                    }
+                  </div>
+
+                  <a [routerLink]="['/listings', item.listingId]" class="item-title">{{ item.title }}</a>
+
+                  <div class="item-facts">
+                    <span>{{ item.observedPrice | number: '1.2-2' }} {{ item.currency }} saved price</span>
+                    @if (hasCurrentPriceInfo(validation)) {
+                      <span [class.changed]="hasCurrentPriceChange(item, validation)">
+                        {{ currentPriceLabel(validation) }} current price
                       </span>
                     }
+                    @if (hasAvailabilityInfo(validation)) {
+                      <span>{{ availabilityLabel(validation) }}</span>
+                    }
+                  </div>
+                </div>
+
+                <div class="quantity-block">
+                  <span>Quantity</span>
+                  <div class="quantity-control">
+                    <button
+                      type="button"
+                      title="Decrease quantity"
+                      aria-label="Decrease quantity"
+                      [disabled]="busy() || item.quantity <= 1"
+                      (click)="changeQuantity(item, item.quantity - 1)">-</button>
+                    <strong aria-live="polite">{{ item.quantity }}</strong>
+                    <button
+                      type="button"
+                      title="Increase quantity"
+                      aria-label="Increase quantity"
+                      [disabled]="busy() || item.quantity >= 999"
+                      (click)="changeQuantity(item, item.quantity + 1)">+</button>
+                  </div>
+                </div>
+
+                <div class="line-money">
+                  <span>Line total</span>
+                  <strong>{{ item.observedPrice * item.quantity | number: '1.2-2' }} {{ item.currency }}</strong>
+                  @if (currentLineTotalLabel(item, validation)) {
+                    <small>
+                      Current:
+                      {{ currentLineTotalLabel(item, validation) }}
+                    </small>
                   }
                 </div>
 
-                <div class="quantity-control" aria-label="Quantity">
+                <div class="line-actions">
                   <button
                     type="button"
-                    title="Decrease quantity"
-                    aria-label="Decrease quantity"
-                    [disabled]="busy() || item.quantity <= 1"
-                    (click)="changeQuantity(item, item.quantity - 1)">-</button>
-                  <strong>{{ item.quantity }}</strong>
-                  <button
-                    type="button"
-                    title="Increase quantity"
-                    aria-label="Increase quantity"
-                    [disabled]="busy() || item.quantity >= 999"
-                    (click)="changeQuantity(item, item.quantity + 1)">+</button>
+                    class="text-action"
+                    [attr.aria-label]="'Remove ' + item.title"
+                    [disabled]="busy()"
+                    (click)="remove(item)">Remove</button>
                 </div>
 
-                <strong class="line-total">
-                  {{ item.observedPrice * item.quantity | number: '1.2-2' }} {{ item.currency }}
-                </strong>
+                @if (validation) {
+                  <section
+                    class="repair-panel"
+                    [class.validation-ready]="validation.status === 'READY'"
+                    [attr.aria-label]="'Cart validation for ' + item.title">
+                    <div>
+                      <strong>{{ statusLabel(validation.status) }}</strong>
+                      @if (validation.status === 'READY') {
+                        <span>{{ availabilityLabel(validation) }}. Price is current.</span>
+                      } @else {
+                        <div class="repair-messages">
+                          @for (issue of validation.issues; track issue.code) {
+                            <span>{{ issue.message }}</span>
+                          }
+                        </div>
+                      }
+                    </div>
 
-                <button
-                  type="button"
-                  class="remove-button"
-                  title="Remove item"
-                  [attr.aria-label]="'Remove ' + item.title"
-                  [disabled]="busy()"
-                  (click)="remove(item)">x</button>
-
-                @if (validationItem(item.listingId); as validation) {
-                  <div
-                    class="item-validation"
-                    [class.validation-ready]="validation.status === 'READY'">
-                    <strong>{{ statusLabel(validation.status) }}</strong>
-                    @if (validation.status === 'READY') {
-                      <span>{{ validation.availableQuantity }} currently available</span>
-                    } @else {
-                      <div class="validation-messages">
-                        @for (issue of validation.issues; track issue.code) {
-                          <span>{{ issue.message }}</span>
-                        }
-                      </div>
-                      <div class="validation-actions">
+                    @if (validation.status !== 'READY') {
+                      <div class="repair-actions">
                         @if (hasAction(validation, 'SET_AVAILABLE_QUANTITY')
                             && validation.availableQuantity !== null
                             && validation.availableQuantity > 0) {
                           <button
                             type="button"
+                            class="text-action"
                             [disabled]="busy()"
                             [attr.aria-label]="'Use available quantity for ' + item.title"
                             (click)="useAvailableQuantity(item, validation.availableQuantity)">
@@ -123,6 +173,7 @@ import { environment } from '../../../environments/environment';
                         @if (hasAction(validation, 'ACCEPT_CURRENT_PRICE')) {
                           <button
                             type="button"
+                            class="text-action"
                             [disabled]="busy()"
                             [attr.aria-label]="'Accept current price for ' + item.title"
                             (click)="acceptCurrentPrice(item)">
@@ -132,6 +183,7 @@ import { environment } from '../../../environments/environment';
                         @if (hasAction(validation, 'REMOVE_ITEM')) {
                           <button
                             type="button"
+                            class="text-action"
                             [disabled]="busy()"
                             [attr.aria-label]="'Remove unavailable ' + item.title"
                             (click)="remove(item)">
@@ -140,60 +192,84 @@ import { environment } from '../../../environments/environment';
                         }
                       </div>
                     }
-                  </div>
+                  </section>
                 }
               </article>
             }
-          </div>
+          </section>
 
-          <aside class="cart-summary" aria-label="Cart summary">
-            <div>
-              <span>Items</span>
-              <strong>{{ cartService.cart()?.totalQuantity }}</strong>
+          <aside class="receipt-rail" aria-label="Cart summary">
+            <div class="receipt-card">
+              <div class="receipt-heading">
+                <span>Cart receipt</span>
+                <strong>{{ cartReadinessLabel() }}</strong>
+              </div>
+
+              <dl>
+                <div>
+                  <dt>Items</dt>
+                  <dd>{{ cartService.cart()?.totalQuantity }}</dd>
+                </div>
+                @for (total of savedTotals(); track total.currency) {
+                  <div>
+                    <dt>Saved subtotal</dt>
+                    <dd>{{ total.amount | number: '1.2-2' }} {{ total.currency }}</dd>
+                  </div>
+                }
+                @for (total of currentTotals(); track total.currency) {
+                  <div class="current-total">
+                    <dt>Current subtotal</dt>
+                    <dd>{{ total.amount | number: '1.2-2' }} {{ total.currency }}</dd>
+                  </div>
+                }
+              </dl>
+
+              @if (cartService.validating()) {
+                <div class="validation-summary validation-checking" aria-live="polite">
+                  <strong>Checking current price and stock</strong>
+                  <span>Cart contents stay unchanged while validation runs.</span>
+                </div>
+              } @else if (validationError()) {
+                <div class="validation-summary validation-problem cart-status-focus" tabindex="-1" role="alert">
+                  <strong>Validation unavailable</strong>
+                  <span>{{ validationError() }}</span>
+                  <button type="button" class="text-action" [disabled]="busy()" (click)="validate()">Retry</button>
+                </div>
+              } @else if (cartService.validation(); as validation) {
+                <div
+                  class="validation-summary"
+                  [class.validation-ready]="validation.checkoutReady"
+                  [class.validation-problem]="!validation.checkoutReady">
+                  <strong>{{ validation.checkoutReady ? 'Ready for checkout' : 'Needs attention' }}</strong>
+                  <span>
+                    {{ validation.checkoutReady
+                      ? 'Current price, stock, store and currency checks passed.'
+                      : 'Use the repair actions on the affected items.' }}
+                  </span>
+                </div>
+                @for (issue of validation.cartIssues; track issue.code) {
+                  <div class="cart-issue" role="alert">{{ issue.message }}</div>
+                }
+              } @else {
+                <div class="validation-summary">
+                  <strong>Saved cart totals</strong>
+                  <span>Open validation to confirm current price, stock, store, and currency.</span>
+                </div>
+              }
+
+              <div class="summary-actions">
+                @if (buyerCheckoutEnabled && cartService.validation()?.checkoutReady) {
+                  <a class="checkout-link" routerLink="/checkout">Continue to checkout</a>
+                } @else {
+                  <p class="checkout-copy">
+                    {{ buyerCheckoutEnabled
+                      ? 'Resolve cart issues before checkout.'
+                      : 'Checkout is not enabled in this cart-only demo.' }}
+                  </p>
+                }
+                <button type="button" class="clear-button" [disabled]="busy()" (click)="clear()">Clear cart</button>
+              </div>
             </div>
-            @if (cartService.validating()) {
-              <div class="validation-summary validation-checking" aria-live="polite">
-                <strong>Checking current price and stock...</strong>
-              </div>
-            } @else if (validationError()) {
-              <div class="validation-summary validation-problem" role="alert">
-                <strong>Validation unavailable</strong>
-                <span>{{ validationError() }}</span>
-                <button type="button" [disabled]="busy()" (click)="validate()">Retry</button>
-              </div>
-            } @else if (cartService.validation(); as validation) {
-              <div
-                class="validation-summary"
-                [class.validation-ready]="validation.checkoutReady"
-                [class.validation-problem]="!validation.checkoutReady">
-                <strong>{{ validation.checkoutReady ? 'Ready for checkout' : 'Needs attention' }}</strong>
-                <span>
-                  {{ validation.checkoutReady
-                    ? 'Prices and availability are current.'
-                    : 'Resolve the highlighted items before checkout.' }}
-                </span>
-              </div>
-              @for (issue of validation.cartIssues; track issue.code) {
-                <div class="cart-issue" role="alert">{{ issue.message }}</div>
-              }
-              @for (total of validation.validatedTotals; track total.currency) {
-                <div>
-                  <span>Current subtotal</span>
-                  <strong>{{ total.amount | number: '1.2-2' }} {{ total.currency }}</strong>
-                </div>
-              }
-            } @else {
-              @for (total of cartService.cart()?.totals || []; track total.currency) {
-                <div>
-                  <span>Saved subtotal</span>
-                  <strong>{{ total.amount | number: '1.2-2' }} {{ total.currency }}</strong>
-                </div>
-              }
-            }
-            <button type="button" class="clear-button" [disabled]="busy()" (click)="clear()">Clear cart</button>
-            @if (buyerCheckoutEnabled && cartService.validation()?.checkoutReady) {
-              <a class="checkout-link" routerLink="/checkout">Continue to checkout</a>
-            }
           </aside>
         </div>
       }
@@ -213,68 +289,120 @@ import { environment } from '../../../environments/environment';
       align-items: end;
       justify-content: space-between;
       gap: 1rem;
-      padding: 0.5rem 0;
+      padding: 0.5rem 0 0.9rem;
       border-bottom: 1px solid var(--market-line);
     }
 
-    .cart-header p {
-      margin: 0 0 0.25rem;
+    .cart-header p,
+    .section-title span,
+    .receipt-heading span,
+    .quantity-block span,
+    .line-money span {
+      margin: 0;
       color: var(--market-accent-dark);
-      font-size: 0.78rem;
-      font-weight: 900;
+      font-size: 0.75rem;
+      font-weight: 950;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
     }
 
-    .cart-header h1 {
+    .cart-header h1,
+    .section-title h2 {
       margin: 0;
       color: #352444;
       font-family: var(--font-display);
-      font-size: clamp(2rem, 4vw, 3.2rem);
       letter-spacing: 0;
     }
 
+    .cart-header h1 {
+      font-size: clamp(2rem, 4vw, 3.2rem);
+    }
+
     .cart-header a,
-    .cart-empty a {
+    .cart-empty a,
+    .store-stamp a,
+    .item-title {
       color: var(--market-accent-dark);
       font-weight: 900;
       text-decoration: none;
     }
 
+    .cart-live-region {
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+      clip: rect(0, 0, 0, 0);
+    }
+
+    .cart-live-region.visible {
+      width: auto;
+      height: auto;
+      clip: auto;
+      position: static;
+      padding: 0.7rem 0.85rem;
+      border-left: 3px solid #178269;
+      background: #edf9f5;
+      color: #176452;
+      font-weight: 850;
+    }
+
     .cart-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
       align-items: start;
       gap: 1rem;
     }
 
-    .cart-items {
+    .cart-items,
+    .section-title {
       display: grid;
-      gap: 0.75rem;
+      gap: 0.8rem;
     }
 
-    .cart-item {
+    .section-title {
+      grid-template-columns: minmax(0, 1fr) max-content;
+      align-items: end;
+      padding-top: 0.15rem;
+    }
+
+    .section-title h2 {
+      font-size: 1.18rem;
+    }
+
+    .packing-card {
       display: grid;
-      grid-template-columns: 88px minmax(0, 1fr) 116px minmax(110px, max-content) 40px;
+      grid-template-columns: 104px minmax(0, 1fr) 128px minmax(126px, max-content) minmax(72px, max-content);
       align-items: center;
       gap: 1rem;
-      min-height: 112px;
-      padding: 0.75rem;
-      border: 1px solid var(--market-line);
+      padding: 0.85rem;
+      border: 1px solid rgba(73, 42, 84, 0.13);
+      border-left: 4px solid #d89a2b;
       border-radius: 8px;
-      background: rgba(255, 255, 255, 0.96);
-      box-shadow: 0 10px 24px rgba(132, 77, 160, 0.08);
+      background: #fffdf9;
+      box-shadow: 0 10px 22px rgba(73, 42, 84, 0.07);
+    }
+
+    .packing-card.needs-repair {
+      border-left-color: #b92f73;
+    }
+
+    .packing-card.ready {
+      border-left-color: #178269;
     }
 
     .item-image {
-      width: 88px;
+      width: 104px;
       aspect-ratio: 1;
       display: grid;
       place-items: center;
       overflow: hidden;
+      border: 1px solid rgba(73, 42, 84, 0.1);
       border-radius: 6px;
-      background: #fff0f7;
+      background: #fff7fb;
       color: var(--market-accent-dark);
-      font-size: 1.5rem;
+      font-size: 1.65rem;
       font-weight: 950;
     }
 
@@ -284,166 +412,239 @@ import { environment } from '../../../environments/environment';
       object-fit: cover;
     }
 
-    .item-copy {
+    .item-main {
       min-width: 0;
       display: grid;
-      gap: 0.4rem;
+      gap: 0.44rem;
     }
 
-    .item-copy a {
+    .store-stamp,
+    .item-facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.55rem;
+      color: #6a5874;
+      font-size: 0.82rem;
+      font-weight: 780;
+      line-height: 1.4;
+    }
+
+    .store-stamp > * + *,
+    .item-facts > * + * {
+      padding-left: 0.55rem;
+      border-left: 1px solid rgba(73, 42, 84, 0.16);
+    }
+
+    .store-stamp .verified {
+      color: #176452;
+      font-weight: 950;
+    }
+
+    .item-title {
       overflow-wrap: anywhere;
       color: var(--market-ink);
-      font-size: 1rem;
-      font-weight: 900;
-      text-decoration: none;
+      font-size: 1.04rem;
+      line-height: 1.22;
     }
 
-    .item-copy span {
-      color: var(--market-muted);
-      font-size: 0.84rem;
-      font-weight: 750;
+    .item-facts .changed {
+      color: #9b275c;
+      font-weight: 950;
     }
 
-    .item-copy .current-price {
-      color: #176452;
-      font-weight: 900;
+    .quantity-block,
+    .line-money,
+    .line-actions {
+      display: grid;
+      gap: 0.42rem;
     }
 
     .quantity-control {
-      width: 116px;
-      height: 40px;
+      width: 128px;
+      min-height: 44px;
       display: grid;
-      grid-template-columns: 38px 1fr 38px;
-      align-items: center;
-      border: 1px solid var(--market-line);
-      border-radius: 6px;
+      grid-template-columns: 44px 1fr 44px;
+      align-items: stretch;
+      border: 1px solid rgba(73, 42, 84, 0.15);
+      border-radius: 8px;
       overflow: hidden;
+      background: #fff;
       text-align: center;
     }
 
     .quantity-control button,
-    .remove-button {
-      width: 100%;
-      height: 100%;
+    .text-action,
+    .clear-button {
+      min-height: 44px;
       border: 0;
       background: #fff7fb;
       color: var(--market-accent-dark);
       cursor: pointer;
       font: inherit;
+      font-weight: 950;
+    }
+
+    .quantity-control button {
       font-size: 1.15rem;
-      font-weight: 900;
     }
 
-    button:disabled {
-      cursor: wait;
-      opacity: 0.5;
+    .quantity-control strong {
+      display: grid;
+      place-items: center;
+      color: var(--market-ink);
+      font-weight: 950;
     }
 
-    .line-total {
+    .line-money {
       text-align: right;
+    }
+
+    .line-money strong {
+      color: var(--market-ink);
+      font-size: 1rem;
       white-space: nowrap;
     }
 
-    .remove-button {
-      width: 40px;
-      height: 40px;
-      border-radius: 6px;
-      font-size: 1.35rem;
+    .line-money small {
+      color: #6a5874;
+      font-weight: 800;
+      white-space: nowrap;
     }
 
-    .item-validation {
+    .line-actions {
+      justify-items: end;
+    }
+
+    .text-action {
+      min-height: 36px;
+      padding: 0.35rem 0.62rem;
+      border: 1px solid rgba(190, 47, 118, 0.22);
+      border-radius: 7px;
+      background: #fff;
+      text-align: center;
+    }
+
+    .repair-panel {
       grid-column: 2 / -1;
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 1rem;
-      padding: 0.7rem 0.8rem;
+      padding: 0.74rem 0.82rem;
+      border: 1px solid rgba(185, 47, 115, 0.18);
       border-left: 3px solid #b92f73;
-      background: #fff2f7;
+      border-radius: 8px;
+      background: #fff5f8;
       color: #7d2453;
       font-size: 0.84rem;
+      line-height: 1.45;
     }
 
-    .item-validation.validation-ready {
+    .repair-panel.validation-ready {
+      border-color: rgba(23, 130, 105, 0.18);
       border-left-color: #178269;
       background: #edf9f5;
       color: #176452;
     }
 
-    .validation-messages {
+    .repair-panel > div:first-child,
+    .repair-messages {
       min-width: 0;
       display: grid;
-      flex: 1;
       gap: 0.2rem;
     }
 
-    .validation-actions {
+    .repair-actions {
       display: flex;
       flex-wrap: wrap;
       justify-content: flex-end;
-      gap: 0.4rem;
+      gap: 0.45rem;
     }
 
-    .validation-actions button,
-    .validation-summary button {
-      min-height: 34px;
-      padding: 0.4rem 0.65rem;
-      border: 1px solid currentColor;
-      border-radius: 6px;
-      background: #fff;
-      color: inherit;
-      cursor: pointer;
-      font: inherit;
-      font-weight: 900;
+    .receipt-rail {
+      position: sticky;
+      top: 0.85rem;
     }
 
-    .cart-summary {
+    .receipt-card {
       display: grid;
-      gap: 0.75rem;
+      gap: 0.8rem;
       padding: 1rem;
-      border: 1px solid var(--market-line);
+      border: 1px solid rgba(73, 42, 84, 0.14);
       border-radius: 8px;
-      background: rgba(255, 255, 255, 0.96);
-      box-shadow: 0 10px 24px rgba(132, 77, 160, 0.08);
+      background: #fffdf9;
+      box-shadow: 0 10px 22px rgba(73, 42, 84, 0.07);
     }
 
-    .cart-summary div {
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      padding-bottom: 0.75rem;
-      border-bottom: 1px solid var(--market-line);
-    }
-
-    .cart-summary span {
-      color: var(--market-muted);
-      font-weight: 750;
-    }
-
-    .cart-summary .validation-summary {
+    .receipt-heading {
       display: grid;
-      justify-content: stretch;
-      gap: 0.3rem;
-      padding: 0.75rem;
-      border: 0;
+      gap: 0.22rem;
+      padding-bottom: 0.72rem;
+      border-bottom: 1px dashed rgba(73, 42, 84, 0.2);
+    }
+
+    .receipt-heading strong {
+      color: var(--market-ink);
+      font-size: 1.25rem;
+      font-weight: 950;
+    }
+
+    .receipt-card dl,
+    .receipt-card dl div {
+      display: grid;
+      gap: 0.62rem;
+    }
+
+    .receipt-card dl {
+      margin: 0;
+    }
+
+    .receipt-card dl div {
+      grid-template-columns: minmax(0, 1fr) max-content;
+      padding-bottom: 0.62rem;
+      border-bottom: 1px solid rgba(73, 42, 84, 0.1);
+    }
+
+    .receipt-card dt {
+      color: var(--market-muted);
+      font-weight: 800;
+    }
+
+    .receipt-card dd {
+      margin: 0;
+      color: var(--market-ink);
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .receipt-card .current-total dd {
+      color: #176452;
+    }
+
+    .validation-summary,
+    .cart-issue {
+      display: grid;
+      gap: 0.32rem;
+      padding: 0.72rem;
       border-left: 3px solid #846b92;
+      border-radius: 8px;
       background: #faf7fc;
+      color: #6a5874;
+      font-size: 0.84rem;
+      font-weight: 800;
+      line-height: 1.45;
     }
 
-    .validation-summary span {
-      color: inherit;
-      font-size: 0.8rem;
-    }
-
-    .cart-summary .validation-summary.validation-ready {
+    .validation-summary.validation-ready {
       border-left-color: #178269;
       background: #edf9f5;
       color: #176452;
     }
 
-    .cart-summary .validation-summary.validation-problem {
+    .validation-summary.validation-problem,
+    .cart-issue {
       border-left-color: #b92f73;
-      background: #fff2f7;
+      background: #fff5f8;
       color: #7d2453;
     }
 
@@ -451,35 +652,40 @@ import { environment } from '../../../environments/environment';
       color: var(--market-muted);
     }
 
-    .cart-issue {
-      padding: 0.65rem 0.75rem;
-      border-left: 3px solid #b92f73;
-      background: #fff2f7;
-      color: #7d2453;
-      font-size: 0.82rem;
-      font-weight: 800;
+    .summary-actions {
+      display: grid;
+      gap: 0.62rem;
     }
 
-    .clear-button {
-      min-height: 42px;
-      border: 1px solid var(--market-line);
-      border-radius: 6px;
-      background: #fff;
-      color: var(--market-accent-dark);
-      cursor: pointer;
-      font: inherit;
-      font-weight: 900;
+    .checkout-link,
+    .clear-button,
+    .cart-empty a {
+      min-height: 44px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 8px;
+      text-align: center;
     }
 
     .checkout-link {
-      min-height: 42px;
-      display: grid;
-      place-items: center;
-      border-radius: 6px;
-      background: var(--market-accent-dark);
-      color: #fff;
-      font-weight: 900;
+      border: 1px solid #b87713;
+      background: #d89a2b;
+      color: #2d2135;
+      font-weight: 950;
       text-decoration: none;
+      box-shadow: 0 12px 20px rgba(156, 99, 16, 0.16);
+    }
+
+    .checkout-copy {
+      margin: 0;
+      color: #6a5874;
+      font-size: 0.84rem;
+      font-weight: 850;
+      line-height: 1.45;
+    }
+
+    .clear-button {
+      border: 1px solid rgba(73, 42, 84, 0.14);
     }
 
     .cart-empty,
@@ -493,7 +699,7 @@ import { environment } from '../../../environments/environment';
     .cart-empty {
       display: grid;
       justify-items: start;
-      gap: 0.5rem;
+      gap: 0.55rem;
     }
 
     .cart-empty p {
@@ -505,47 +711,108 @@ import { environment } from '../../../environments/environment';
       padding: 0.75rem 1rem;
       border-color: rgba(190, 58, 131, 0.35);
       color: #a72f68;
-      font-weight: 800;
+      font-weight: 850;
     }
 
-    @media (max-width: 820px) {
+    button:disabled,
+    .text-action:disabled,
+    .clear-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.56;
+      box-shadow: none;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    .cart-status-focus:focus-visible {
+      outline: 2px solid rgba(216, 154, 43, 0.5);
+      outline-offset: 3px;
+    }
+
+    @media (max-width: 900px) {
       .cart-layout {
         grid-template-columns: 1fr;
       }
 
-      .cart-summary {
+      .receipt-rail {
         order: -1;
+        position: static;
       }
 
-      .cart-item {
-        grid-template-columns: 72px minmax(0, 1fr) 40px;
+      .packing-card {
+        grid-template-columns: 92px minmax(0, 1fr) minmax(72px, max-content);
       }
 
       .item-image {
-        width: 72px;
+        width: 92px;
       }
 
-      .quantity-control {
+      .quantity-block,
+      .line-money {
         grid-column: 2;
       }
 
-      .line-total {
-        grid-column: 2;
+      .line-money {
         text-align: left;
       }
 
-      .remove-button {
+      .line-actions {
         grid-column: 3;
         grid-row: 1;
       }
 
-      .item-validation {
+      .repair-panel {
         grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .cart-header,
+      .section-title {
+        align-items: flex-start;
+        grid-template-columns: 1fr;
         flex-direction: column;
       }
 
-      .validation-actions {
+      .packing-card {
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 0.75rem;
+      }
+
+      .item-image {
+        width: 76px;
+      }
+
+      .line-actions {
+        grid-column: 2;
+        grid-row: auto;
+        justify-items: start;
+      }
+
+      .quantity-block,
+      .line-money,
+      .repair-panel {
+        grid-column: 1 / -1;
+      }
+
+      .repair-panel {
+        flex-direction: column;
+      }
+
+      .repair-actions {
         justify-content: flex-start;
+      }
+
+      .receipt-card dl div {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
       }
     }
   `],
@@ -554,8 +821,10 @@ export class CartComponent implements OnInit {
   readonly buyerCheckoutEnabled = environment.features.buyerCheckout;
   readonly cartService = inject(CartService);
   private readonly listingService = inject(ListingService);
+  private readonly host = inject(ElementRef<HTMLElement>);
   readonly errorMsg = signal('');
   readonly validationError = signal('');
+  readonly operationMsg = signal('');
   readonly loading = signal(false);
 
   ngOnInit(): void {
@@ -568,6 +837,7 @@ export class CartComponent implements OnInit {
       },
       error: error => {
         this.errorMsg.set(error?.error?.error?.message || 'The cart could not be loaded.');
+        this.focusStatus();
       },
       complete: () => this.loading.set(false),
     });
@@ -577,21 +847,21 @@ export class CartComponent implements OnInit {
     if (quantity < 1 || quantity > 999 || this.busy()) {
       return;
     }
-    this.runMutation(this.cartService.update(item.listingId, { quantity }));
+    this.runMutation(this.cartService.update(item.listingId, { quantity }), 'Quantity updated.');
   }
 
   remove(item: CartItem): void {
     if (this.busy()) {
       return;
     }
-    this.runMutation(this.cartService.remove(item.listingId));
+    this.runMutation(this.cartService.remove(item.listingId), 'Item removed.');
   }
 
   clear(): void {
     if (this.busy()) {
       return;
     }
-    this.runMutation(this.cartService.clear());
+    this.runMutation(this.cartService.clear(), 'Cart cleared.');
   }
 
   validate(): void {
@@ -604,6 +874,7 @@ export class CartComponent implements OnInit {
         this.validationError.set(
           error?.error?.error?.message || 'Current price and stock could not be checked.',
         );
+        this.focusStatus();
       },
     });
   }
@@ -615,14 +886,14 @@ export class CartComponent implements OnInit {
     this.runMutation(this.cartService.add({
       listingId: item.listingId,
       quantity: item.quantity,
-    }));
+    }), 'Current price accepted.');
   }
 
   useAvailableQuantity(item: CartItem, quantity: number): void {
     if (this.busy() || quantity < 1) {
       return;
     }
-    this.runMutation(this.cartService.update(item.listingId, { quantity }));
+    this.runMutation(this.cartService.update(item.listingId, { quantity }), 'Quantity reduced to available stock.');
   }
 
   validationItem(listingId: string): CartValidationItem | undefined {
@@ -637,28 +908,116 @@ export class CartComponent implements OnInit {
     return {
       READY: 'Ready',
       PRICE_CHANGED: 'Price changed',
-      QUANTITY_REDUCED: 'Quantity changed',
+      QUANTITY_REDUCED: 'Quantity needs review',
       OUT_OF_STOCK: 'Out of stock',
       LISTING_UNAVAILABLE: 'Item unavailable',
-      SELLER_UNAVAILABLE: 'Seller unavailable',
+      SELLER_UNAVAILABLE: 'Store unavailable',
       CURRENCY_CONFLICT: 'Currency conflict',
     }[status];
   }
 
+  hasCurrentPriceInfo(item?: CartValidationItem): boolean {
+    return !!item && item.currentPrice !== null && !!item.currentCurrency;
+  }
+
+  currentPriceLabel(item?: CartValidationItem): string {
+    if (!this.hasCurrentPriceInfo(item)) {
+      return '';
+    }
+    return `${Number(item?.currentPrice).toFixed(2)} ${item?.currentCurrency}`;
+  }
+
+  currentLineTotalLabel(cartItem: CartItem, validation?: CartValidationItem): string {
+    if (!this.hasCurrentPriceInfo(validation)) {
+      return '';
+    }
+    return `${(Number(validation?.currentPrice) * cartItem.quantity).toFixed(2)} ${validation?.currentCurrency}`;
+  }
+
+  hasAvailabilityInfo(item?: CartValidationItem): boolean {
+    return !!item && item.availableQuantity !== null;
+  }
+
+  availabilityLabel(item?: CartValidationItem): string {
+    if (!item || item.availableQuantity === null) {
+      return 'Availability needs review';
+    }
+    if (item.availableQuantity === 0) {
+      return 'Out of stock';
+    }
+    return `${item.availableQuantity} currently available`;
+  }
+
+  hasCurrentPriceChange(item: CartItem, validation?: CartValidationItem): boolean {
+    return !!validation
+      && ((validation.currentPrice !== null && validation.currentPrice !== item.observedPrice)
+        || (validation.currentCurrency !== null && validation.currentCurrency !== item.currency));
+  }
+
+  savedTotals(): CartCurrencyTotal[] {
+    return this.cartService.cart()?.totals || [];
+  }
+
+  currentTotals(): CartCurrencyTotal[] {
+    return this.cartService.validation()?.checkoutReady
+      ? this.cartService.validation()?.validatedTotals || []
+      : [];
+  }
+
+  cartReadinessLabel(): string {
+    if (this.cartService.validating()) {
+      return 'Checking';
+    }
+    if (this.validationError()) {
+      return 'Retry needed';
+    }
+    const validation = this.cartService.validation();
+    if (!validation) {
+      return 'Saved totals';
+    }
+    return validation.checkoutReady ? 'Ready' : 'Repair needed';
+  }
+
   busy(): boolean {
-    return this.loading() || this.cartService.validating();
+    return this.loading() || this.cartService.loading() || this.cartService.validating();
   }
 
   imageUrl(item: CartItem): string {
     return this.listingService.mediaUrl(item.thumbnailUrl);
   }
 
-  private runMutation(request: Observable<Cart>): void {
+  fallbackInitial(item: CartItem): string {
+    return (item.title.trim()[0] || 'B').toUpperCase();
+  }
+
+  storeLabel(item: CartItem, validation?: CartValidationItem): string {
+    return validation?.storeName || item.storeName || 'Business store item';
+  }
+
+  storeSlug(item: CartItem, validation?: CartValidationItem): string | null {
+    return validation?.storeSlug || item.storeSlug || null;
+  }
+
+  businessVerified(item: CartItem, validation?: CartValidationItem): boolean {
+    return Boolean(validation?.businessVerified ?? item.businessVerified);
+  }
+
+  storeLocation(item: CartItem, validation?: CartValidationItem): string {
+    const city = validation?.publicCity || item.publicCity || '';
+    const region = validation?.publicRegion || item.publicRegion || '';
+    return [city, region].filter(Boolean).join(', ');
+  }
+
+  // Runs one explicit buyer cart mutation, then revalidates without replaying failures.
+  private runMutation(request: Observable<Cart>, successMessage: string): void {
     this.loading.set(true);
     this.errorMsg.set('');
     this.validationError.set('');
+    this.operationMsg.set('');
     request.subscribe({
       next: cart => {
+        this.operationMsg.set(successMessage);
+        this.focusStatus();
         if (cart.items.length) {
           this.validate();
         }
@@ -666,8 +1025,15 @@ export class CartComponent implements OnInit {
       error: error => {
         this.loading.set(false);
         this.errorMsg.set(error?.error?.error?.message || 'The cart could not be updated.');
+        this.focusStatus();
       },
       complete: () => this.loading.set(false),
+    });
+  }
+
+  private focusStatus(): void {
+    setTimeout(() => {
+      (this.host.nativeElement.querySelector('.cart-status-focus') as HTMLElement | null)?.focus();
     });
   }
 }

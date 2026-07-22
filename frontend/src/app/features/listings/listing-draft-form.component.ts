@@ -6,6 +6,15 @@ import { Category, ListingCondition, ListingDraft, ListingImage, ListingSellerTy
 import { BusinessStoreService } from '../../core/services/business-store.service';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import {
+  ListingProposalApplicationCommand,
+  ListingProposalApplicationState,
+  ListingProposalReviewMedia,
+} from '../agent/agent-listing-proposal.model';
+import {
+  AgentListingProposalReviewComponent,
+} from '../agent/agent-listing-proposal-review.component';
 import {
   buildListingDraftRequest,
   listingDraftToFormState,
@@ -29,7 +38,7 @@ interface PendingListingMedia {
 @Component({
   selector: 'app-listing-draft-form',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, AgentListingProposalReviewComponent],
   template: `
     <section class="listing-page">
       <header class="page-header">
@@ -272,6 +281,21 @@ interface PendingListingMedia {
           }
         </div>
       </form>
+
+      @if (listingProposalReviewEnabled && proposalReviewEligible()) {
+        <app-agent-listing-proposal-review
+          [listingId]="savedId()"
+          [listingVersion]="proposalReviewListingVersion()"
+          [listingStatus]="listingStatus()"
+          [media]="proposalReviewMedia()"
+          [categories]="categories()"
+          [hasUnsavedEditorChanges]="hasUnsavedListingChanges()"
+          [applicationState]="proposalApplicationState()"
+          [applicationMessage]="proposalApplicationMessage()"
+          [appliedVersion]="proposalAppliedVersion()"
+          (applyConfirmed)="applyListingProposal($event)"
+        />
+      }
     </section>
   `,
   styles: [`
@@ -585,6 +609,7 @@ export class ListingDraftFormComponent implements OnInit {
   private toastService = inject(ToastService);
   private route = inject(ActivatedRoute);
   router = inject(Router);
+  readonly listingProposalReviewEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
 
   categories = signal<Category[]>([]);
   loadingCategories = signal(false);
@@ -600,6 +625,9 @@ export class ListingDraftFormComponent implements OnInit {
   uploadingMedia = signal(false);
   mediaError = signal('');
   mediaMessage = signal('');
+  proposalApplicationState = signal<ListingProposalApplicationState>('IDLE');
+  proposalApplicationMessage = signal('');
+  proposalAppliedVersion = signal<number | null>(null);
   mediaItems = signal<ListingImage[]>([]);
   pendingMediaItems = signal<PendingListingMedia[]>([]);
   storeContext = signal<BusinessStoreContext | null>(null);
@@ -1110,6 +1138,136 @@ export class ListingDraftFormComponent implements OnInit {
 
   businessStoreMode(): boolean {
     return this.router.url.startsWith('/seller/store/items');
+  }
+
+  /** Restricts the optional proposal entry point to editable owned individual drafts. */
+  proposalReviewEligible(): boolean {
+    return this.marketplaceAccountMode()
+      && !this.businessStoreMode()
+      && this.isEditMode()
+      && Boolean(this.savedId())
+      && ['DRAFT', 'CHANGES_REQUESTED'].includes(this.listingStatus());
+  }
+
+  proposalReviewListingVersion(): number {
+    return this.currentVersion;
+  }
+
+  /** Applies only seller-confirmed proposal fields through the existing owner-scoped Product PATCH. */
+  applyListingProposal(command: ListingProposalApplicationCommand): void {
+    this.proposalApplicationMessage.set('');
+    this.proposalAppliedVersion.set(null);
+    if (!this.listingProposalReviewEnabled
+      || !this.proposalReviewEligible()
+      || this.saving()
+      || this.submitting()) {
+      this.failProposalApplication('The listing is not available for proposal application.');
+      return;
+    }
+    if (command.listingId !== this.editListingId
+      || command.sourceListingVersion !== this.currentVersion) {
+      this.proposalApplicationState.set('CONFLICT');
+      this.proposalApplicationMessage.set(
+        'The listing version changed. Reload and compare the current draft; no proposal fields were applied.',
+      );
+      return;
+    }
+    if (this.hasUnsavedListingChanges()) {
+      this.failProposalApplication(
+        'Save or discard ordinary editor changes first so only confirmed proposal fields are updated.',
+      );
+      return;
+    }
+
+    const fieldNames = Object.keys(command.fields);
+    if (fieldNames.length < 1
+      || fieldNames.some(name => !['title', 'description', 'categoryId'].includes(name))) {
+      this.failProposalApplication('Choose at least one supported proposal field.');
+      return;
+    }
+
+    const nextState = { ...this.formState() };
+    if (Object.prototype.hasOwnProperty.call(command.fields, 'title')) {
+      const title = command.fields.title?.trim() || '';
+      if (title.length < 1 || title.length > 160) {
+        this.failProposalApplication('The confirmed title is not valid.');
+        return;
+      }
+      nextState.title = title;
+    }
+    if (Object.prototype.hasOwnProperty.call(command.fields, 'description')) {
+      const description = command.fields.description?.trim() || '';
+      if (description.length < 1 || description.length > 5_000) {
+        this.failProposalApplication('The confirmed description is not valid.');
+        return;
+      }
+      nextState.description = description;
+    }
+    if (Object.prototype.hasOwnProperty.call(command.fields, 'categoryId')) {
+      const categoryId = command.fields.categoryId || '';
+      if (!this.categories().some(category => category.id === categoryId)) {
+        this.failProposalApplication('Choose a current category from the listing editor.');
+        return;
+      }
+      nextState.categoryId = categoryId;
+    }
+
+    const validation = validateListingDraftForm(nextState);
+    if (!validation.valid) {
+      this.failProposalApplication(validation.message);
+      return;
+    }
+
+    this.proposalApplicationState.set('APPLYING');
+    this.saving.set(true);
+    this.listingService.updateDraft(
+      this.editListingId,
+      command.sourceListingVersion,
+      buildListingDraftRequest(nextState),
+    ).subscribe({
+      next: listing => {
+        this.populateFromDraft(listing);
+        this.saving.set(false);
+        this.proposalAppliedVersion.set(listing.version);
+        this.proposalApplicationState.set('APPLIED');
+        this.proposalApplicationMessage.set(
+          'Product accepted the confirmed fields. The listing remains an editable draft.',
+        );
+        this.toastService.success('Selected proposal fields applied to the listing draft.');
+      },
+      error: error => {
+        this.saving.set(false);
+        if (error.status === 409) {
+          this.proposalApplicationState.set('CONFLICT');
+          this.proposalApplicationMessage.set(
+            'The listing changed before confirmation completed. Reload and compare the current draft; no automatic retry occurred.',
+          );
+          return;
+        }
+        this.failProposalApplication(
+          'Product could not update the listing. Nothing is marked applied; review the draft and try again later.',
+        );
+      },
+    });
+  }
+
+  /** Maps only attached image display data and Product-owned media IDs into the Agent review boundary. */
+  proposalReviewMedia(): ListingProposalReviewMedia[] {
+    const allowedMimes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    const allowedModeration = new Set(['NOT_SUBMITTED', 'CHANGES_REQUESTED', 'APPROVED']);
+    return this.mediaItems().map(image => ({
+      mediaId: image.mediaObjectId,
+      imageUrl: this.imageUrl(image),
+      altText: image.altText || image.originalFileName || 'Listing image',
+      eligible: image.uploadStatus === 'UPLOADED'
+        && allowedMimes.has(image.contentType.toLowerCase())
+        && allowedModeration.has(image.moderationStatus),
+    }));
+  }
+
+  private failProposalApplication(message: string): void {
+    this.proposalApplicationState.set('FAILED');
+    this.proposalApplicationMessage.set(message);
   }
 
   // Keeps paused business item copy distinct from pre-publication drafts.

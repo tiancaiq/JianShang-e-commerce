@@ -87,7 +87,7 @@ class ListingToolResult(_StrictModel):
     """Contains only the currently approved Product listing projection."""
 
     listing_id: str = Field(alias="listingId", min_length=1, max_length=160)
-    source_version: str = Field(alias="sourceVersion", pattern=r"^[1-9][0-9]{0,19}$")
+    source_version: str = Field(alias="sourceVersion", pattern=r"^(?:0|[1-9][0-9]{0,19})$")
     title: str = Field(min_length=1, max_length=180)
     transaction_notice: str = Field(alias="transactionNotice", min_length=1, max_length=1_000)
 
@@ -124,7 +124,7 @@ class RetrieveKnowledgeArguments(_StrictModel):
 class AnswerSource(_StrictModel):
     source_type: Literal["LISTING"] = Field(alias="sourceType")
     source_id: str = Field(alias="sourceId", min_length=1, max_length=100)
-    source_version: str = Field(alias="sourceVersion", pattern=r"^[1-9][0-9]{0,19}$")
+    source_version: str = Field(alias="sourceVersion", pattern=r"^(?:0|[1-9][0-9]{0,19})$")
     label: Literal["Current listing"] = "Current listing"
 
 

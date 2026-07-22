@@ -335,7 +335,7 @@ export class AuthService {
           headers: this.csrfHeader(),
         }
       )),
-      switchMap(() => this.refreshSession())
+      switchMap(session => this.applySession(session))
     );
   }
 
@@ -406,12 +406,6 @@ export class AuthService {
   }
 
   private url(path: string): string {
-    if (!this.gatewayUrl && isPlatformBrowser(this.platformId)) {
-      const origin = this.document.defaultView?.location.origin;
-      if (origin === 'http://localhost:4200') {
-        return `http://localhost:9000${path}`;
-      }
-    }
     if (!this.gatewayUrl) {
       return path;
     }

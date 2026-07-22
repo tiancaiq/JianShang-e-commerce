@@ -41,7 +41,7 @@ services:
     container_name: msb-demo-keycloak
     command: start-dev --import-realm
     environment:
-      KC_HOSTNAME: ${KC_HOSTNAME:-localhost}
+      KC_HOSTNAME_URL: ${KEYCLOAK_PUBLIC_BASE_URI:-http://localhost:8181}
       KC_PROXY_HEADERS: xforwarded
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_DB:-keycloak}
@@ -53,6 +53,7 @@ services:
       KEYCLOAK_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8181}:8080"
@@ -148,11 +149,42 @@ services:
       - mysql
     restart: "no"
 
+  agent-zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    hostname: agent-zookeeper
+    container_name: msb-demo-agent-zookeeper
+    profiles:
+      - ai
+    ports:
+      - "127.0.0.1:2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: msb-demo-agent-broker
+    profiles:
+      - ai
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:-9092}:9092"
+    depends_on:
+      - agent-zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "agent-zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
   agent-opensearch:
     image: opensearchproject/opensearch:2.15.0
     container_name: msb-demo-agent-opensearch
     profiles:
       - ai
+      - ai-bootstrap
     ports:
       - "127.0.0.1:${AGENT_OPENSEARCH_PORT:-9201}:9200"
     environment:
@@ -180,13 +212,13 @@ services:
       context: ./agent-service
       dockerfile: Dockerfile
     profiles:
-      - ai
+      - ai-bootstrap
     entrypoint:
       - msb-knowledge-index
     command:
       - bootstrap
     environment:
-      AGENT_KNOWLEDGE_ENABLED: "true"
+      AGENT_KNOWLEDGE_ENABLED: ${AGENT_KNOWLEDGE_ENABLED:-false}
       AGENT_OPENSEARCH_URL: http://agent-opensearch:9200
       AGENT_OPENSEARCH_VERIFY_CERTS: "false"
       AGENT_KNOWLEDGE_EMBEDDING_PROVIDER: openai
@@ -209,13 +241,13 @@ services:
     environment:
       PORT: 8086
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AGENT_KNOWLEDGE_ENABLED: ${AGENT_KNOWLEDGE_ENABLED:-true}
+      AGENT_KNOWLEDGE_ENABLED: ${AGENT_KNOWLEDGE_ENABLED:-false}
       AGENT_OPENSEARCH_URL: http://agent-opensearch:9200
       AGENT_OPENSEARCH_VERIFY_CERTS: "false"
       AGENT_KNOWLEDGE_EMBEDDING_PROVIDER: openai
       AGENT_KNOWLEDGE_EMBEDDING_MODEL: text-embedding-3-small
       AGENT_KNOWLEDGE_EMBEDDING_DIMENSIONS: 1536
-      AGENT_KNOWLEDGE_INGESTION_ENABLED: ${AGENT_KNOWLEDGE_INGESTION_ENABLED:-true}
+      AGENT_KNOWLEDGE_INGESTION_ENABLED: ${AGENT_KNOWLEDGE_INGESTION_ENABLED:-false}
       AGENT_KNOWLEDGE_PROCESSOR_ENABLED: ${AGENT_KNOWLEDGE_PROCESSOR_ENABLED:-false}
       AGENT_MYSQL_HOST: mysql
       AGENT_MYSQL_PORT: 3306
@@ -224,6 +256,10 @@ services:
       AGENT_MYSQL_PASSWORD: ${AGENT_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}}
       AGENT_PERSISTENCE_ENABLED: ${AGENT_PERSISTENCE_ENABLED:-false}
       AGENT_CUSTOMER_SERVICE_API_ENABLED: ${AGENT_CUSTOMER_SERVICE_API_ENABLED:-false}
+      AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED: ${AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED:-false}
+      AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED: ${AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED:-false}
+      AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED: ${AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED:-false}
+      AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED: ${AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED:-false}
       AUTH_SERVICE_URL: http://auth-service:8085
       AGENT_MESSAGE_RETENTION_DAYS: ${AGENT_MESSAGE_RETENTION_DAYS:-90}
       AGENT_AUDIT_RETENTION_DAYS: ${AGENT_AUDIT_RETENTION_DAYS:-365}
@@ -243,8 +279,10 @@ services:
         condition: service_started
       product-service:
         condition: service_healthy
-      agent-index-bootstrap:
+      agent-migrations:
         condition: service_completed_successfully
+      agent-opensearch:
+        condition: service_healthy
     restart: unless-stopped
 
   chat-service:
@@ -287,6 +325,7 @@ services:
       ORDER_SERVICE_URL: http://order-service-disabled:8081
       INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
       PAYMENT_SERVICE_URL: http://payment-service-disabled:8084
+      GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
       KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
@@ -314,6 +353,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        FRONTEND_BUILD_CONFIGURATION: ${FRONTEND_BUILD_CONFIGURATION:-production}
     container_name: msb-demo-frontend
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4200}:4200"

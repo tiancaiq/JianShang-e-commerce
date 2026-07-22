@@ -11,6 +11,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -40,6 +41,7 @@ public class NativeAuthService {
 
     private final ClientRegistrationRepository clientRegistrationRepository;
     private final OAuth2AuthorizedClientService authorizedClientService;
+    private final OAuth2AuthorizedClientRepository authorizedClientRepository;
     private final JwtDecoderFactory<ClientRegistration> idTokenDecoderFactory;
     private final SecurityContextRepository securityContextRepository;
     private final ObjectMapper objectMapper;
@@ -52,6 +54,7 @@ public class NativeAuthService {
     public NativeAuthService(
             ClientRegistrationRepository clientRegistrationRepository,
             OAuth2AuthorizedClientService authorizedClientService,
+            OAuth2AuthorizedClientRepository authorizedClientRepository,
             JwtDecoderFactory<ClientRegistration> idTokenDecoderFactory,
             SecurityContextRepository securityContextRepository,
             ObjectMapper objectMapper,
@@ -62,6 +65,7 @@ public class NativeAuthService {
             @Value("${msb.gateway.auth.admin-client-secret:local-dev-only-change-me-gateway-admin}") String adminClientSecret) {
         this.clientRegistrationRepository = clientRegistrationRepository;
         this.authorizedClientService = authorizedClientService;
+        this.authorizedClientRepository = authorizedClientRepository;
         this.idTokenDecoderFactory = idTokenDecoderFactory;
         this.securityContextRepository = securityContextRepository;
         this.objectMapper = objectMapper;
@@ -181,6 +185,7 @@ public class NativeAuthService {
                         ? null
                         : new OAuth2RefreshToken(tokenResponse.refreshToken(), Instant.now()));
         authorizedClientService.saveAuthorizedClient(authorizedClient, authentication);
+        authorizedClientRepository.saveAuthorizedClient(authorizedClient, authentication, request, response);
         return authentication;
     }
 

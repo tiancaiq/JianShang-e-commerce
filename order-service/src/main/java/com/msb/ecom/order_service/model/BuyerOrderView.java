@@ -10,6 +10,7 @@ public record BuyerOrderView(
         String paymentStatus,
         BigDecimal totalAmount,
         String currency,
+        long version,
         Instant createdAt,
         Instant updatedAt,
         List<Group> groups,

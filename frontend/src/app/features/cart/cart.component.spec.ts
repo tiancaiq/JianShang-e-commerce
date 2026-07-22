@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { CartService } from '../../core/services/cart.service';
 import { ListingService } from '../../core/services/listing.service';
 import { CartComponent } from './cart.component';
@@ -22,7 +22,12 @@ describe('CartComponent', () => {
       items: [{
         listingId: '01L00000000000000000000001',
         title: 'Store plush',
-        thumbnailUrl: null,
+        thumbnailUrl: '/api/v1/public/listing-media/01M00000000000000000000001',
+        storeName: 'Mochi Store',
+        storeSlug: 'mochi-store',
+        businessVerified: true,
+        publicCity: 'Irvine',
+        publicRegion: 'CA',
         quantity: 2,
         observedPrice: 10,
         currency: 'USD',
@@ -40,7 +45,12 @@ describe('CartComponent', () => {
       items: [{
         listingId: cart.items[0].listingId,
         title: cart.items[0].title,
-        thumbnailUrl: null,
+        thumbnailUrl: cart.items[0].thumbnailUrl,
+        storeName: cart.items[0].storeName,
+        storeSlug: cart.items[0].storeSlug,
+        businessVerified: cart.items[0].businessVerified,
+        publicCity: cart.items[0].publicCity,
+        publicRegion: cart.items[0].publicRegion,
         requestedQuantity: 2,
         availableQuantity: 5,
         observedPrice: 10,
@@ -73,21 +83,34 @@ describe('CartComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: CartService, useValue: cartService },
-        { provide: ListingService, useValue: { mediaUrl: (url: string | null) => url || '' } },
+        { provide: ListingService, useValue: { mediaUrl: (url: string | null) => url ? `media:${url}` : '' } },
       ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(CartComponent);
   });
 
-  it('renders observed totals and updates quantity', () => {
+  it('renders the cart as store packing cards and updates quantity', () => {
     fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Your cart');
     expect(text).toContain('Store plush');
+    expect(text).toContain('Mochi Store');
+    expect(text).toContain('Verified');
+    expect(text).toContain('Irvine, CA');
     expect(text).toContain('20.00 USD');
     expect(text).toContain('Ready for checkout');
+    expect(text).toContain('Current subtotal');
+    expect(text).toContain('Checkout is not enabled in this cart-only demo.');
+    expect(fixture.nativeElement.querySelector('.packing-card')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.receipt-rail')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('a[href="/stores/mochi-store"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('img')?.getAttribute('alt')).toBe('Store plush');
+    expect(fixture.nativeElement.querySelector('img')?.getAttribute('src')).toBe(
+      'media:/api/v1/public/listing-media/01M00000000000000000000001',
+    );
+    expect(fixture.nativeElement.querySelector('a[href="/checkout"]')).toBeNull();
     expect(cartService.validate).toHaveBeenCalled();
 
     const increase = fixture.nativeElement.querySelector('[aria-label="Increase quantity"]') as HTMLButtonElement;
@@ -130,8 +153,13 @@ describe('CartComponent', () => {
 
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Needs attention');
+    expect(text).toContain('Quantity needs review');
     expect(text).toContain('Only 1 is currently available.');
     expect(text).toContain('Accept current price');
+    expect(text).toContain('Use the repair actions on the affected items.');
+    expect(cartService.add).not.toHaveBeenCalled();
+    expect(cartService.update).not.toHaveBeenCalled();
+    expect(cartService.remove).not.toHaveBeenCalled();
 
     const useAvailable = fixture.nativeElement.querySelector(
       '[aria-label="Use available quantity for Store plush"]',
@@ -142,5 +170,136 @@ describe('CartComponent', () => {
       cart.items[0].listingId,
       { quantity: 1 },
     );
+  });
+
+  it('accepts a current price only after an explicit repair click', () => {
+    const priceValidation = {
+      ...validation,
+      checkoutReady: false,
+      validatedTotals: [],
+      items: [{
+        ...validation.items[0],
+        currentPrice: 12,
+        status: 'PRICE_CHANGED',
+        issues: [{
+          code: 'CART_PRICE_CHANGED',
+          message: 'The price changed from 10.00 USD to 12.00 USD.',
+          action: 'ACCEPT_CURRENT_PRICE',
+        }],
+      }],
+    };
+    cartService.validation = signal(priceValidation).asReadonly();
+    cartService.validate.and.returnValue(of(priceValidation));
+
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('12.00 USD current price');
+    expect(cartService.add).not.toHaveBeenCalled();
+
+    const accept = fixture.nativeElement.querySelector(
+      '[aria-label="Accept current price for Store plush"]',
+    ) as HTMLButtonElement;
+    accept.click();
+
+    expect(cartService.add).toHaveBeenCalledOnceWith({
+      listingId: cart.items[0].listingId,
+      quantity: 2,
+    });
+  });
+
+  it('runs remove and clear only from explicit buyer actions', () => {
+    fixture.detectChanges();
+
+    const remove = fixture.nativeElement.querySelector(
+      '[aria-label="Remove Store plush"]',
+    ) as HTMLButtonElement;
+    remove.click();
+    fixture.detectChanges();
+
+    expect(cartService.remove).toHaveBeenCalledOnceWith(cart.items[0].listingId);
+    expect(cartService.clear).not.toHaveBeenCalled();
+
+    cartService.remove.calls.reset();
+    fixture = TestBed.createComponent(CartComponent);
+    fixture.detectChanges();
+
+    const clear = fixture.nativeElement.querySelector('.clear-button') as HTMLButtonElement;
+    clear.click();
+
+    expect(cartService.clear).toHaveBeenCalledTimes(1);
+    expect(cartService.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-replay uncertain cart mutations', () => {
+    cartService.update.and.returnValue(throwError(() => ({ status: 503 })));
+    fixture.detectChanges();
+
+    const increase = fixture.nativeElement.querySelector('[aria-label="Increase quantity"]') as HTMLButtonElement;
+    increase.click();
+    fixture.detectChanges();
+
+    expect(cartService.update).toHaveBeenCalledTimes(1);
+    expect(cartService.validate).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.textContent).toContain('The cart could not be updated.');
+  });
+
+  it('shows no checkout route in cart-only mode even when validation is ready', () => {
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Ready for checkout');
+    expect(fixture.nativeElement.textContent).toContain('Checkout is not enabled in this cart-only demo.');
+    expect(fixture.nativeElement.querySelector('a[href="/checkout"]')).toBeNull();
+  });
+
+  it('retains cart contents and exposes retry when validation is unavailable', () => {
+    cartService.validation = signal(null).asReadonly();
+    cartService.validate.and.returnValue(throwError(() => ({
+      error: { error: { message: 'Current price and stock are unavailable.' } },
+    })));
+
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Store plush');
+    expect(text).toContain('Validation unavailable');
+    expect(text).toContain('Current price and stock are unavailable.');
+    expect(cartService.update).not.toHaveBeenCalled();
+    expect(cartService.remove).not.toHaveBeenCalled();
+
+    const retry = fixture.nativeElement.querySelector('.validation-summary button') as HTMLButtonElement;
+    retry.click();
+
+    expect(cartService.validate).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the empty cart path with clear shopping actions', () => {
+    const emptyCart = { ...cart, version: 0, itemCount: 0, totalQuantity: 0, items: [], totals: [] };
+    cartService.cart = signal(emptyCart).asReadonly();
+    cartService.load.and.returnValue(of(emptyCart));
+
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Your cart is empty');
+    expect(text).toContain('Browse business items');
+    expect(fixture.nativeElement.querySelector('a[href="/stores"]')).not.toBeNull();
+    expect(cartService.validate).not.toHaveBeenCalled();
+  });
+
+  it('keeps quantity controls bounded from 1 through 999', () => {
+    const maxCart = {
+      ...cart,
+      items: [{ ...cart.items[0], quantity: 999 }],
+    };
+    cartService.cart = signal(maxCart).asReadonly();
+    cartService.load.and.returnValue(of(maxCart));
+
+    fixture.detectChanges();
+
+    const increase = fixture.nativeElement.querySelector('[aria-label="Increase quantity"]') as HTMLButtonElement;
+    expect(increase.disabled).toBeTrue();
+    increase.click();
+
+    expect(cartService.update).not.toHaveBeenCalled();
   });
 });

@@ -33,7 +33,8 @@ public class BuyerOrderRepository {
         List<OrderHeader> headers;
         if (beforeCreatedAt == null) {
             headers = jdbc.query("""
-                            SELECT id, status, payment_status, total, currency, created_at, updated_at
+                            SELECT id, status, payment_status, total, currency, version,
+                                   created_at, updated_at
                             FROM orders
                             WHERE buyer_id = ?
                             ORDER BY created_at DESC, id DESC
@@ -44,7 +45,8 @@ public class BuyerOrderRepository {
                     limit);
         } else {
             headers = jdbc.query("""
-                            SELECT id, status, payment_status, total, currency, created_at, updated_at
+                            SELECT id, status, payment_status, total, currency, version,
+                                   created_at, updated_at
                             FROM orders
                             WHERE buyer_id = ?
                               AND (created_at < ? OR (created_at = ? AND id < ?))
@@ -64,7 +66,8 @@ public class BuyerOrderRepository {
     // Applies buyer ownership in the header query so missing and cross-buyer reads are identical.
     public Optional<BuyerOrderView> findOwnedDetail(String buyerId, String orderId) {
         Optional<OrderHeader> header = jdbc.query("""
-                        SELECT id, status, payment_status, total, currency, created_at, updated_at
+                        SELECT id, status, payment_status, total, currency, version,
+                               created_at, updated_at
                         FROM orders
                         WHERE id = ? AND buyer_id = ?
                         """,
@@ -179,6 +182,7 @@ public class BuyerOrderRepository {
                 rs.getString("payment_status"),
                 rs.getBigDecimal("total"),
                 rs.getString("currency"),
+                rs.getLong("version"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant());
     }
@@ -199,6 +203,7 @@ public class BuyerOrderRepository {
             String paymentStatus,
             java.math.BigDecimal totalAmount,
             String currency,
+            long version,
             Instant createdAt,
             Instant updatedAt
     ) {
@@ -211,6 +216,7 @@ public class BuyerOrderRepository {
                     paymentStatus,
                     totalAmount,
                     currency,
+                    version,
                     createdAt,
                     updatedAt,
                     List.copyOf(groups),

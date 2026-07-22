@@ -91,7 +91,7 @@ class AuthBffControllerNativeTests {
         private final boolean failLogin;
 
         private StubNativeAuthService(boolean failLogin) {
-            super(null, null, null, null, null, RestClient.builder(), "", "", "", "");
+            super(null, null, null, null, null, null, RestClient.builder(), "", "", "", "");
             this.failLogin = failLogin;
         }
 
