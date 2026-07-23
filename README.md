@@ -1,164 +1,297 @@
-# MSB E-Commerce Microservices
+# MSB Commerce
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)](https://spring.io/projects/spring-boot)
-[![Angular](https://img.shields.io/badge/Angular-20-red.svg)](https://angular.io/)
-[![Docker](https://img.shields.io/badge/Docker-Enabled-blue.svg)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Java 21](https://img.shields.io/badge/Java-21-007396.svg)](pom.xml)
+[![Spring Boot 3.4.2](https://img.shields.io/badge/Spring%20Boot-3.4.2-6DB33F.svg)](pom.xml)
+[![Angular 20](https://img.shields.io/badge/Angular-20-DD0031.svg)](frontend/package.json)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg)](agent-service/pyproject.toml)
+[![Pull Request Quality](https://github.com/Arkrly/msb-ecom/actions/workflows/pull-request-quality.yml/badge.svg?branch=dev)](https://github.com/Arkrly/msb-ecom/actions/workflows/pull-request-quality.yml)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](docker-compose.yml)
+[![Kafka](https://img.shields.io/badge/Apache%20Kafka-Event%20Bus-231F20.svg)](docker-compose.yml)
+[![Keycloak](https://img.shields.io/badge/Keycloak-OIDC-4D4D4D.svg)](infra/keycloak/)
+[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1.svg)](docs/mvp/database.md)
+[![Redis](https://img.shields.io/badge/Redis-Cart%20State-DC382D.svg)](docs/v2/commerce/v2-cart-01-redis-cart-plan.md)
+[![OpenSearch](https://img.shields.io/badge/OpenSearch-Search%20%26%20RAG-005EB8.svg)](agent-service/README.md)
 
-A comprehensive, production-grade e-commerce microservices application built with Java Spring Boot and Angular. This project represents a year of dedicated design and development, solving complex distributed system challenges to provide a robust, scalable backend and a modern, responsive frontend.
+## Overview
 
-## 🚀 Overview
+MSB Commerce is a full-stack marketplace and commerce platform built to explore how a system can support two different transaction models without conflating them: peer-to-peer listings, where buyers and individual sellers arrange payment and delivery themselves, and business-store commerce, where the platform owns cart, inventory, checkout, payment, and order workflows.
 
-MSB E-Commerce is designed to demonstrate a real-world microservices architecture. It includes services for product management, order processing, inventory control, payment handling, and notifications, all orchestrated behind an API Gateway and secured with OAuth2/OpenID Connect.
+The repository is an engineering portfolio project. It demonstrates service boundaries, identity and tenant isolation, transactional data modeling, asynchronous workflows, secure media handling, and a guarded AI-agent architecture across a Java/Spring backend, Angular frontend, and Python/FastAPI agent service. The public marketplace, seller workflows, chat, and moderation form the implemented MVP. Commerce and AI capabilities are developed behind default-off feature gates until their release evidence is complete.
 
-### Key Features
+The authoritative product and technical contracts live in [`docs/mvp`](docs/mvp/), with V2 commerce plans in [`docs/v2/commerce`](docs/v2/commerce/).
 
-- **Microservices Architecture**: Decoupled services for independent scaling and development.
-- **API Gateway**: Centralized entry point with routing, rate limiting, and circuit breaking.
-- **Security**: OAuth2 Resource Server implementation using **Keycloak** for identity management.
-- **Event-Driven**: Asynchronous communication using **Apache Kafka** for order placement and notifications.
-- **Resilience**: Implementation of Circuit Breaker pattern using **Resilience4j**.
-- **Observability**: Distributed tracing and centralized logging (ready for integration).
-- **Responsive Frontend**: Modern UI built with **Angular 20** and **TailwindCSS**.
+## Why I Built This
 
-## 🛠️ Tech Stack
+Many marketplace examples stop at CRUD screens and a single database. I built MSB Commerce to practice the harder engineering decisions behind a production-style system: deciding which service owns each rule, keeping identity and authorization consistent across boundaries, recovering safely from partial failures, evolving schemas without rewriting history, and introducing AI without allowing it to bypass application controls.
 
-### Backend
+The project is deliberately broader than an online catalog. It is a working environment for learning distributed-system design while preserving one important product distinction: individual listings create peer-to-peer trades, while business listings can enter platform-owned commerce workflows.
 
-- **Language**: Java 21
-- **Framework**: Spring Boot 3.4.2, Spring Cloud 2024.0.0
-- **Database**:
-  - PostgreSQL (Auth, Keycloak)
-  - MongoDB (Product Service)
-  - MySQL (Order, Inventory, Payment)
-- **Messaging**: Apache Kafka
-- **Security**: Spring Security, OAuth2, Keycloak
-- **Build Tool**: Maven
+## Project at a Glance
 
-### Frontend
+| Dimension | Repository evidence |
+| --- | --- |
+| **Architecture** | 8 domain services plus an API Gateway/BFF |
+| **User surfaces** | Public marketplace, seller/account experience, and admin portal |
+| **Application stack** | Java/Spring Boot, Angular/TypeScript, Python/FastAPI |
+| **Data and messaging** | MySQL, Redis, OpenSearch, Kafka, Flyway, transactional outbox |
+| **Identity and security** | Keycloak OIDC, Spring Security, CSRF, tenant isolation, service authentication |
+| **AI engineering** | RAG, LangChain ReAct tools, citations, deterministic evaluation, default-off release gates |
+| **Delivery and quality** | Docker Compose, GitHub Actions, Testcontainers, browser and architecture tests |
 
-- **Framework**: Angular 20
-- **Styling**: TailwindCSS
-- **State Management**: Signals (Angular Core)
+## Architecture
 
-### Infrastructure
+```mermaid
+flowchart LR
+    Browser["Angular marketplace, seller, and admin UI"] --> Gateway["API Gateway / BFF"]
+    Gateway <--> Keycloak["Keycloak / OIDC"]
 
-- **Containerization**: Docker & Docker Compose
-- **Service Discovery**: (Planned/Static)
-- **API Gateway**: Spring Cloud Gateway MVC
+    Gateway --> Auth["Auth Service"]
+    Gateway --> Product["Product Service"]
+    Gateway --> Chat["Chat Service"]
+    Gateway -. default-off .-> Commerce["Inventory / Order / Payment / Notification"]
+    Gateway -. default-off .-> Agent["Agent Service"]
 
-## 🏗️ Architecture
+    Auth --> MySQL[("MySQL service schemas")]
+    Product --> MySQL
+    Chat --> MySQL
+    Commerce --> MySQL
+    Agent --> MySQL
 
-The system consists of the following microservices:
+    Product --> Storage["S3-compatible media storage"]
+    Auth --> Storage
+    Commerce --> Redis[("Redis carts and temporary state")]
+    Product --> Kafka["Kafka + transactional outbox"]
+    Commerce --> Kafka
+    Kafka --> Agent
+    Product --> Search[("OpenSearch projections")]
+    Agent --> Search
+    Agent -. only when explicitly enabled .-> OpenAI["OpenAI API"]
+```
 
-| Service | Port | Description | DB |
-|---|---:|---|---|
-| API Gateway | 9000 | Entry point, routing, auth & resilience | - |
-| Auth Service | 8085 | User authentication & registration | PostgreSQL |
-| Product Service | 8080 | Product catalog management | MongoDB |
-| Order Service | 8081 | Order lifecycle management | MySQL |
-| Inventory Service | 8082 | Stock tracking and reservation | MySQL |
-| Payment Service | 8084 | Payment processing | MySQL |
-| Notification Service | 8083 | Email/SMS notifications via Kafka | - |
-| Frontend | 4200 | User Interface | - |
+The browser communicates through one BFF boundary. Each service owns its schema; services do not read or write another service's database. Synchronous APIs handle immediate validation and commands, while Kafka and transactional outboxes carry durable asynchronous work. Redis and OpenSearch are projections or temporary stores, never authorities for orders, payments, or audit history.
 
-## 🚦 Getting Started
+## Live Demo & Project Links
+
+- **Live marketplace:** [demo.bigjianshang.shop](https://demo.bigjianshang.shop)
+- **Architecture:** [MVP architecture](docs/mvp/architecture.md)
+- **API contracts:** [MVP API contract](docs/mvp/api-contract.md)
+- **Delivery plan:** [Development roadmap](docs/mvp/development-roadmap.md)
+
+The live site is a curated demo deployment. It may trail the repository, and default-off capabilities are not guaranteed to be active there.
+
+## Screenshot
+
+![MSB Commerce public marketplace](marketplace-images-fixed.png)
+
+Authenticated seller, admin, cart, and AI-assistant screenshots will be added after their release gates and browser acceptance checks are complete.
+
+## Highlights
+
+- **Bounded microservices:** Auth, Product, Chat, Inventory, Order, Notification, Payment, and Agent domains own their APIs and persistence. Shared modules contain technical primitives rather than business entities or repositories.
+- **Authentication and authorization:** Keycloak provides OpenID Connect identity; Spring Security enforces backend authorization; the gateway acts as a session-based BFF and strips spoofed identity headers. Business operations also verify membership and granular permissions.
+- **API Gateway / BFF:** Spring Cloud Gateway provides the browser-facing boundary, token relay, CSRF protection for commands, correlation IDs, route-level feature gates, and consistent error handling.
+- **Transactional design:** MySQL schemas use forward-only Flyway migrations, optimistic locking, immutable history, idempotency records, transactional outboxes, and consumer deduplication where workflows cross service boundaries.
+- **Event-driven integration:** Kafka contracts and transactional outbox patterns decouple durable domain changes from downstream processing while keeping authoritative state in the owning service.
+- **Media storage:** A small `common-storage` adapter supports S3-compatible object storage. Product-owned rules validate listing media and avatars without leaking storage keys through public contracts.
+- **AI agent architecture:** The isolated FastAPI service includes OpenAI provider adapters, OpenSearch RAG, LangChain-based ReAct discovery, strict allowlisted tools, actor-scoped persistence, citations, seller handoff, prompt-injection defenses, and deterministic offline release gates. AI actions remain default-off and cannot bypass application authorization or human confirmation.
+- **Testing depth:** The repository contains Java unit and integration tests, Testcontainers-backed MySQL/Redis/OpenSearch coverage, authorization and tenant-isolation tests, migration tests, Angular component/service tests, Playwright browser tests, Python unit/integration tests, and architecture guardrails.
+- **CI/CD and containers:** GitHub Actions validate backend, frontend, Agent, migrations, secrets, dependencies, and feature-specific release gates. Docker Compose models local infrastructure, full-stack containers, demo profiles, and optional AI dependencies.
+- **Security-focused failure behavior:** Protected resources use non-enumerating responses, internal calls use bounded service authentication, webhook signatures are verified, logs redact secrets and unnecessary PII, and incomplete capabilities fail closed.
+
+## Tech Stack
+
+| Area | Technologies |
+| --- | --- |
+| Backend | Java 21, Spring Boot 3.4.2, Spring Cloud 2024.0.0, Spring MVC, Spring Security, Maven; Python 3.12, FastAPI, Pydantic |
+| Frontend | Angular 20, TypeScript 5.8, RxJS, Angular SSR, responsive CSS and theme tokens |
+| Database | MySQL 8, Flyway, Redis, OpenSearch; PostgreSQL for Keycloak |
+| Infrastructure | Apache Kafka, Schema Registry, S3-compatible object storage, Keycloak, Mailpit, Docker Compose, Elasticsearch/Logstash/Kibana development tooling |
+| Authentication | OAuth 2.0 / OpenID Connect, Keycloak, Spring Security resource servers, gateway BFF sessions and CSRF protection |
+| AI | OpenAI Responses API adapter, LangChain, ReAct tool orchestration, OpenSearch vector retrieval, deterministic offline evaluation |
+| Testing | JUnit 5, Spring Boot Test, Mockito, Testcontainers, ArchUnit, Python `unittest`, Jasmine/Karma, ChromeHeadless, Playwright |
+| DevOps | Maven Wrapper, npm, Dockerfiles and Compose profiles, GitHub Actions, dependency review, secret scanning, migration and architecture checks |
+
+## Features
+
+Feature status is intentionally explicit: source-complete does not mean enabled in the default runtime.
+
+### Completed
+
+- OIDC login/session handling, account profile and address workflows.
+- Public listing browse, search and detail pages with approved-field privacy boundaries.
+- Individual seller profiles plus versioned listing and media creation/edit flows.
+- Business onboarding, store profiles and business listing management.
+- Participant-authorized listing chat.
+- Admin business approval, listing moderation, request-changes, approval and removal workflows with history.
+- Responsive Angular surfaces for marketplace, account, seller, and admin jobs.
+- Shared correlation/error handling, storage adapters, test utilities and architecture checks.
+
+### In progress / default-off
+
+- **Business cart:** Redis-backed, store-only cart APIs, validation and an Amazon-style cart UI are implemented behind independent gateway/frontend flags. Redis concurrency/retry, publication and browser acceptance evidence remain release gates.
+- **Business checkout and inventory:** inventory reservations, immutable checkout snapshots, totals and recovery foundations exist with local-demo policy adapters; activation and browser release evidence remain gated.
+- **Payment and orders:** fake provider intents, HMAC-verified webhooks, durable outbox dispatch, payment-confirmed order creation, and buyer/business order read models are implemented but not connected to live payment or event transport.
+- **Notifications:** persistence, authenticated reads, gateway routing and account UI are source-complete and default-off; delivery transports and broader event coverage are deferred.
+- **AI customer service and discovery:** authenticated sessions, hybrid RAG, citations, ReAct discovery, comparison and clarification behavior, history, and Angular chat surfaces are implemented behind capability and kill-switch gates. Offline evaluation is deterministic; production quality, latency, cost and rollout evidence are still blocking activation.
+- **AI listing proposals:** image-to-listing proposals and seller-confirmed field application are implemented behind default-off gates; the seller remains the final authority and Product Service performs the versioned write.
+- **Cancellation foundation:** buyer cancellation eligibility and immutable request history are source-complete but await the remaining database/release evidence and downstream refund/compensation work.
+
+### Planned
+
+- Production payment-provider onboarding, capture, transfers, payouts, refunds, disputes and reconciliation.
+- Cancellation completion with refund orchestration and inventory compensation.
+- Notification transport, unread counts, preferences, retention and additional domain-event coverage.
+- Production AI evaluation, policy approval, controlled rollout, cost/latency monitoring and rollback evidence.
+- Removal of legacy infrastructure paths after all active services and local tooling no longer depend on them.
+
+See the [MVP roadmap](docs/mvp/development-roadmap.md) and [V2 commerce plan](docs/v2/commerce/v2-com-00-commerce-domain-plan.md) for the detailed dependency order and release gates.
+
+## Architecture Details
+
+| Component | Port | Responsibility | Authoritative state |
+| --- | ---: | --- | --- |
+| Frontend | 4200 | Marketplace, account, seller, and admin Angular surfaces | None |
+| API Gateway | 9000 | BFF sessions, routing, CSRF, token relay, feature gates | Session state |
+| Auth Service | 8085 | Application users, profiles, addresses, business membership and permissions | MySQL `identity`; credentials remain in Keycloak |
+| Product Service | 8091 | Stores, listings, media, public catalog projections, moderation | MySQL `catalog` |
+| Chat Service | 8092 | Listing conversations and participant-authorized messaging | MySQL `chat` |
+| Order Service | 8081 | Redis cart, checkout snapshots, order orchestration and order views | MySQL `order_service`; Redis for temporary cart state |
+| Inventory Service | 8082 | Business stock and reservation lifecycle | MySQL `inventory_service` |
+| Notification Service | 8083 | Durable in-app notification projection and reads | MySQL `notification_service` |
+| Payment Service | 8084 | Provider-neutral intent, verified webhook and outbox foundations | MySQL `payment_service`; outside the default Maven reactor |
+| Agent Service | 8086 | RAG, customer assistance, discovery, proposal workflows and evaluation | MySQL `agent`; OpenSearch is derived |
+
+## Repository Structure
+
+| Path | Purpose |
+| --- | --- |
+| `api-gateway/` | Spring Cloud Gateway BFF, browser sessions, routing and feature boundaries |
+| `auth-service/` | Application identity, profiles, addresses, business membership and permissions |
+| `product-service/` | Catalog, stores, listings, media, public projections and moderation |
+| `chat-service/` | Listing conversations and messages |
+| `inventory-service/` | Business inventory and reservations |
+| `order-service/` | Cart, checkout, order orchestration and buyer/business order views |
+| `payment-service/` | Default-off provider-neutral payment foundations; built independently of the root reactor |
+| `notification-service/` | Default-off durable in-app notification projection and API |
+| `agent-service/` | FastAPI AI runtime, RAG ingestion/retrieval, agents, persistence and evaluations |
+| `frontend/` | Angular marketplace, account, seller and admin interfaces plus browser tests |
+| `common-*` | Small Java technical libraries for core values, web conventions, storage and testing |
+| `docs/mvp/` | Authoritative MVP requirements, architecture, data, API and roadmap contracts |
+| `docs/v2/` | Commerce and later-phase design/implementation contracts |
+| `infra/` | Keycloak realm and supporting infrastructure configuration |
+| `tools/` | Architecture, CI and repository validation scripts |
+| `.github/workflows/` | Pull-request, feature-release and demo-deployment workflows |
+
+## Getting Started
 
 ### Prerequisites
 
 - Java 21
-- Node.js 20+ and npm
-- Docker & Docker Compose
-- Maven is provided by the repository wrapper
+- Node.js 22 and npm
+- Python 3.12 for the optional Agent Service
+- Docker Desktop or Docker Engine with Compose
+- Git Bash, WSL or another Bash environment for `run.sh`
 
-Windows PowerShell users should run `npm.cmd` if local execution policy blocks
-`npm.ps1`.
-
-Verify the local toolchain:
+### 1. Clone and configure local defaults
 
 ```powershell
-java -version
-.\mvnw.cmd -version
-node --version
-npm.cmd --version
-docker compose version
+git clone https://github.com/Arkrly/msb-ecom.git
+Set-Location msb-ecom
 docker compose config --quiet
 ```
 
-### Installation
+`.env.example` documents the expected local variables. `run.sh` reads `.env` and then an optional, ignored `.env.local` override. Keep real credentials out of repository-tracked files and use environment-specific secret injection for any internet-facing deployment.
 
-1. **Clone the repository**
+### 2. Start the application
 
-   ```bash
-   git clone https://github.com/Arkrly/msb-ecom.git
-   cd msb-ecom
-   ```
+The repository provides two Bash modes:
 
-2. **Start Infrastructure (Databases, Broker, Keycloak)**
+```bash
+# Infrastructure in Docker; Java services and Angular run as local processes
+./run.sh local
 
-   ```bash
-   ./run.sh local
-   ```
+# Infrastructure and application services in Docker
+./run.sh docker
+```
 
-   _The `run.sh` script automates the startup of Docker containers and local Java processes._
+Open <http://localhost:4200>. Stop either mode with:
 
-   Alternatively, use Docker Compose directly:
+```bash
+./run.sh stop
+```
 
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Run Backend Services**
-   If not using `run.sh`, you can run each service individually:
-
-   ```bash
-   cd product-service && ../mvnw spring-boot:run
-   cd auth-service && ../mvnw spring-boot:run
-   cd api-gateway && ../mvnw spring-boot:run
-   ```
-
-   `order-service`, `inventory-service`, `payment-service`, and
-   `notification-service` are archived V2/tutorial stubs and are not part of
-   the active MVP build.
-
-4. **Run Frontend**
-   ```bash
-   cd frontend
-   npm ci
-   npm run start
-   ```
-   Access the app at `http://localhost:4200`.
-
-### Verification
-
-Backend:
+To start only shared infrastructure for focused service development:
 
 ```powershell
-.\mvnw.cmd -DskipTests package
-.\mvnw.cmd test
+docker compose up -d
+```
+
+### 3. Run the verification suites
+
+Backend reactor:
+
+```powershell
+./mvnw.cmd test
 ```
 
 Frontend:
 
 ```powershell
 Set-Location frontend
-npm.cmd ci
-npm.cmd run build
-npm.cmd test -- --watch=false --browsers=ChromeHeadless
+npm ci
+npm run build
+npm test -- --watch=false --browsers=ChromeHeadless
 ```
 
-See [Phase 1 Toolchain and Build Baseline](docs/phase1-baseline.md) for the
-latest verified results and known baseline warnings.
+Agent Service:
 
-## 🤝 Contributing
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".\agent-service[dev]"
+python -m unittest discover -s agent-service/tests -v
+```
 
-Contributions are welcome! This project is open source to help others learn and build better software. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests.
+The Agent process can start without an API key for health checks, but readiness and provider-backed features remain unavailable until their explicit dependencies and gates are configured. See the [Agent Service guide](agent-service/README.md) for optional MySQL/OpenSearch integration tests and the isolated AI Compose profile.
 
-## 📄 License
+## Engineering Decisions
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- **Keep individual trades separate from business orders.** Peer-to-peer listings carry an explicit off-platform transaction notice; platform-owned payment and fulfillment belong only to business commerce.
+- **Make ownership visible in architecture.** Each service owns its schema and business rules. Cross-service validation uses APIs; durable propagation uses versioned events and outboxes.
+- **Treat derived systems as disposable.** MySQL remains authoritative; Redis holds temporary cart state and OpenSearch holds rebuildable search/RAG projections.
+- **Put identity at the boundary, authorization in the service.** The BFF manages browser sessions and token relay, but each backend repeats actor, ownership and tenant checks.
+- **Design retries before activation.** Money, inventory, checkout, order, webhook and notification paths use explicit idempotency, optimistic concurrency and immutable history rather than relying on best-effort requests.
+- **Fail incomplete features closed.** Independent backend, gateway and frontend flags prevent unfinished V2/V3 paths from creating UI dead ends or accidental external calls.
+- **Constrain AI like any other untrusted integration.** Agents use allowlisted tools with strict schemas and the requesting actor's permissions. Retrieved text and media are untrusted, sensitive output is filtered, and writes require explicit human confirmation.
 
-## ❤️ Acknowledgments
+## Interesting Engineering Challenges
 
-- Built with passion and coffee over 12 months.
-- Open sourced for the community.
+- **Distributed consistency needs domain-specific recovery.** Transactional outboxes, replay-safe consumers and immutable histories are more useful than attempting cross-service database transactions, but every boundary still needs explicit timeout, duplicate and partial-failure behavior.
+- **Authorization is a data-model concern.** Hiding navigation is insufficient; non-enumerating reads, business membership, granular permissions and cross-user tests must exist at repositories and service boundaries.
+- **Applied migrations are permanent contracts.** As the project moved beyond tutorial-era data paths, changes were added through forward-only Flyway migrations and compatibility tests instead of rewriting migration history.
+- **AI quality is not implied by a successful model call.** Grounding, citations, source-version checks, tool authorization, injection resistance, offline evaluation and rollout gates are separate engineering concerns.
+- **Feature flags require end-to-end verification.** A disabled feature should perform no repository, downstream API or provider work—not merely hide its Angular route.
+
+## What I Learned
+
+- How to decompose a product into bounded services without creating a shared business-logic layer.
+- Why authentication at the gateway must be paired with authorization and tenant isolation inside every owning service.
+- How outboxes, idempotency, optimistic locking and immutable history make asynchronous workflows recoverable.
+- How forward-only migrations, contract tests and default-off flags reduce risk while a large system evolves.
+- How to treat model output, retrieved text and tool calls as untrusted inputs rather than privileged application logic.
+- How CI, disposable infrastructure tests and browser acceptance complement one another; none alone proves a distributed feature is ready.
+
+## Future Improvements
+
+- Close the remaining cart mutation concurrency/idempotency contract and run the full local browser acceptance matrix.
+- Activate commerce slices only after exact-revision CI, disposable database, runtime and browser evidence is green.
+- Select and integrate a real marketplace payment provider after legal, payout, refund and dispute ownership decisions are approved.
+- Complete cancellation, refund, inventory compensation and reconciliation workflows.
+- Add notification delivery transports and operational preferences without weakening in-app durability.
+- Collect controlled production evidence for AI answer quality, privacy, latency and cost before enabling a cohort.
+- Simplify local orchestration and retire legacy database/tooling paths once no verified workflow depends on them.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
