@@ -273,14 +273,6 @@ The Agent process can start without an API key for health checks, but readiness 
 - **AI quality is not implied by a successful model call.** Grounding, citations, source-version checks, tool authorization, injection resistance, offline evaluation and rollout gates are separate engineering concerns.
 - **Feature flags require end-to-end verification.** A disabled feature should perform no repository, downstream API or provider work—not merely hide its Angular route.
 
-## What I Learned
-
-- How to decompose a product into bounded services without creating a shared business-logic layer.
-- Why authentication at the gateway must be paired with authorization and tenant isolation inside every owning service.
-- How outboxes, idempotency, optimistic locking and immutable history make asynchronous workflows recoverable.
-- How forward-only migrations, contract tests and default-off flags reduce risk while a large system evolves.
-- How to treat model output, retrieved text and tool calls as untrusted inputs rather than privileged application logic.
-- How CI, disposable infrastructure tests and browser acceptance complement one another; none alone proves a distributed feature is ready.
 
 ## Future Improvements
 
