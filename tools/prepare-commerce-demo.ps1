@@ -38,7 +38,7 @@ function Set-LocalFixturePassword([string]$Username, [string]$Password) {
 Set-LocalFixturePassword 'trade.buyer@msb.local' $env:LOCAL_DEMO_BUYER_PASSWORD
 Set-LocalFixturePassword 'trade.seller@msb.local' $env:LOCAL_DEMO_BUYER_B_PASSWORD
 
-node "$PSScriptRoot\cart_second_business_fixture.mjs"
+node (Join-Path $PSScriptRoot 'cart_second_business_fixture.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Deterministic commerce listing/inventory preparation failed.' }
 
 Write-Output 'Reusable commerce fixtures are ready. Preserved evidence orders were not deleted or rewritten.'
