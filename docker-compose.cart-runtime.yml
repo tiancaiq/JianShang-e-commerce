@@ -222,6 +222,7 @@ services:
   product-service:
     environment:
       COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      LISTING_MEDIA_STORAGE: local-demo
 
   frontend:
     environment:
