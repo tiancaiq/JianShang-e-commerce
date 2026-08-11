@@ -93,6 +93,7 @@ class BuyerOrderControllerTests {
                 .andExpect(jsonPath("$.groups[0].items[0].policyVersion")
                         .value("LOCAL_DEMO_V1"))
                 .andExpect(jsonPath("$.version").value(0))
+                .andExpect(jsonPath("$.groups[0].shipment").doesNotExist())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().string("ETag", "\"0\""))
                 .andExpect(jsonPath("$.shippingAddress.recipientName").value("Buyer"))
@@ -106,8 +107,7 @@ class BuyerOrderControllerTests {
                         "sourceVersion",
                         "catalogVersion",
                         "sellerOrderNumber",
-                        "platformFee",
-                        "shipment");
+                        "platformFee");
     }
 
     @Test

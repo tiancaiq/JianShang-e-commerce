@@ -417,6 +417,12 @@ public class OrderCancellationService {
 
     // Rejects any group whose immutable structured policy or cutoff is not eligible.
     private PolicyEvidence requireEligible(OrderRecord order, GroupRecord group, Instant now) {
+        if (!"PENDING_ACCEPTANCE".equals(group.fulfillmentStatus())) {
+            reject(HttpStatus.CONFLICT,
+                    "ORDER_CANCELLATION_FULFILLMENT_STARTED",
+                    "Cancellation is unavailable after fulfillment begins.",
+                    "fulfillment_started");
+        }
         if (!"NONE".equals(group.cancellationStatus())) {
             reject(HttpStatus.CONFLICT,
                     "ORDER_CANCELLATION_STATE_CONFLICT",

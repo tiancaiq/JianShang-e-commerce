@@ -88,12 +88,13 @@ describe('app routes', () => {
     }));
   });
 
-  it('protects marketplace account listing routes', () => {
+  it('protects marketplace account listing and cart routes', () => {
     const marketplaceRoute = routes.find(route => route.path === '');
 
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'cart',
-      redirectTo: '/marketplace',
+      canActivate: [authGuard],
+      loadComponent: jasmine.any(Function),
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'sell',

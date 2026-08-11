@@ -91,12 +91,24 @@ class CartValidationServiceTests {
                     assertThat(item.issues()).isEmpty();
                 });
         verify(repository).get(USER_ID);
-        verify(repository, never()).upsert(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(repository, never()).upsert(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
         verify(repository, never()).replaceQuantity(
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyInt());
-        verify(repository, never()).clear(org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        verify(repository, never()).clear(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

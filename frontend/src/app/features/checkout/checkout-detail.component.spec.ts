@@ -1,18 +1,29 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
+import { CartService } from '../../core/services/cart.service';
 import { CheckoutService } from '../../core/services/checkout.service';
 import { CheckoutDetailComponent } from './checkout-detail.component';
 
 describe('CheckoutDetailComponent', () => {
   let fixture: ComponentFixture<CheckoutDetailComponent>;
   let checkoutService: jasmine.SpyObj<CheckoutService>;
+  let cartService: jasmine.SpyObj<CartService>;
 
   beforeEach(async () => {
-    checkoutService = jasmine.createSpyObj<CheckoutService>('CheckoutService', ['get', 'cancel']);
+    checkoutService = jasmine.createSpyObj<CheckoutService>('CheckoutService', [
+      'get',
+      'cancel',
+      'createPaymentIntent',
+      'completeDemoPayment',
+      'confirmedOrder',
+    ]);
     checkoutService.get.and.returnValue(of(checkout()));
-    checkoutService.cancel.and.returnValue(of({ ...checkout(), status: 'CANCELLED' }));
+    cartService = jasmine.createSpyObj<CartService>('CartService', [
+      'refreshAfterConfirmedCheckout',
+    ]);
+    cartService.refreshAfterConfirmedCheckout.and.returnValue(of({} as any));
 
     await TestBed.configureTestingModule({
       imports: [CheckoutDetailComponent],
@@ -28,31 +39,52 @@ describe('CheckoutDetailComponent', () => {
           },
         },
         { provide: CheckoutService, useValue: checkoutService },
+        { provide: CartService, useValue: cartService },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CheckoutDetailComponent);
   });
 
-  it('renders stored snapshots and local-demo calculation metadata without payment controls', () => {
+  it('renders stored snapshots and an explicit no-real-money demo payment control', () => {
     fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
-    expect(text).toContain('Stored items');
+    expect(text).toContain('Shen Ban Demo Store');
+    expect(text).not.toContain('Store 01S00000000000000000000001');
     expect(text).toContain('Store item');
-    expect(text).toContain('Local demo shipping');
+    expect(text).toContain('Free shipping is local-demo behavior');
     expect(text).toContain('FREE_LOCAL_DEMO_V1');
     expect(text).toContain('LOCAL_DEMO_V1');
-    expect(text).toContain('Payment and order confirmation are not available');
-    expect(text).not.toContain('Pay now');
+    expect(text).toContain('Local demo payment');
+    expect(text).toContain('No real money will be charged');
+    expect(text).toContain('Complete demo payment');
   });
 
-  it('cancels only a pending checkout', () => {
+  it('does not expose disabled cancellation controls', () => {
     fixture.detectChanges();
-    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
-    button.click();
+    const button = fixture.nativeElement.querySelector('button.cancel') as HTMLButtonElement;
+    expect(button).toBeNull();
+    expect(checkoutService.cancel).not.toHaveBeenCalled();
+  });
 
-    expect(checkoutService.cancel).toHaveBeenCalledWith('01C00000000000000000000001');
-    expect(fixture.componentInstance.checkout()?.status).toBe('CANCELLED');
+  it('starts authoritative cart refresh as soon as the confirmed order is observed', () => {
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+    checkoutService.createPaymentIntent.and.returnValue(of({ status: 'PENDING' } as any));
+    checkoutService.completeDemoPayment.and.returnValue(of({} as any));
+    checkoutService.confirmedOrder.and.returnValue(of({
+      confirmed: true,
+      orderId: '01O00000000000000000000001',
+    }));
+    fixture.detectChanges();
+
+    fixture.componentInstance.pay();
+
+    expect(cartService.refreshAfterConfirmedCheckout).toHaveBeenCalledOnceWith(4);
+    expect(router.navigate).toHaveBeenCalledOnceWith(
+      ['/account/orders', '01O00000000000000000000001'],
+      { queryParams: { confirmed: 'true' } },
+    );
   });
 
   function checkout(): any {
@@ -89,6 +121,7 @@ describe('CheckoutDetailComponent', () => {
         listingId: '01L00000000000000000000001',
         businessId: '01B00000000000000000000001',
         storeId: '01S00000000000000000000001',
+        storeName: 'Shen Ban Demo Store',
         catalogVersion: 7,
         title: 'Store item',
         sku: 'SKU-1',

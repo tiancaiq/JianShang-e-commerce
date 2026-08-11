@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +20,7 @@ import java.util.Map;
 public class RestInventoryReservationClient implements InventoryReservationClient {
 
     private static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
+    private static final Logger LOGGER = LoggerFactory.getLogger(RestInventoryReservationClient.class);
 
     private final RestClient client;
     private final String internalServiceToken;
@@ -59,6 +62,8 @@ public class RestInventoryReservationClient implements InventoryReservationClien
         } catch (CheckoutException exception) {
             throw exception;
         } catch (RestClientException exception) {
+            LOGGER.warn("Inventory reservation call requires reconciliation checkoutId={} errorType={} message={}",
+                    checkoutId, exception.getClass().getSimpleName(), exception.getMessage());
             throw pending();
         }
     }
@@ -74,6 +79,8 @@ public class RestInventoryReservationClient implements InventoryReservationClien
         } catch (CheckoutException exception) {
             throw exception;
         } catch (RestClientException exception) {
+            LOGGER.warn("Inventory reservation lookup requires reconciliation reservationId={} errorType={} message={}",
+                    reservationId, exception.getClass().getSimpleName(), exception.getMessage());
             throw pending();
         }
     }

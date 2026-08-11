@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, Injector, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterOutlet } from '@angular/router';
 import { take } from 'rxjs';
@@ -10,6 +10,8 @@ import { ToastContainerComponent } from '../../shared/components/toast/toast-con
 import { ToastService } from '../../core/services/toast.service';
 import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
 import { CART_ENABLED } from '../../features/cart/cart.capability';
+import { NOTIFICATION_CENTER_ENABLED } from '../../features/account/notification-center.capability';
+import { NotificationService } from '../../core/services/notification.service';
 
 @Component({
   selector: 'app-marketplace-layout',
@@ -21,6 +23,8 @@ import { CART_ENABLED } from '../../features/cart/cart.capability';
         [authenticated]="authService.isAuthenticated()"
         [cartEnabled]="cartEnabled"
         [cartCount]="cartEnabled ? cartService.count() : 0"
+        [notificationsEnabled]="notificationsEnabled"
+        [notificationCount]="notificationCount()"
         [currentUser]="authService.user()"
         (loginRequested)="openAuthDialog()"
         (searchRequested)="searchMarketplace($event)"
@@ -331,10 +335,14 @@ import { CART_ENABLED } from '../../features/cart/cart.capability';
     }
   `],
 })
-export class MarketplaceLayoutComponent implements OnInit {
+export class MarketplaceLayoutComponent implements OnInit, OnDestroy {
   authService = inject(AuthService);
   cartService = inject(CartService);
   readonly cartEnabled = inject(CART_ENABLED);
+  readonly notificationsEnabled = inject(NOTIFICATION_CENTER_ENABLED);
+  readonly notificationCount = signal(0);
+  private readonly injector = inject(Injector);
+  private notificationPoll: ReturnType<typeof setInterval> | null = null;
   private toastService = inject(ToastService);
   private router = inject(Router);
   authDialogOpen = signal(false);
@@ -353,9 +361,25 @@ export class MarketplaceLayoutComponent implements OnInit {
       }
       if (state.authenticated) {
         this.cartService.load().subscribe({ error: () => undefined });
+        if (this.notificationsEnabled) {
+          this.refreshNotificationCount();
+          if (!this.notificationPoll) {
+            this.notificationPoll = setInterval(() => this.refreshNotificationCount(), 15000);
+          }
+        }
       } else {
         this.cartService.reset();
       }
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.notificationPoll) clearInterval(this.notificationPoll);
+  }
+
+  private refreshNotificationCount(): void {
+    this.injector.get(NotificationService).count().subscribe({
+      next: value => this.notificationCount.set(value.unreadCount), error: () => undefined,
     });
   }
 
@@ -463,6 +487,9 @@ export class MarketplaceLayoutComponent implements OnInit {
     if (authenticated) {
       this.authDialogOpen.set(false);
       this.authPassword = '';
+      if (this.cartEnabled) {
+        this.cartService.load().subscribe({ error: () => undefined });
+      }
       return;
     }
     this.authDialogError.set(unauthenticatedMessage);

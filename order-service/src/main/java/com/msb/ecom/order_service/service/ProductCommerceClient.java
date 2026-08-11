@@ -1,5 +1,7 @@
 package com.msb.ecom.order_service.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.math.BigDecimal;
 import java.util.Optional;
 
@@ -7,6 +9,7 @@ public interface ProductCommerceClient {
 
     Optional<ProductContext> find(String listingId);
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record ProductContext(
             String listingId,
             String businessId,

@@ -6,6 +6,7 @@
     "start": "ng serve",
     "build": "ng build",
     "build:demo-cart": "ng build --configuration demo-cart",
+    "build:demo-checkout": "ng build --configuration demo-checkout",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed",
     "test:ai-build-config": "node --test config/ai-build-config.test.mjs",

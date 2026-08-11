@@ -10,6 +10,7 @@ import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
 import com.msb.ecom.order_service.repository.CheckoutRepository;
 import com.msb.ecom.order_service.repository.CheckoutPaymentBindingRepository;
+import com.msb.ecom.order_service.repository.OrderConfirmationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -267,6 +268,7 @@ class CheckoutPaymentServiceTests {
                 checkoutProperties,
                 paymentProperties,
                 client,
+                mock(OrderConfirmationRepository.class),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

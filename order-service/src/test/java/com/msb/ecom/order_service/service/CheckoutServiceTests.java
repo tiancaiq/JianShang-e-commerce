@@ -149,6 +149,12 @@ class CheckoutServiceTests {
                 .isEqualTo("CHECKOUT_RESERVATION_PENDING");
 
         verify(repository).insert(reserving);
+        verify(repository).insertCartReconciliation(
+                CHECKOUT_ID,
+                SUBJECT,
+                assessment.cart().version(),
+                assessment.cart().items(),
+                NOW);
         verify(repository).insertIdempotency(
                 any(), any(), eq("create-key"), any(), eq("CREATE_CHECKOUT"),
                 eq(CHECKOUT_ID), eq(NOW), eq(NOW.plus(Duration.ofDays(7))));
@@ -313,6 +319,35 @@ class CheckoutServiceTests {
         verify(repository).markPending(CHECKOUT_ID, RESERVATION_ID, "ACTIVE", 1L, NOW);
         verify(repository).outbox(
                 any(), eq(CHECKOUT_ID), eq("checkout.created.v1"), any(), any(), any(), eq(NOW));
+    }
+
+    @Test
+    void repeatedCreateReconcilesAnActiveReservingCheckout() {
+        CartAssessment assessment = assessment();
+        CheckoutAggregate reserving = checkout(CheckoutStatus.RESERVING);
+        CheckoutAggregate pending = checkout(CheckoutStatus.PENDING_PAYMENT);
+        InventoryReservationClient.Reservation active = reservation(pending, "ACTIVE", true, 1L);
+        when(repository.idempotency(any(), eq("retry-with-new-key"))).thenReturn(Optional.empty());
+        when(carts.get(SUBJECT)).thenReturn(assessment.cart());
+        when(assessments.assess(assessment.cart())).thenReturn(assessment);
+        when(buyers.resolveAddress(SUBJECT, ADDRESS_ID)).thenReturn(address());
+        when(repository.findActiveByBuyer(BUYER_ID)).thenReturn(Optional.of(reserving));
+        when(inventory.reserve(CHECKOUT_ID, reserving.expiresAt(), List.of(
+                new InventoryReservationClient.Line("01L00000000000000000000001", 2))))
+                .thenReturn(active);
+        when(inventory.get(RESERVATION_ID)).thenReturn(active);
+        when(repository.lock(CHECKOUT_ID)).thenReturn(Optional.of(reserving));
+        when(repository.markPending(CHECKOUT_ID, RESERVATION_ID, "ACTIVE", 1L, NOW)).thenReturn(1);
+        when(repository.find(CHECKOUT_ID)).thenReturn(Optional.of(pending));
+
+        CheckoutResponse response = service.create(
+                "retry-with-new-key",
+                new CreateCheckoutRequest(3L, ADDRESS_ID),
+                "correlation");
+
+        assertThat(response.status()).isEqualTo("PENDING_PAYMENT");
+        verify(repository, never()).insert(any());
+        verify(calculations, never()).calculate(any(), any(), any(), any());
     }
 
     @Test

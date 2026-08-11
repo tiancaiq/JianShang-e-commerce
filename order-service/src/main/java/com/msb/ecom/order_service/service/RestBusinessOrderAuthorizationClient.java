@@ -1,6 +1,7 @@
 package com.msb.ecom.order_service.service;
 
 import com.msb.ecom.order_service.model.BusinessOrderException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,7 @@ public class RestBusinessOrderAuthorizationClient
 
     private final RestClient client;
 
+    @Autowired
     public RestBusinessOrderAuthorizationClient(
             RestClient.Builder builder,
             @Value("${service.auth.url}") String authServiceUrl) {

@@ -3,6 +3,8 @@ package com.msb.ecom.order_service.repository;
 import com.msb.ecom.order_service.model.CheckoutAggregate;
 import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
+import com.msb.ecom.order_service.model.CartStoredItem;
+import com.msb.ecom.order_service.model.PurchasedCartReconciliation;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -52,6 +54,91 @@ public class CheckoutRepository {
         checkout.items().forEach(item -> insertItem(checkout.id(), item, checkout.createdAt()));
         checkout.shippingQuotes().forEach(quote -> insertShipping(checkout.id(), quote));
         insertTax(checkout.id(), checkout.taxQuote());
+    }
+
+    // Persists the exact mutable-cart line identities that may be removed after payment.
+    public void insertCartReconciliation(
+            String checkoutId,
+            String cartOwnerKey,
+            long cartVersion,
+            List<CartStoredItem> items,
+            Instant now) {
+        jdbc.update("""
+                        INSERT INTO checkout_cart_reconciliations (
+                            checkout_id, cart_owner_key, cart_version, state, attempt_count,
+                            next_attempt_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, 'PENDING', 0, ?, ?, ?)
+                        """,
+                checkoutId,
+                cartOwnerKey,
+                cartVersion,
+                Timestamp.from(now),
+                Timestamp.from(now),
+                Timestamp.from(now));
+        for (CartStoredItem item : items) {
+            jdbc.update("""
+                            INSERT INTO checkout_cart_reconciliation_items (
+                                checkout_id, listing_id, cart_line_identity
+                            ) VALUES (?, ?, ?)
+                            """,
+                    checkoutId,
+                    item.listingId(),
+                    item.lineIdentity().toString());
+        }
+    }
+
+    public List<PurchasedCartReconciliation> findPendingCartReconciliations(Instant now, int limit) {
+        List<ReconciliationHeader> headers = jdbc.query("""
+                        SELECT reconciliation.checkout_id, reconciliation.cart_owner_key,
+                               reconciliation.cart_version
+                        FROM checkout_cart_reconciliations reconciliation
+                        JOIN checkout_sessions checkout ON checkout.id = reconciliation.checkout_id
+                        WHERE reconciliation.state = 'PENDING'
+                          AND reconciliation.next_attempt_at <= ?
+                          AND checkout.status = 'COMPLETED'
+                        ORDER BY reconciliation.next_attempt_at, reconciliation.checkout_id
+                        LIMIT ?
+                        """,
+                (rs, rowNum) -> new ReconciliationHeader(
+                        rs.getString("checkout_id"),
+                        rs.getString("cart_owner_key"),
+                        rs.getLong("cart_version")),
+                Timestamp.from(now),
+                limit);
+        return headers.stream().map(header -> new PurchasedCartReconciliation(
+                header.checkoutId(),
+                header.cartOwnerKey(),
+                header.cartVersion(),
+                jdbc.query("""
+                                SELECT listing_id, cart_line_identity
+                                FROM checkout_cart_reconciliation_items
+                                WHERE checkout_id = ?
+                                ORDER BY listing_id
+                                """,
+                        (rs, rowNum) -> new PurchasedCartReconciliation.Line(
+                                rs.getString("listing_id"),
+                                Instant.parse(rs.getString("cart_line_identity"))),
+                        header.checkoutId()))).toList();
+    }
+
+    public int markCartReconciled(String checkoutId, Instant now) {
+        return jdbc.update("""
+                        UPDATE checkout_cart_reconciliations
+                        SET state = 'COMPLETED', reconciled_at = ?, last_error_code = NULL,
+                            updated_at = ?
+                        WHERE checkout_id = ? AND state = 'PENDING'
+                        """,
+                Timestamp.from(now), Timestamp.from(now), checkoutId);
+    }
+
+    public int markCartReconciliationRetry(String checkoutId, String errorCode, Instant nextAttempt, Instant now) {
+        return jdbc.update("""
+                        UPDATE checkout_cart_reconciliations
+                        SET attempt_count = attempt_count + 1, last_error_code = ?,
+                            next_attempt_at = ?, updated_at = ?
+                        WHERE checkout_id = ? AND state = 'PENDING'
+                        """,
+                errorCode, Timestamp.from(nextAttempt), Timestamp.from(now), checkoutId);
     }
 
     public Optional<CheckoutAggregate> findOwned(String checkoutId, String buyerId) {
@@ -450,11 +537,11 @@ public class CheckoutRepository {
     private void insertItem(String checkoutId, CheckoutAggregate.Item item, Instant now) {
         jdbc.update("""
                         INSERT INTO checkout_items (
-                            id, checkout_id, line_number, listing_id, business_id, store_id,
+                            id, checkout_id, line_number, listing_id, business_id, store_id, store_name,
                             catalog_version, title, sku, item_condition, thumbnail_url, quantity,
                             unit_price, currency, line_subtotal, shipping_allocation, tax_allocation,
                             discount_allocation, line_total, policy_snapshot_id, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 item.id(),
                 checkoutId,
@@ -462,6 +549,7 @@ public class CheckoutRepository {
                 item.listingId(),
                 item.businessId(),
                 item.storeId(),
+                item.storeName(),
                 item.catalogVersion(),
                 item.title(),
                 item.sku(),
@@ -569,6 +657,7 @@ public class CheckoutRepository {
                         rs.getString("listing_id"),
                         rs.getString("business_id"),
                         rs.getString("store_id"),
+                        rs.getString("store_name"),
                         rs.getLong("catalog_version"),
                         rs.getString("title"),
                         rs.getString("sku"),
@@ -679,5 +768,8 @@ public class CheckoutRepository {
             Instant createdAt,
             Instant updatedAt
     ) {
+    }
+
+    private record ReconciliationHeader(String checkoutId, String cartOwnerKey, long cartVersion) {
     }
 }

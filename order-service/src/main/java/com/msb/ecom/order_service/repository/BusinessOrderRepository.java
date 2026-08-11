@@ -1,6 +1,7 @@
 package com.msb.ecom.order_service.repository;
 
 import com.msb.ecom.order_service.model.BusinessOrderView;
+import com.msb.ecom.order_service.model.BusinessFulfillmentView;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -21,7 +22,7 @@ public class BusinessOrderRepository {
                    counts.total_quantity, bo.subtotal, bo.total, o.currency,
                    CASE WHEN ? THEN bo.platform_fee_projection ELSE NULL END
                        AS platform_fee_projection,
-                   o.confirmed_at, bo.created_at, bo.updated_at
+                   o.confirmed_at, bo.created_at, bo.updated_at, bo.version
             FROM business_orders bo%s
             """;
     private static final String HEADER_JOINS = """
@@ -48,18 +49,23 @@ public class BusinessOrderRepository {
             String beforeBusinessOrderId,
             int limit,
             boolean includeFinance) {
-        String indexHint = status == null
-                ? " FORCE INDEX (idx_business_order_all_queue)"
-                : " FORCE INDEX (idx_business_order_queue)";
+        String indexHint = "CANCELLED".equals(status)
+                ? " FORCE INDEX (idx_business_order_cancellation_queue)"
+                : status == null
+                        ? " FORCE INDEX (idx_business_order_all_queue)"
+                        : " FORCE INDEX (idx_business_order_queue)";
         StringBuilder sql = new StringBuilder(HEADER_SELECT.formatted(indexHint))
                 .append(HEADER_JOINS)
                 .append(" WHERE bo.business_id = ?");
         java.util.ArrayList<Object> arguments = new java.util.ArrayList<>();
         arguments.add(includeFinance);
         arguments.add(businessId);
-        if (status != null) {
+        if ("CANCELLED".equals(status)) {
+            sql.append(" AND bo.cancellation_status = 'CANCELLED'");
+        } else if (status != null) {
             sql.append(" AND bo.fulfillment_status = ?");
             arguments.add(status);
+            sql.append(" AND bo.cancellation_status <> 'CANCELLED'");
         }
         if (beforeCreatedAt != null) {
             sql.append("""
@@ -132,7 +138,9 @@ public class BusinessOrderRepository {
                         rs.getString("country_code")),
                 businessOrderId,
                 businessId).stream().findFirst().orElse(null);
-        return Optional.of(withDetail(current, items, address));
+        List<BusinessFulfillmentView.TimelineEntry> timeline = timeline(businessOrderId);
+        BusinessFulfillmentView.Shipment shipment = shipment(businessId, businessOrderId);
+        return Optional.of(withDetail(current, items, address, timeline, shipment));
     }
 
     private static BusinessOrderView mapHeader(ResultSet rs, int rowNum) throws SQLException {
@@ -156,13 +164,18 @@ public class BusinessOrderRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 List.of(),
+                null,
+                rs.getLong("version"),
+                List.of(),
                 null);
     }
 
     private static BusinessOrderView withDetail(
             BusinessOrderView header,
             List<BusinessOrderView.Item> items,
-            BusinessOrderView.Address address) {
+            BusinessOrderView.Address address,
+            List<BusinessFulfillmentView.TimelineEntry> timeline,
+            BusinessFulfillmentView.Shipment shipment) {
         return new BusinessOrderView(
                 header.businessOrderId(),
                 header.sellerOrderNumber(),
@@ -183,6 +196,44 @@ public class BusinessOrderRepository {
                 header.createdAt(),
                 header.updatedAt(),
                 List.copyOf(items),
-                address);
+                address,
+                header.version(),
+                List.copyOf(timeline),
+                shipment);
+    }
+
+    private List<BusinessFulfillmentView.TimelineEntry> timeline(String businessOrderId) {
+        return jdbc.query("""
+                        SELECT to_status, created_at
+                        FROM business_order_status_history
+                        WHERE business_order_id = ?
+                        ORDER BY business_order_version
+                        """,
+                (rs, rowNum) -> new BusinessFulfillmentView.TimelineEntry(
+                        rs.getString("to_status"), rs.getTimestamp("created_at").toInstant()),
+                businessOrderId);
+    }
+
+    private BusinessFulfillmentView.Shipment shipment(
+            String businessId,
+            String businessOrderId) {
+        return jdbc.query("""
+                        SELECT id, source, carrier_display_name, service_display_name,
+                               tracking_number, status, version, shipped_at, delivered_at,
+                               created_at, updated_at
+                        FROM shipments
+                        WHERE business_id = ? AND business_order_id = ?
+                        """,
+                (rs, rowNum) -> new BusinessFulfillmentView.Shipment(
+                        rs.getString("id"), rs.getString("source"),
+                        rs.getString("carrier_display_name"),
+                        rs.getString("service_display_name"),
+                        rs.getString("tracking_number"), rs.getString("status"),
+                        rs.getLong("version"), rs.getTimestamp("shipped_at").toInstant(),
+                        rs.getTimestamp("delivered_at") == null ? null
+                                : rs.getTimestamp("delivered_at").toInstant(),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at").toInstant()),
+                businessId, businessOrderId).stream().findFirst().orElse(null);
     }
 }

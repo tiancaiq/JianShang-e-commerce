@@ -9,8 +9,10 @@ export const environment = {
     sellerInventory: false,
     businessOrders: false,
     buyerCheckout: false,
+    orderCancellation: false,
     aiAssistant: false,
     aiDiscovery: false,
     notifications: false,
+    returns: false,
   },
 };

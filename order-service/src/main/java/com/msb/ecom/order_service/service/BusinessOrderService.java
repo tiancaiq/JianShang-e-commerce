@@ -19,13 +19,13 @@ import java.util.regex.Pattern;
 public class BusinessOrderService {
 
     private static final Pattern ULID = Pattern.compile("[0-9A-HJKMNP-TV-Z]{26}");
+    private static final Pattern BUSINESS_ID = Pattern.compile("[0-9A-Z]{26}");
     private static final Set<String> STATUSES = Set.of(
             "PENDING_ACCEPTANCE",
             "ACCEPTED",
-            "PARTIALLY_SHIPPED",
+            "PROCESSING",
             "SHIPPED",
             "DELIVERED",
-            "CANCELLATION_PENDING",
             "CANCELLED");
 
     private final BusinessOrderProperties properties;
@@ -54,7 +54,7 @@ public class BusinessOrderService {
             String cursorValue,
             String limitValue) {
         requireEnabled("list");
-        requireId("business", businessId);
+        requireBusinessId(businessId);
         String status = status(statusValue);
         BusinessOrderCursorCodec.Cursor cursor = BusinessOrderCursorCodec.decode(cursorValue);
         int limit = BusinessOrderCursorCodec.limit(limitValue);
@@ -80,7 +80,7 @@ public class BusinessOrderService {
     // Resolves membership before loading one immutable business-owned group snapshot.
     public BusinessOrderDetailResponse detail(String businessId, String businessOrderId) {
         requireEnabled("detail");
-        requireId("business", businessId);
+        requireBusinessId(businessId);
         requireId("business order", businessOrderId);
         BusinessOrderAuthorizationClient.Access access = authorize(businessId);
         BusinessOrderView order = repository.findOwnedDetail(
@@ -181,7 +181,20 @@ public class BusinessOrderService {
                         address.city(),
                         address.region(),
                         address.postalCode(),
-                        address.countryCode()));
+                        address.countryCode()),
+                order.version(),
+                order.timeline().stream()
+                        .map(entry -> new BusinessOrderDetailResponse.TimelineEntry(
+                                entry.status(), entry.occurredAt()))
+                        .toList(),
+                order.shipment() == null ? null : new BusinessOrderDetailResponse.Shipment(
+                        order.shipment().shipmentId(), order.shipment().source(),
+                        order.shipment().carrierDisplayName(),
+                        order.shipment().serviceDisplayName(),
+                        order.shipment().trackingNumber(), order.shipment().status(),
+                        order.shipment().version(), order.shipment().shippedAt(),
+                        order.shipment().deliveredAt(), order.shipment().createdAt(),
+                        order.shipment().updatedAt()));
     }
 
     private void requireEnabled(String operation) {
@@ -201,6 +214,15 @@ public class BusinessOrderService {
                     "BUSINESS_ORDER_ID_INVALID",
                     Character.toUpperCase(label.charAt(0)) + label.substring(1)
                             + " ID is invalid.");
+        }
+    }
+
+    private void requireBusinessId(String value) {
+        if (value == null || !BUSINESS_ID.matcher(value).matches()) {
+            throw new BusinessOrderException(
+                    HttpStatus.BAD_REQUEST,
+                    "BUSINESS_ORDER_ID_INVALID",
+                    "Business ID is invalid.");
         }
     }
 

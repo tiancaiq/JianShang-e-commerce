@@ -52,6 +52,7 @@ public record CheckoutAggregate(
             String listingId,
             String businessId,
             String storeId,
+            String storeName,
             long catalogVersion,
             String title,
             String sku,
@@ -68,6 +69,32 @@ public record CheckoutAggregate(
             String policySnapshotId,
             String policyVersion
     ) {
+        public Item(
+                String id,
+                int lineNumber,
+                String listingId,
+                String businessId,
+                String storeId,
+                long catalogVersion,
+                String title,
+                String sku,
+                String condition,
+                String thumbnailUrl,
+                int quantity,
+                BigDecimal unitPrice,
+                String currency,
+                BigDecimal lineSubtotal,
+                BigDecimal shippingAllocation,
+                BigDecimal taxAllocation,
+                BigDecimal discountAllocation,
+                BigDecimal lineTotal,
+                String policySnapshotId,
+                String policyVersion) {
+            this(id, lineNumber, listingId, businessId, storeId, null, catalogVersion, title, sku,
+                    condition, thumbnailUrl, quantity, unitPrice, currency, lineSubtotal,
+                    shippingAllocation, taxAllocation, discountAllocation, lineTotal,
+                    policySnapshotId, policyVersion);
+        }
     }
 
     public record Policy(

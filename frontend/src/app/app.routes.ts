@@ -57,6 +57,16 @@ export function checkoutDetailRoute(enabled: boolean): Route {
   : { path: 'checkout/:checkoutId', redirectTo: '/marketplace', pathMatch: 'full' };
 }
 
+export function buyerOrderRoutes(enabled: boolean): Routes {
+  return enabled ? [
+    { path: 'account/orders', canActivate: [authGuard], loadComponent: () => import('./features/orders/order-list.component').then(m => m.OrderListComponent) },
+    { path: 'account/orders/:orderId', canActivate: [authGuard], loadComponent: () => import('./features/orders/order-detail.component').then(m => m.OrderDetailComponent) },
+  ] : [
+    { path: 'account/orders', redirectTo: '/account', pathMatch: 'full' },
+    { path: 'account/orders/:orderId', redirectTo: '/account', pathMatch: 'full' },
+  ];
+}
+
 export function cartRoute(enabled: boolean): Route {
   return enabled ? {
       path: 'cart',
@@ -147,6 +157,9 @@ export const routes: Routes = [
       { path: 'store/items/:listingId/edit', loadComponent: () => import('./features/listings/listing-draft-form.component').then(m => m.ListingDraftFormComponent) },
       sellerInventoryRoute(environment.features.sellerInventory),
       ...businessOrderRoutes(BUSINESS_ORDERS_DEFAULT_ENABLED),
+      ...(NOTIFICATION_CENTER_DEFAULT_ENABLED ? [{ path: 'notifications',
+        loadComponent: () => import('./features/business/business-notification-center.component')
+          .then(m => m.BusinessNotificationCenterComponent) }] : []),
       { path: 'account', loadComponent: () => import('./features/business/business-account.component').then(m => m.BusinessAccountComponent) },
       { path: 'profile', redirectTo: '/seller/account', pathMatch: 'full' },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -205,6 +218,7 @@ export const routes: Routes = [
       { path: 'account', canActivate: [authGuard], loadComponent: () => import('./features/account/account.component').then(m => m.AccountComponent) },
       { path: 'account/profile', canActivate: [authGuard], loadComponent: () => import('./features/account/profile.component').then(m => m.ProfileComponent) },
       buyerAddressesRoute(environment.features.buyerAddresses),
+      ...buyerOrderRoutes(environment.features.buyerCheckout),
       notificationCenterRoute(NOTIFICATION_CENTER_DEFAULT_ENABLED),
       { path: 'account/liked', canActivate: [authGuard], loadComponent: () => import('./features/account/liked-listings.component').then(m => m.LikedListingsComponent) },
       { path: 'account/seller-profile', canActivate: [authGuard], loadComponent: () => import('./features/seller/individual-seller-activation.component').then(m => m.IndividualSellerActivationComponent) },

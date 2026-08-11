@@ -77,6 +77,8 @@ describe('CheckoutReviewComponent', () => {
     expect(fixture.componentInstance.selectedAddressId())
       .toBe('01A00000000000000000000001');
     expect(fixture.nativeElement.textContent).toContain('Calculated when checkout starts');
+    expect(fixture.nativeElement.textContent).toContain('Next: local demo payment');
+    expect(fixture.nativeElement.textContent).toContain('No real money will be charged');
 
     const button = fixture.nativeElement.querySelector('aside button') as HTMLButtonElement;
     button.click();

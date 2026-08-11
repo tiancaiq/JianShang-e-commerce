@@ -150,6 +150,10 @@ public class CheckoutService {
         }
         CheckoutAggregate active = repository.findActiveByBuyer(buyerId).orElse(null);
         if (active != null) {
+            if (active.status() == CheckoutStatus.RESERVING) {
+                metrics.command("CREATE", "RESERVATION_RECONCILE");
+                return reserve(active, null, null, correlationId);
+            }
             metrics.command("CREATE", "ALREADY_ACTIVE");
             throw new CheckoutException(
                     HttpStatus.CONFLICT,
@@ -175,6 +179,12 @@ public class CheckoutService {
         try {
             transactions.executeWithoutResult(status -> {
                 repository.insert(checkout);
+                repository.insertCartReconciliation(
+                        checkout.id(),
+                        subject,
+                        checkout.cartVersion(),
+                        assessment.cart().items(),
+                        checkout.createdAt());
                 repository.insertIdempotency(
                         ids.next(),
                         scope,
@@ -493,6 +503,9 @@ public class CheckoutService {
                 || !checkout.expiresAt().equals(reservation.expiresAt())
                 || !expected.equals(actual)) {
             metrics.invariant();
+            log.warn("Inventory reservation invariant mismatch checkoutId={} observedCheckoutId={} purpose={} expectedExpiresAt={} observedExpiresAt={} expectedItems={} observedItems={}",
+                    checkout.id(), reservation.checkoutId(), reservation.purpose(), checkout.expiresAt(),
+                    reservation.expiresAt(), expected, actual);
             throw new CheckoutException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "CHECKOUT_RESERVATION_PENDING",
@@ -622,6 +635,7 @@ public class CheckoutService {
                         item.listingId(),
                         item.businessId(),
                         item.storeId(),
+                        item.storeName(),
                         item.catalogVersion(),
                         item.title(),
                         item.sku(),

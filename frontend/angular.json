@@ -104,6 +104,19 @@
                 }
               ]
             },
+            "demo-checkout": {
+              "budgets": [
+                { "type": "initial", "maximumWarning": "500kB", "maximumError": "1MB" },
+                { "type": "anyComponentStyle", "maximumWarning": "13kB", "maximumError": "16kB" }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-checkout.ts"
+                }
+              ]
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,
@@ -132,6 +145,9 @@
             },
             "demo-cart": {
               "buildTarget": "frontend:build:demo-cart"
+            },
+            "demo-checkout": {
+              "buildTarget": "frontend:build:demo-checkout"
             },
             "development": {
               "buildTarget": "frontend:build:development"

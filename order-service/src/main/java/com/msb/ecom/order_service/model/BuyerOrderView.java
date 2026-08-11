@@ -21,10 +21,36 @@ public record BuyerOrderView(
             String businessOrderId,
             String businessId,
             String storeId,
+            String storeName,
             String status,
             BigDecimal totalAmount,
-            List<Item> items
+            List<Item> items,
+            long version,
+            List<BusinessFulfillmentView.TimelineEntry> timeline,
+            BusinessFulfillmentView.Shipment shipment
     ) {
+        public Group(
+                String businessOrderId,
+                String businessId,
+                String storeId,
+                String status,
+                BigDecimal totalAmount,
+                List<Item> items) {
+            this(businessOrderId, businessId, storeId, null, status, totalAmount, items,
+                    0, List.of(), null);
+        }
+
+        public Group(
+                String businessOrderId,
+                String businessId,
+                String storeId,
+                String storeName,
+                String status,
+                BigDecimal totalAmount,
+                List<Item> items) {
+            this(businessOrderId, businessId, storeId, storeName, status, totalAmount,
+                    items, 0, List.of(), null);
+        }
     }
 
     public record Item(

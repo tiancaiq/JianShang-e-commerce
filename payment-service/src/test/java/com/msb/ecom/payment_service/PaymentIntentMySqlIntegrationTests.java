@@ -3,12 +3,18 @@ package com.msb.ecom.payment_service;
 import com.msb.ecom.payment_service.dto.CreatePaymentIntentRequest;
 import com.msb.ecom.payment_service.dto.PaymentIntentResponse;
 import com.msb.ecom.payment_service.dto.PaymentWebhookResponse;
+import com.msb.ecom.payment_service.dto.CreatePaymentRefundRequest;
+import com.msb.ecom.payment_service.dto.PaymentRefundResponse;
+import com.msb.ecom.payment_service.dto.CreateReturnRefundRequest;
+import com.msb.ecom.payment_service.dto.ReturnRefundResponse;
 import com.msb.ecom.payment_service.model.PaymentIntent;
 import com.msb.ecom.payment_service.model.PaymentIntentException;
 import com.msb.ecom.payment_service.model.PaymentIntentStatus;
 import com.msb.ecom.payment_service.repository.PaymentIntentRepository;
 import com.msb.ecom.payment_service.service.PaymentIntentService;
 import com.msb.ecom.payment_service.service.PaymentWebhookService;
+import com.msb.ecom.payment_service.service.PaymentRefundService;
+import com.msb.ecom.payment_service.service.PaymentReturnRefundService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +52,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "payment.intents.enabled=true",
         "payment.internal-service-token=payment-test-token",
         "payment.webhooks.enabled=true",
-        "payment.webhooks.fake.secret=payment-webhook-test-secret"
+        "payment.webhooks.fake.secret=payment-webhook-test-secret",
+        "payment.refunds.enabled=true"
 })
 class PaymentIntentMySqlIntegrationTests {
 
@@ -54,7 +61,7 @@ class PaymentIntentMySqlIntegrationTests {
     private static final String WEBHOOK_SECRET = "payment-webhook-test-secret";
 
     @ServiceConnection
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.3.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
 
     static {
         MYSQL.start();
@@ -65,6 +72,12 @@ class PaymentIntentMySqlIntegrationTests {
 
     @Autowired
     private PaymentWebhookService webhookService;
+
+    @Autowired
+    private PaymentRefundService refundService;
+
+    @Autowired
+    private PaymentReturnRefundService returnRefundService;
 
     @Autowired
     private PaymentIntentRepository repository;
@@ -84,7 +97,12 @@ class PaymentIntentMySqlIntegrationTests {
     @BeforeEach
     void clean() {
         jdbc.update("DELETE FROM payment_outbox_events");
+        jdbc.update("DELETE FROM payment_return_refund_attempts");
+        jdbc.update("DELETE FROM payment_return_refunds");
         jdbc.update("DELETE FROM payment_provider_events");
+        jdbc.update("DELETE FROM payment_refund_attempts");
+        jdbc.update("DELETE FROM payment_refund_status_history");
+        jdbc.update("DELETE FROM payment_refunds");
         jdbc.update("DELETE FROM payment_idempotency_records");
         jdbc.update("DELETE FROM payment_status_history");
         jdbc.update("DELETE FROM payment_attempts");
@@ -596,6 +614,78 @@ class PaymentIntentMySqlIntegrationTests {
                         .content(invalidSchema))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("PAYMENT_WEBHOOK_PAYLOAD_INVALID"));
+    }
+
+    @Test
+    void deterministicFullRefundDerivesAmountAndReplaysExactlyOnce() {
+        PaymentIntentResponse intent = service.create(
+                TOKEN,
+                "payment-key-refund-0120",
+                request(id(120), id(121), List.of(id(122), id(123)), "48.7500"),
+                "correlation-refund-create");
+        byte[] succeeded = webhookBody(
+                "fake_evt_refund_0001", "payment_intent.succeeded",
+                intent.providerReference(), null);
+        webhookService.process(signature(succeeded), succeeded, "correlation-refund-succeeded");
+        CreatePaymentRefundRequest command = new CreatePaymentRefundRequest(id(124), id(125));
+
+        PaymentRefundResponse first = refundService.refund(
+                TOKEN, intent.id(), "refund-key-0120", command, "correlation-refund-1");
+        PaymentRefundResponse replay = refundService.refund(
+                TOKEN, intent.id(), "refund-key-0120", command, "correlation-refund-2");
+
+        assertThat(replay.refundId()).isEqualTo(first.refundId());
+        assertThat(first.amount()).isEqualByComparingTo("48.7500");
+        assertThat(first.currency()).isEqualTo("USD");
+        assertThat(first.status()).isEqualTo("SUCCEEDED");
+        assertThat(first.displayName()).isEqualTo("Local demo refund");
+        assertThat(first.disclosure()).isEqualTo("No real money is moved.");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_refunds", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_refund_attempts", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_refund_status_history", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM payment_outbox_events
+                WHERE event_type = 'payment.refunded'
+                """, Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void deterministicBusinessGroupReturnRefundIsBoundedAndReplaysExactlyOnce() {
+        PaymentIntentResponse intent = service.create(
+                TOKEN, "payment-key-return-0130",
+                request(id(130), id(131), List.of(id(132), id(133)), "48.7500"),
+                "correlation-return-create");
+        byte[] succeeded = webhookBody("fake_evt_return_0001", "payment_intent.succeeded",
+                intent.providerReference(), null);
+        webhookService.process(signature(succeeded), succeeded, "correlation-return-succeeded");
+        CreateReturnRefundRequest command = new CreateReturnRefundRequest(
+                id(130), id(135), id(134), new BigDecimal("20.2500"), "USD");
+
+        ReturnRefundResponse first = returnRefundService.refund(
+                TOKEN, intent.id(), "return-refund-key-0130", command, "correlation-return-1");
+        ReturnRefundResponse replay = returnRefundService.refund(
+                TOKEN, intent.id(), "return-refund-key-0130", command, "correlation-return-2");
+
+        assertThat(replay.refundId()).isEqualTo(first.refundId());
+        assertThat(first.amount()).isEqualByComparingTo("20.2500");
+        assertThat(first.status()).isEqualTo("SUCCEEDED");
+        assertThat(first.disclosure()).isEqualTo("No real money is moved.");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_return_refunds", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_return_refund_attempts", Integer.class))
+                .isEqualTo(1);
+
+        CreateReturnRefundRequest excessive = new CreateReturnRefundRequest(
+                id(130), id(137), id(136), new BigDecimal("30.0000"), "USD");
+        assertThatThrownBy(() -> returnRefundService.refund(
+                TOKEN, intent.id(), "return-refund-key-0131", excessive, "correlation-return-3"))
+                .isInstanceOfSatisfying(PaymentIntentException.class,
+                        error -> assertThat(error.code()).isEqualTo("PAYMENT_RETURN_REFUND_STATE_CONFLICT"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_return_refunds", Integer.class))
+                .isEqualTo(1);
     }
 
     private int transitionAfter(

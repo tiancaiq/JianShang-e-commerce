@@ -118,6 +118,22 @@ class NotificationRouteIntegrationTests {
     }
 
     @Test
+    void authenticatedBusinessNotificationRouteUsesTheSameProtectedBoundary() {
+        RestAssured.given()
+                .header("Authorization", "Bearer relayed-access-token")
+                .header("X-User-Id", "spoofed-user")
+                .when()
+                .get("/api/v1/businesses/01K0BUSINESS00000000000000/notifications/unread-count")
+                .then()
+                .statusCode(200)
+                .body("unreadCount", equalTo(0));
+
+        assertThat(AUTHORIZATION.get()).isEqualTo("Bearer relayed-access-token");
+        assertThat(USER_ID.get()).isNull();
+        assertThat(REQUESTS.get()).isEqualTo(1);
+    }
+
+    @Test
     void notificationPostRequiresCsrfBeforeCallingUpstream() throws Exception {
         mockMvc.perform(post("/api/v1/notifications/read-all")
                         .with(oidcLogin()))
@@ -175,6 +191,7 @@ class NotificationRouteIntegrationTests {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/api/v1/notifications", NotificationRouteIntegrationTests::respond);
+            server.createContext("/api/v1/businesses", NotificationRouteIntegrationTests::respond);
             server.start();
             return server;
         } catch (IOException error) {
@@ -200,7 +217,9 @@ class NotificationRouteIntegrationTests {
             exchange.close();
             return;
         }
-        byte[] body = "{\"items\":[],\"page\":{\"nextCursor\":null,\"hasMore\":false}}"
+        byte[] body = (exchange.getRequestURI().getPath().endsWith("/unread-count")
+                ? "{\"unreadCount\":0}"
+                : "{\"items\":[],\"page\":{\"nextCursor\":null,\"hasMore\":false}}")
                 .getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, body.length);

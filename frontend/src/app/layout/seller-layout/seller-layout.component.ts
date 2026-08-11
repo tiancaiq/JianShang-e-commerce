@@ -1,9 +1,12 @@
-import { Component, inject } from '@angular/core';
+import { Component, Injector, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 import { environment } from '../../../environments/environment';
 import { BUSINESS_ORDERS_ENABLED } from '../../features/business/business-orders.capability';
+import { NOTIFICATION_CENTER_ENABLED } from '../../features/account/notification-center.capability';
+import { NotificationService } from '../../core/services/notification.service';
+import { BusinessStoreService } from '../../core/services/business-store.service';
 
 @Component({
   selector: 'app-seller-layout',
@@ -32,6 +35,13 @@ import { BUSINESS_ORDERS_ENABLED } from '../../features/business/business-orders
         <header class="portal-header">
           <h1>{{ pageTitle() }}</h1>
           <div class="user-menu">
+            @if (notificationsEnabled) {
+              <a routerLink="/seller/notifications" class="notification-bell"
+                 [attr.aria-label]="'Notifications, ' + unreadCount() + ' unread'">
+                <span aria-hidden="true">&#128276;</span>
+                @if (unreadCount() > 0) { <b>{{ unreadCount() > 99 ? '99+' : unreadCount() }}</b> }
+              </a>
+            }
             <span>{{ authService.user()?.displayName || authService.user()?.email }}</span>
             <button type="button" (click)="authService.logout('seller-portal')">Logout</button>
           </div>
@@ -155,6 +165,12 @@ import { BUSINESS_ORDERS_ENABLED } from '../../features/business/business-orders
       color: var(--color-danger);
     }
 
+    .notification-bell { position: relative; display: inline-flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--color-border); text-decoration: none; }
+    .notification-bell b { position: absolute; right: -0.25rem; top: -0.25rem; min-width: 1.2rem;
+      height: 1.2rem; display: grid; place-items: center; border-radius: 999px;
+      background: var(--color-accent); color: #fff; font-size: 0.65rem; }
+
     .portal-content {
       position: relative;
       flex: 1;
@@ -190,11 +206,34 @@ import { BUSINESS_ORDERS_ENABLED } from '../../features/business/business-orders
     }
   `],
 })
-export class SellerLayoutComponent {
+export class SellerLayoutComponent implements OnInit, OnDestroy {
   authService = inject(AuthService);
   private router = inject(Router);
   readonly sellerInventoryEnabled = environment.features.sellerInventory;
   readonly businessOrdersEnabled = inject(BUSINESS_ORDERS_ENABLED);
+  readonly notificationsEnabled = inject(NOTIFICATION_CENTER_ENABLED);
+  readonly unreadCount = signal(0);
+  private readonly injector = inject(Injector);
+  private poll: ReturnType<typeof setInterval> | null = null;
+  private businessId: string | null = null;
+
+  ngOnInit(): void {
+    if (!this.notificationsEnabled) return;
+    this.injector.get(BusinessStoreService).getCurrentStoreContext().subscribe({ next: context => {
+      this.businessId = context?.businessId || null;
+      this.refresh();
+      this.poll = setInterval(() => this.refresh(), 15000);
+    }});
+  }
+
+  ngOnDestroy(): void { if (this.poll) clearInterval(this.poll); }
+
+  private refresh(): void {
+    if (!this.businessId) return;
+    this.injector.get(NotificationService).businessCount(this.businessId).subscribe({
+      next: value => this.unreadCount.set(value.unreadCount), error: () => undefined,
+    });
+  }
 
   pageTitle(): string {
     const path = this.router.url.split(/[?#]/, 1)[0];

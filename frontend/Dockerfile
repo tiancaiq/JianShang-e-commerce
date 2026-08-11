@@ -8,6 +8,8 @@ RUN npm ci
 COPY . .
 ARG FRONTEND_BUILD_CONFIGURATION=production
 RUN npm run build -- --configuration "$FRONTEND_BUILD_CONFIGURATION"
+RUN printf '{"buildConfiguration":"%s"}\n' "$FRONTEND_BUILD_CONFIGURATION" \
+    > /app/dist/frontend/browser/commerce-runtime.json
 
 # ── Stage 2: Serve with Nginx ─────────────────────────────────
 FROM nginx:alpine

@@ -65,6 +65,60 @@ public class NotificationRepository {
                 limit);
     }
 
+    public List<NotificationReadRow> findScopePage(
+            String scopeType, String scopeId, Instant beforeCreatedAt,
+            String beforeNotificationId, int limit) {
+        if (beforeCreatedAt == null) {
+            return jdbc.query("""
+                            SELECT id, type, message_key, message_args_json, route,
+                                   read_at, created_at
+                            FROM notifications
+                            WHERE recipient_scope_type = ? AND recipient_scope_id = ?
+                            ORDER BY created_at DESC, id DESC LIMIT ?
+                            """, NotificationRepository::readRow, scopeType, scopeId, limit);
+        }
+        return jdbc.query("""
+                        SELECT id, type, message_key, message_args_json, route,
+                               read_at, created_at
+                        FROM notifications
+                        WHERE recipient_scope_type = ? AND recipient_scope_id = ?
+                          AND (created_at < ? OR (created_at = ? AND id < ?))
+                        ORDER BY created_at DESC, id DESC LIMIT ?
+                        """, NotificationRepository::readRow, scopeType, scopeId,
+                Timestamp.from(beforeCreatedAt), Timestamp.from(beforeCreatedAt),
+                beforeNotificationId, limit);
+    }
+
+    public int unreadCount(String scopeType, String scopeId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM notifications
+                WHERE recipient_scope_type = ? AND recipient_scope_id = ? AND read_at IS NULL
+                """, Integer.class, scopeType, scopeId);
+        return count == null ? 0 : count;
+    }
+
+    public boolean markScopeRead(
+            String scopeType, String scopeId, String notificationId, Instant now) {
+        int changed = jdbc.update("""
+                        UPDATE notifications SET read_at = ?, updated_at = ?
+                        WHERE id = ? AND recipient_scope_type = ? AND recipient_scope_id = ?
+                          AND read_at IS NULL
+                        """, Timestamp.from(now), Timestamp.from(now), notificationId,
+                scopeType, scopeId);
+        if (changed == 1) return true;
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM notifications
+                    WHERE id = ? AND recipient_scope_type = ? AND recipient_scope_id = ?)
+                """, Boolean.class, notificationId, scopeType, scopeId));
+    }
+
+    public void markScopeAllRead(String scopeType, String scopeId, Instant now) {
+        jdbc.update("""
+                UPDATE notifications SET read_at = ?, updated_at = ?
+                WHERE recipient_scope_type = ? AND recipient_scope_id = ? AND read_at IS NULL
+                """, Timestamp.from(now), Timestamp.from(now), scopeType, scopeId);
+    }
+
     // Sets the first read timestamp only when the notification belongs to the resolved actor.
     public boolean markOwnedRead(String recipientUserId, String notificationId, Instant now) {
         int changed = jdbc.update("""
@@ -170,6 +224,38 @@ public class NotificationRepository {
                 Timestamp.from(retentionUntil),
                 Timestamp.from(now),
                 Timestamp.from(now));
+    }
+
+    // Persists one strictly validated commerce projection for a user or business audience.
+    public void insertCommerceNotification(
+            String notificationId, String consumerName, NotificationSourceEvent event,
+            String scopeType, String scopeId, String type, String messageKey,
+            String orderId, String businessId, String businessOrderId,
+            String storeDisplayName, String route, String payloadHash,
+            Instant retentionUntil, Instant now) {
+        String args = storeDisplayName == null
+                ? (businessOrderId == null
+                    ? "{\"orderId\":\"" + orderId + "\"}"
+                    : "{\"orderId\":\"" + orderId + "\",\"businessOrderId\":\"" + businessOrderId + "\"}")
+                : "{\"orderId\":\"" + orderId + "\",\"businessOrderId\":\""
+                    + businessOrderId + "\",\"storeDisplayName\":\""
+                    + storeDisplayName.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+        jdbc.update("""
+                        INSERT INTO notifications (
+                            id, recipient_scope_type, recipient_scope_id, recipient_user_id,
+                            business_id, business_order_id, type, message_key, message_args_json,
+                            route, source_consumer_name, source_event_id, source_event_type,
+                            source_event_version, source_occurred_at, source_payload_hash,
+                            read_at, version, retention_until, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?, ?, ?, ?, ?,
+                                  NULL, 0, ?, ?, ?)
+                        """, notificationId, scopeType, scopeId,
+                "USER".equals(scopeType) ? scopeId : null,
+                "BUSINESS".equals(scopeType) ? scopeId : null,
+                businessOrderId, type, messageKey, args, route, consumerName,
+                event.eventId(), event.eventType(), event.eventVersion(),
+                Timestamp.from(event.occurredAt()), payloadHash,
+                Timestamp.from(retentionUntil), Timestamp.from(now), Timestamp.from(now));
     }
 
     public void complete(

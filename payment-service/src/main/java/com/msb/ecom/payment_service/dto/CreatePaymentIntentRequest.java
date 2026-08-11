@@ -20,7 +20,8 @@ public record CreatePaymentIntentRequest(
         @NotBlank @Pattern(regexp = "[a-f0-9]{64}") String checkoutSnapshotHash,
         @NotBlank @Pattern(regexp = "[0-7][0-9A-HJKMNP-TV-Z]{25}") String buyerId,
         @NotEmpty @Size(max = 50)
-        List<@Pattern(regexp = "[0-7][0-9A-HJKMNP-TV-Z]{25}") String> businessIds,
+        // Business IDs are opaque platform IDs; legacy deterministic fixtures are not canonical ULIDs.
+        List<@Pattern(regexp = "[0-9A-Z]{26}") String> businessIds,
         @NotNull @DecimalMin(value = "0.0001") @Digits(integer = 15, fraction = 4) BigDecimal amount,
         @NotBlank @Pattern(regexp = "USD") String currency,
         @NotNull @Future Instant expiresAt

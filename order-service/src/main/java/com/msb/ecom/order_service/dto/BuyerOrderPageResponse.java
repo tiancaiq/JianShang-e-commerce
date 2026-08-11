@@ -24,10 +24,19 @@ public record BuyerOrderPageResponse(
     public record GroupSummary(
             String businessOrderId,
             String businessId,
+            String storeName,
             String status,
             BigDecimal totalAmount,
             String currency
     ) {
+        public GroupSummary(
+                String businessOrderId,
+                String businessId,
+                String status,
+                BigDecimal totalAmount,
+                String currency) {
+            this(businessOrderId, businessId, null, status, totalAmount, currency);
+        }
     }
 
     public record PageMetadata(

@@ -20,7 +20,13 @@ public class NotificationPresentationMapper {
 
     private static final int MAX_ARGS_BYTES = 2048;
     private static final Pattern ULID = Pattern.compile("[0-7][0-9A-HJKMNP-TV-Z]{25}");
-    private static final Set<String> ARG_FIELDS = Set.of("orderId");
+    private static final Set<String> TYPES = Set.of(
+            "BUYER_ORDER_CONFIRMED", "BUYER_ORDER_CANCELLED", "BUYER_REFUND_COMPLETED",
+            "BUYER_ORDER_ACCEPTED", "BUYER_ORDER_PROCESSING", "BUYER_ORDER_SHIPPED",
+            "BUYER_ORDER_DELIVERED", "SELLER_NEW_ORDER", "SELLER_ORDER_CANCELLED",
+            "BUYER_RETURN_AUTHORIZED", "BUYER_RETURN_RECEIVED",
+            "BUYER_RETURN_REFUND_COMPLETED", "SELLER_RETURN_REQUESTED",
+            "ORDER_CONFIRMED");
 
     private final ObjectMapper objectMapper;
 
@@ -34,9 +40,11 @@ public class NotificationPresentationMapper {
         if (row == null
                 || row.id() == null
                 || !ULID.matcher(row.id()).matches()
-                || !"ORDER_CONFIRMED".equals(row.type())
-                || !"ORDER_CONFIRMED_V1".equals(row.messageKey())
-                || !"/account".equals(row.route())
+                || !TYPES.contains(row.type())
+                || !(row.type() + "_V1").equals(row.messageKey())
+                    && !("ORDER_CONFIRMED".equals(row.type())
+                        && "ORDER_CONFIRMED_V1".equals(row.messageKey()))
+                || !safeRoute(row.route())
                 || row.createdAt() == null
                 || row.messageArgsJson() == null
                 || row.messageArgsJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
@@ -51,17 +59,34 @@ public class NotificationPresentationMapper {
             Set<String> actual = new HashSet<>();
             args.fieldNames().forEachRemaining(actual::add);
             JsonNode orderId = args.get("orderId");
-            if (!actual.equals(ARG_FIELDS)
+            Set<String> allowed = Set.of("orderId", "businessOrderId", "storeDisplayName");
+            if (!allowed.containsAll(actual) || !actual.contains("orderId")
                     || orderId == null
                     || !orderId.isTextual()
                     || !ULID.matcher(orderId.textValue()).matches()) {
                 throw corrupt();
             }
+            java.util.LinkedHashMap<String, String> projection = new java.util.LinkedHashMap<>();
+            projection.put("orderId", orderId.textValue());
+            JsonNode businessOrderId = args.get("businessOrderId");
+            if (businessOrderId != null) {
+                if (!businessOrderId.isTextual() || !ULID.matcher(businessOrderId.textValue()).matches()) {
+                    throw corrupt();
+                }
+                projection.put("businessOrderId", businessOrderId.textValue());
+            }
+            JsonNode store = args.get("storeDisplayName");
+            if (store != null) {
+                if (!store.isTextual() || store.textValue().isBlank() || store.textValue().length() > 120) {
+                    throw corrupt();
+                }
+                projection.put("storeDisplayName", store.textValue());
+            }
             return new NotificationPageResponse.NotificationItem(
                     row.id(),
                     row.type(),
                     row.messageKey(),
-                    Map.of("orderId", orderId.textValue()),
+                    projection,
                     row.route(),
                     row.readAt() != null,
                     row.readAt(),
@@ -69,6 +94,12 @@ public class NotificationPresentationMapper {
         } catch (JsonProcessingException exception) {
             throw corrupt();
         }
+    }
+
+    private boolean safeRoute(String route) {
+        return "/account".equals(route)
+                || (route != null && route.matches("/account/orders/[0-7][0-9A-HJKMNP-TV-Z]{25}"))
+                || (route != null && route.matches("/seller/orders/[0-7][0-9A-HJKMNP-TV-Z]{25}"));
     }
 
     private NotificationReadException corrupt() {

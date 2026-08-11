@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 class BusinessOrderAcceptanceMySqlIntegrationTests {
 
     private static final Instant NOW = Instant.parse("2026-07-20T01:00:00Z");
-    private static final String BUSINESS_ID = id(1);
+    private static final String BUSINESS_ID = "01KXQBUSI00000000000000001";
     private static final String OTHER_BUSINESS_ID = id(2);
     private static final String BUSINESS_ORDER_ID = id(3);
     private static final String ACTOR_ID = id(4);
@@ -88,7 +88,7 @@ class BusinessOrderAcceptanceMySqlIntegrationTests {
     }
 
     @Test
-    void v5MigratesExactVersionAndFulfillmentConstraints() {
+    void v5VersionFoundationRemainsAfterForwardFulfillmentExpansion() {
         String versionClause = jdbc.queryForObject("""
                 SELECT CHECK_CLAUSE
                 FROM information_schema.CHECK_CONSTRAINTS
@@ -104,8 +104,7 @@ class BusinessOrderAcceptanceMySqlIntegrationTests {
 
         assertThat(versionClause).contains("version", ">= 0");
         assertThat(fulfillmentClause)
-                .contains("PENDING_ACCEPTANCE", "ACCEPTED")
-                .doesNotContain("SHIPPED", "DELIVERED");
+                .contains("PENDING_ACCEPTANCE", "ACCEPTED", "PROCESSING", "SHIPPED", "DELIVERED");
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM flyway_schema_history
                 WHERE version = '5' AND success = 1

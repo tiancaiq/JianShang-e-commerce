@@ -1,6 +1,16 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, computed, signal } from '@angular/core';
-import { Observable, finalize, tap } from 'rxjs';
+import {
+  EMPTY,
+  Observable,
+  catchError,
+  exhaustMap,
+  finalize,
+  take,
+  takeWhile,
+  tap,
+  timer,
+} from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AddCartItemRequest,
@@ -29,27 +39,44 @@ export class CartService {
     return this.track(this.http.get<Cart>(this.baseUrl, { withCredentials: true }), false);
   }
 
+  // Refreshes the shared badge after confirmation without making order success depend on Redis cleanup.
+  refreshAfterConfirmedCheckout(purchasedCartVersion: number): Observable<Cart> {
+    return timer(0, 500).pipe(
+      exhaustMap(() => this.load()),
+      takeWhile(
+        cart => cart.version === purchasedCartVersion && cart.totalQuantity > 0,
+        true,
+      ),
+      take(8),
+      catchError(() => EMPTY),
+    );
+  }
+
   add(request: AddCartItemRequest): Observable<Cart> {
-    return this.track(this.http.post<Cart>(`${this.baseUrl}/items`, request, { withCredentials: true }));
+    return this.track(this.http.post<Cart>(
+      `${this.baseUrl}/items`,
+      request,
+      this.mutationOptions(),
+    ));
   }
 
   update(listingId: string, request: UpdateCartItemRequest): Observable<Cart> {
     return this.track(this.http.patch<Cart>(
       `${this.baseUrl}/items/${encodeURIComponent(listingId)}`,
       request,
-      { withCredentials: true },
+      this.mutationOptions(),
     ));
   }
 
   remove(listingId: string): Observable<Cart> {
     return this.track(this.http.delete<Cart>(
       `${this.baseUrl}/items/${encodeURIComponent(listingId)}`,
-      { withCredentials: true },
+      this.mutationOptions(),
     ));
   }
 
   clear(): Observable<Cart> {
-    return this.track(this.http.delete<Cart>(this.baseUrl, { withCredentials: true }));
+    return this.track(this.http.delete<Cart>(this.baseUrl, this.mutationOptions()));
   }
 
   validate(): Observable<CartValidation> {
@@ -86,5 +113,22 @@ export class CartService {
       }),
       finalize(() => this.activeRequests.update(count => Math.max(0, count - 1))),
     );
+  }
+
+  private mutationOptions(): { withCredentials: true; headers: HttpHeaders } {
+    return {
+      withCredentials: true,
+      headers: new HttpHeaders({
+        'If-Match': `"${this.currentCart()?.version ?? 0}"`,
+        'Idempotency-Key': this.idempotencyKey(),
+      }),
+    };
+  }
+
+  private idempotencyKey(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return `cart-${crypto.randomUUID()}`;
+    }
+    return `cart-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   }
 }
