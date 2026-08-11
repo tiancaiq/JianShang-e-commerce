@@ -1,0 +1,60 @@
+name: Stripe Sandbox Integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stripe-sandbox-integration
+  cancel-in-progress: false
+
+jobs:
+  stripe-provider:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STRIPE_SANDBOX_E2E: "true"
+      STRIPE_SANDBOX_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      PAYMENT_STRIPE_SECRET_KEY: ${{ secrets.PAYMENT_STRIPE_SECRET_KEY }}
+      PAYMENT_STRIPE_PUBLISHABLE_KEY: ${{ secrets.PAYMENT_STRIPE_PUBLISHABLE_KEY }}
+      PAYMENT_STRIPE_WEBHOOK_SECRET: ${{ secrets.PAYMENT_STRIPE_WEBHOOK_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require Stripe test-mode secrets
+        shell: bash
+        run: |
+          test -n "$PAYMENT_STRIPE_SECRET_KEY"
+          test -n "$PAYMENT_STRIPE_PUBLISHABLE_KEY"
+          test -n "$PAYMENT_STRIPE_WEBHOOK_SECRET"
+          case "$PAYMENT_STRIPE_SECRET_KEY" in sk_test_*) ;; *) exit 1 ;; esac
+          case "$PAYMENT_STRIPE_PUBLISHABLE_KEY" in pk_test_*) ;; *) exit 1 ;; esac
+          case "$PAYMENT_STRIPE_WEBHOOK_SECRET" in whsec_*) ;; *) exit 1 ;; esac
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run Stripe sandbox provider gate
+        run: ./mvnw -pl payment-service -am -Dtest=StripeSandboxIntegrationTests -Dsurefire.failIfNoSpecifiedTests=false test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build secure Stripe checkout UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build:demo-checkout

@@ -129,6 +129,9 @@ public class OrderCancellationProcessingService {
                 var refund = payments.refund(
                         current.paymentIntentId(), current.orderId(), current.requestId(),
                         "cancel-refund:" + current.requestId());
+                if (!"SUCCEEDED".equals(refund.status())) {
+                    throw new IllegalStateException("Payment refund is not complete.");
+                }
                 Instant succeededAt = clock.instant();
                 CompensationRecord captured = current;
                 transactions.executeWithoutResult(status -> repository.refundSucceeded(

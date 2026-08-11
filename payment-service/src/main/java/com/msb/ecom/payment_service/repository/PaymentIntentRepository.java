@@ -67,6 +67,18 @@ public class PaymentIntentRepository {
                 checkoutId).stream().findFirst());
     }
 
+    public List<PaymentIntent> reconciliationCandidates(
+            String provider, Instant updatedBefore, int limit) {
+        return jdbc.query("""
+                        SELECT * FROM payment_intents
+                        WHERE provider = ? AND provider_reference IS NOT NULL
+                          AND status IN ('REQUIRES_ACTION','PROCESSING')
+                          AND updated_at <= ?
+                        ORDER BY updated_at, id LIMIT ?
+                        """, (rs, rowNum) -> map(rs), provider, Timestamp.from(updatedBefore), limit)
+                .stream().map(intent -> withBusinessScopes(Optional.of(intent)).orElseThrow()).toList();
+    }
+
     public Optional<PaymentIntent> findOwned(String paymentIntentId, String buyerId) {
         return withBusinessScopes(jdbc.query(
                 "SELECT * FROM payment_intents WHERE id = ? AND buyer_id = ?",
@@ -172,6 +184,19 @@ public class PaymentIntentRepository {
                 safeErrorCode, safeErrorMessage, Timestamp.from(createdAt));
     }
 
+    public void insertReconciliationAttempt(
+            String id, String paymentIntentId, int attemptNumber, String provider,
+            String outcome, String providerReference, String safeErrorCode,
+            String safeErrorMessage, Instant createdAt) {
+        jdbc.update("""
+                        INSERT INTO payment_attempts (
+                            id, payment_intent_id, attempt_number, provider, operation,
+                            outcome, provider_reference, safe_error_code, safe_error_message, created_at
+                        ) VALUES (?, ?, ?, ?, 'RECONCILE_INTENT', ?, ?, ?, ?, ?)
+                        """, id, paymentIntentId, attemptNumber, provider, outcome,
+                providerReference, safeErrorCode, safeErrorMessage, Timestamp.from(createdAt));
+    }
+
     public int nextAttemptNumber(String paymentIntentId) {
         Integer result = jdbc.queryForObject(
                 "SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM payment_attempts WHERE payment_intent_id = ?",
@@ -249,7 +274,7 @@ public class PaymentIntentRepository {
             String providerEventId) {
         return jdbc.query("""
                         SELECT provider, provider_event_id, event_type, provider_reference,
-                               payment_intent_id, payload_hash, processing_outcome, resulting_status
+                               payment_intent_id, refund_id, payload_hash, processing_outcome, resulting_status
                         FROM payment_provider_events
                         WHERE provider = ? AND provider_event_id = ?
                         """,
@@ -259,6 +284,7 @@ public class PaymentIntentRepository {
                         rs.getString("event_type"),
                         rs.getString("provider_reference"),
                         rs.getString("payment_intent_id"),
+                        rs.getString("refund_id"),
                         rs.getString("payload_hash"),
                         PaymentWebhookOutcome.valueOf(rs.getString("processing_outcome")),
                         rs.getString("resulting_status")),
@@ -273,25 +299,26 @@ public class PaymentIntentRepository {
             String eventType,
             String providerReference,
             String paymentIntentId,
+            String refundId,
             String payloadHash,
             Instant signatureTimestamp,
             Instant providerOccurredAt,
             PaymentWebhookOutcome outcome,
-            PaymentIntentStatus resultingStatus,
+            String resultingStatus,
             String safeErrorCode,
             String correlationId,
             Instant createdAt) {
         jdbc.update("""
                         INSERT INTO payment_provider_events (
                             id, provider, provider_event_id, event_type, provider_reference,
-                            payment_intent_id, payload_hash, signature_timestamp,
+                            payment_intent_id, refund_id, payload_hash, signature_timestamp,
                             provider_occurred_at, processing_outcome, resulting_status,
                             safe_error_code, correlation_id, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 id, provider, providerEventId, eventType, providerReference, paymentIntentId,
-                payloadHash, Timestamp.from(signatureTimestamp), Timestamp.from(providerOccurredAt),
-                outcome.name(), resultingStatus == null ? null : resultingStatus.name(),
+                refundId, payloadHash, Timestamp.from(signatureTimestamp), Timestamp.from(providerOccurredAt),
+                outcome.name(), resultingStatus,
                 safeErrorCode, correlationId, Timestamp.from(createdAt));
     }
 

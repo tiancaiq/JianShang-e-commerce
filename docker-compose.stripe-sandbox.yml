@@ -1,0 +1,17 @@
+services:
+  api-gateway:
+    environment:
+      GATEWAY_FEATURE_STRIPE_WEBHOOK: "true"
+
+  payment-service:
+    environment:
+      PAYMENT_PROVIDER: STRIPE_TEST_V1
+      PAYMENT_EXTERNAL_PROVIDER_ENABLED: "true"
+      PAYMENT_DEMO_COMPLETION_ENABLED: "false"
+      PAYMENT_STRIPE_SANDBOX_ENABLED: "true"
+      PAYMENT_STRIPE_SECRET_KEY: ${PAYMENT_STRIPE_SECRET_KEY:?Stripe test secret key is required}
+      PAYMENT_STRIPE_PUBLISHABLE_KEY: ${PAYMENT_STRIPE_PUBLISHABLE_KEY:?Stripe test publishable key is required}
+      PAYMENT_STRIPE_WEBHOOK_SECRET: ${PAYMENT_STRIPE_WEBHOOK_SECRET:?Stripe webhook secret is required}
+      PAYMENT_STRIPE_API_VERSION: ${PAYMENT_STRIPE_API_VERSION:-2026-02-25.clover}
+      PAYMENT_STRIPE_RETURN_URL_BASE: ${PAYMENT_STRIPE_RETURN_URL_BASE:-http://localhost:4200/checkout}
+      PAYMENT_STRIPE_RECONCILIATION_ENABLED: "true"

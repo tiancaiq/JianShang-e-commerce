@@ -10,6 +10,7 @@ public class BusinessOrderReturnProcessingWorker{
  @Scheduled(fixedDelayString="${business-orders.return-worker-interval-ms:500}") public void process(){if(!props.enabled()||!props.processingEnabled())return;for(var r:repo.due(clock.instant(),props.batchSize())){if(!repo.claimProcessing(r.id()))continue;try{
    if("RESTOCK_SELLABLE".equals(r.disposition()))inventory.restock(r.reservationId(),r.orderId(),r.id(),r.businessId(),"return-restock:"+r.id());
    var refund=payment.refund(r.paymentIntentId(),r.orderId(),r.businessOrderId(),r.id(),groupMerchandiseAmount(r),r.currency(),"return-refund:"+r.id());
+   if(!"SUCCEEDED".equals(refund.status()))throw new IllegalStateException("Return refund is not complete.");
    var now=clock.instant();String event=ids.next();String payload=json(Map.of("returnId",r.id(),"orderId",r.orderId(),"businessOrderId",r.businessOrderId(),"businessId",r.businessId(),"refundId",refund.refundId(),"amount",refund.amount(),"currency",r.currency(),"status","RETURN_COMPLETED","occurredAt",now));
    tx.executeWithoutResult(s->repo.complete(r.id(),refund.refundId(),refund.amount(),r.id(),now,ids.next(),ids.next(),event,payload));
   }catch(RuntimeException e){repo.retry(r.id(),clock.instant().plus(props.retryDelay()),"RETURN_DEPENDENCY_UNAVAILABLE");log.warn("Return processing deferred returnRef={}",r.id());}}}

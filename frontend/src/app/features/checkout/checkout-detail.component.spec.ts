@@ -4,12 +4,14 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { of } from 'rxjs';
 import { CartService } from '../../core/services/cart.service';
 import { CheckoutService } from '../../core/services/checkout.service';
+import { StripePaymentElementService } from '../../core/services/stripe-payment-element.service';
 import { CheckoutDetailComponent } from './checkout-detail.component';
 
 describe('CheckoutDetailComponent', () => {
   let fixture: ComponentFixture<CheckoutDetailComponent>;
   let checkoutService: jasmine.SpyObj<CheckoutService>;
   let cartService: jasmine.SpyObj<CartService>;
+  let stripe: jasmine.SpyObj<StripePaymentElementService>;
 
   beforeEach(async () => {
     checkoutService = jasmine.createSpyObj<CheckoutService>('CheckoutService', [
@@ -24,6 +26,10 @@ describe('CheckoutDetailComponent', () => {
       'refreshAfterConfirmedCheckout',
     ]);
     cartService.refreshAfterConfirmedCheckout.and.returnValue(of({} as any));
+    stripe = jasmine.createSpyObj<StripePaymentElementService>('StripePaymentElementService', [
+      'mount', 'confirm', 'unmount',
+    ]);
+    stripe.mount.and.resolveTo();
 
     await TestBed.configureTestingModule({
       imports: [CheckoutDetailComponent],
@@ -40,6 +46,7 @@ describe('CheckoutDetailComponent', () => {
         },
         { provide: CheckoutService, useValue: checkoutService },
         { provide: CartService, useValue: cartService },
+        { provide: StripePaymentElementService, useValue: stripe },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(CheckoutDetailComponent);
@@ -85,6 +92,33 @@ describe('CheckoutDetailComponent', () => {
       ['/account/orders', '01O00000000000000000000001'],
       { queryParams: { confirmed: 'true' } },
     );
+  });
+
+  it('mounts Stripe Payment Element from server-provided safe action data', async () => {
+    checkoutService.createPaymentIntent.and.returnValue(of({
+      status: 'REQUIRES_ACTION',
+      action: {
+        type: 'STRIPE_PAYMENT_ELEMENT',
+        reference: 'pi_test_secret_example',
+        publicKey: 'pk_test_example',
+        returnUrl: 'http://localhost:4200/checkout/01C00000000000000000000001',
+      },
+    } as any));
+    fixture.detectChanges();
+
+    fixture.componentInstance.pay();
+    fixture.detectChanges();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(stripe.mount).toHaveBeenCalledOnceWith(
+      'pk_test_example',
+      'pi_test_secret_example',
+      'http://localhost:4200/checkout/01C00000000000000000000001',
+      '#stripe-payment-element',
+    );
+    expect(checkoutService.completeDemoPayment).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.textContent).toContain('No production charge will occur');
   });
 
   function checkout(): any {

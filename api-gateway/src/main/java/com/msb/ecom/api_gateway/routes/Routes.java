@@ -487,6 +487,16 @@ public class Routes {
         }
 
         @Bean
+        @Order(1)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "stripe-webhook",
+                        havingValue = "true")
+        public RouterFunction<ServerResponse> stripePaymentWebhookRoute() {
+                return route("stripe_payment_webhook")
+                                .POST("/api/v1/webhooks/payments/STRIPE_TEST_V1", http(paymentServiceUrl))
+                                .build();
+        }
+
+        @Bean
         @Order(10)
         public RouterFunction<ServerResponse> authServiceRoute() {
                 return route("auth_service")

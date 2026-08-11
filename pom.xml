@@ -38,6 +38,7 @@
 		<docker-java.version>3.7.0</docker-java.version>
 		<lombok.version>1.18.42</lombok.version>
 		<archunit.version>1.4.1</archunit.version>
+		<stripe-java.version>31.4.0</stripe-java.version>
 	</properties>
 
 	<dependencyManagement>

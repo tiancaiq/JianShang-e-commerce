@@ -8,6 +8,7 @@ public record PaymentProviderEventRecord(
         String eventType,
         String providerReference,
         String paymentIntentId,
+        String refundId,
         String payloadHash,
         PaymentWebhookOutcome outcome,
         String resultingStatus

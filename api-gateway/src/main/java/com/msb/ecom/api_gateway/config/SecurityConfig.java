@@ -83,7 +83,9 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(csrfRequestHandler)
                         .ignoringRequestMatchers(
-                                new AntPathRequestMatcher("/api/v1/webhooks/business-verification")))
+                                new AntPathRequestMatcher("/api/v1/webhooks/business-verification"),
+                                new AntPathRequestMatcher(
+                                        "/api/v1/webhooks/payments/STRIPE_TEST_V1", "POST")))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(new AntPathRequestMatcher("/api/v1/public/**"))
                         .permitAll()
@@ -94,6 +96,7 @@ public class SecurityConfig {
                                 "/swagger-resources/**", "/aggregate/**",
                                 "/actuator/health/**", "/fallbackRoute",
                                 "/api/v1/webhooks/business-verification",
+                                "/api/v1/webhooks/payments/STRIPE_TEST_V1",
                                 "/api/v1/categories", "/api/v1/categories/**",
                                 "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/session",
                                 "/api/v1/auth/native/login", "/api/v1/auth/native/register",
