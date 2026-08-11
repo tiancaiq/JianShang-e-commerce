@@ -132,14 +132,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          keycloak_admin="RcAdmin-$(openssl rand -hex 18)"
+          commerce_token="$(openssl rand -hex 32)"
+          payment_token="$(openssl rand -hex 32)"
+          buyer_a="RcBuyerA-$(openssl rand -hex 12)"
+          buyer_b="RcBuyerB-$(openssl rand -hex 12)"
+          harbor="RcHarbor-$(openssl rand -hex 12)"
+          shen="RcShen-$(openssl rand -hex 12)"
+          for value in "$keycloak_admin" "$commerce_token" "$payment_token" "$buyer_a" "$buyer_b" "$harbor" "$shen"; do
+            echo "::add-mask::$value"
+          done
           {
-            echo "KEYCLOAK_ADMIN_PASSWORD=RcAdmin-$(openssl rand -hex 18)"
-            echo "COMMERCE_INTERNAL_SERVICE_TOKEN=$(openssl rand -hex 32)"
-            echo "PAYMENT_INTERNAL_SERVICE_TOKEN=$(openssl rand -hex 32)"
-            echo "LOCAL_DEMO_BUYER_PASSWORD=RcBuyerA-$(openssl rand -hex 12)"
-            echo "LOCAL_DEMO_BUYER_B_PASSWORD=RcBuyerB-$(openssl rand -hex 12)"
-            echo "LOCAL_DEMO_HARBOR_PASSWORD=RcHarbor-$(openssl rand -hex 12)"
-            echo "LOCAL_DEMO_SHEN_PASSWORD=RcShen-$(openssl rand -hex 12)"
+            echo "KEYCLOAK_ADMIN_PASSWORD=$keycloak_admin"
+            echo "COMMERCE_INTERNAL_SERVICE_TOKEN=$commerce_token"
+            echo "PAYMENT_INTERNAL_SERVICE_TOKEN=$payment_token"
+            echo "LOCAL_DEMO_BUYER_PASSWORD=$buyer_a"
+            echo "LOCAL_DEMO_BUYER_B_PASSWORD=$buyer_b"
+            echo "LOCAL_DEMO_HARBOR_PASSWORD=$harbor"
+            echo "LOCAL_DEMO_SHEN_PASSWORD=$shen"
           } >> "$GITHUB_ENV"
       - name: Package services
         run: |
