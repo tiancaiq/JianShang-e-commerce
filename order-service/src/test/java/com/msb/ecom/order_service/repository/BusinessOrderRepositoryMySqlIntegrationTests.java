@@ -108,6 +108,23 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
     }
 
     @Test
+    void cancelledFilterIsDistinctFromPendingAcceptance() {
+        Seed cancelled = seedOrder(22, BASE.plusSeconds(1), BUSINESS_ONE);
+        Seed pending = seedOrder(23, BASE, BUSINESS_ONE);
+        jdbc.update("UPDATE business_orders SET cancellation_status = 'CANCELLED' WHERE id = ?",
+                cancelled.firstBusinessOrderId());
+
+        assertThat(repository.findPage(
+                BUSINESS_ONE, "PENDING_ACCEPTANCE", null, null, 10, false))
+                .extracting(BusinessOrderView::businessOrderId)
+                .containsExactly(pending.firstBusinessOrderId());
+        assertThat(repository.findPage(
+                BUSINESS_ONE, "CANCELLED", null, null, 10, false))
+                .extracting(BusinessOrderView::businessOrderId)
+                .containsExactly(cancelled.firstBusinessOrderId());
+    }
+
+    @Test
     void detailContainsOnlyOwnedItemsAndImmutableMinimumAddress() {
         Seed seed = seedOrder(30, BASE, BUSINESS_ONE, BUSINESS_TWO);
 
@@ -146,7 +163,7 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
     }
 
     @Test
-    void queuePlansAvoidFilesortWithAndWithoutStatusFilter() {
+    void queuePlansAvoidFilesortForFulfillmentCancellationAndUnfilteredQueues() {
         seedOrder(50, BASE, BUSINESS_ONE);
 
         List<String> unfilteredExtra = jdbc.query("""
@@ -168,10 +185,21 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
                 (rs, rowNum) -> rs.getString("Extra"),
                 BUSINESS_ONE,
                 "PENDING_ACCEPTANCE");
+        List<String> cancelledExtra = jdbc.query("""
+                        EXPLAIN SELECT id
+                        FROM business_orders FORCE INDEX (idx_business_order_cancellation_queue)
+                        WHERE business_id = ? AND cancellation_status = 'CANCELLED'
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 21
+                        """,
+                (rs, rowNum) -> rs.getString("Extra"),
+                BUSINESS_ONE);
 
         assertThat(unfilteredExtra).noneMatch(extra ->
                 extra != null && extra.contains("Using filesort"));
         assertThat(filteredExtra).noneMatch(extra ->
+                extra != null && extra.contains("Using filesort"));
+        assertThat(cancelledExtra).noneMatch(extra ->
                 extra != null && extra.contains("Using filesort"));
     }
 

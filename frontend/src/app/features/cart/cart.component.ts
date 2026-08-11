@@ -13,6 +13,15 @@ import { CartService } from '../../core/services/cart.service';
 import { ListingService } from '../../core/services/listing.service';
 import { environment } from '../../../environments/environment';
 
+interface CartStoreGroup {
+  key: string;
+  storeName: string;
+  storeSlug: string | null;
+  businessVerified: boolean;
+  location: string;
+  items: CartItem[];
+}
+
 @Component({
   selector: 'app-cart',
   standalone: true,
@@ -55,9 +64,34 @@ import { environment } from '../../../environments/environment';
               <span>{{ cartService.cart()?.totalQuantity }} total</span>
             </div>
 
-            @for (item of cartService.cart()?.items || []; track item.listingId) {
-              @let validation = validationItem(item.listingId);
-              <article
+            @for (group of storeGroups(); track group.key) {
+              <section
+                class="store-group"
+                data-testid="cart-store-group"
+                [attr.aria-label]="'Items from ' + group.storeName">
+                <header class="store-group-header">
+                  <div>
+                    <span>Ships from</span>
+                    @if (group.storeSlug) {
+                      <a [routerLink]="['/stores', group.storeSlug]">{{ group.storeName }}</a>
+                    } @else {
+                      <strong>{{ group.storeName }}</strong>
+                    }
+                  </div>
+                  <div class="store-group-meta">
+                    @if (group.businessVerified) {
+                      <span class="verified">Verified business</span>
+                    }
+                    @if (group.location) {
+                      <span>{{ group.location }}</span>
+                    }
+                    <span>{{ group.items.length }} {{ group.items.length === 1 ? 'item' : 'items' }}</span>
+                  </div>
+                </header>
+
+                @for (item of group.items; track item.listingId) {
+                  @let validation = validationItem(item.listingId);
+                  <article
                 class="packing-card"
                 [class.needs-repair]="validation && validation.status !== 'READY'"
                 [class.ready]="validation?.status === 'READY'">
@@ -70,20 +104,6 @@ import { environment } from '../../../environments/environment';
                 </a>
 
                 <div class="item-main">
-                  <div class="store-stamp">
-                    @if (storeSlug(item, validation)) {
-                      <a [routerLink]="['/stores', storeSlug(item, validation)]">{{ storeLabel(item, validation) }}</a>
-                    } @else {
-                      <span>{{ storeLabel(item, validation) }}</span>
-                    }
-                    @if (businessVerified(item, validation)) {
-                      <span class="verified">Verified</span>
-                    }
-                    @if (storeLocation(item, validation)) {
-                      <span>{{ storeLocation(item, validation) }}</span>
-                    }
-                  </div>
-
                   <a [routerLink]="['/listings', item.listingId]" class="item-title">{{ item.title }}</a>
 
                   <div class="item-facts">
@@ -107,14 +127,14 @@ import { environment } from '../../../environments/environment';
                       title="Decrease quantity"
                       aria-label="Decrease quantity"
                       [disabled]="busy() || item.quantity <= 1"
-                      (click)="changeQuantity(item, item.quantity - 1)">-</button>
+                      (click)="changeQuantity(item, item.quantity - 1, validation)">-</button>
                     <strong aria-live="polite">{{ item.quantity }}</strong>
                     <button
                       type="button"
                       title="Increase quantity"
                       aria-label="Increase quantity"
-                      [disabled]="busy() || item.quantity >= 999"
-                      (click)="changeQuantity(item, item.quantity + 1)">+</button>
+                      [disabled]="!canIncreaseQuantity(item, validation)"
+                      (click)="changeQuantity(item, item.quantity + 1, validation)">+</button>
                   </div>
                 </div>
 
@@ -194,7 +214,9 @@ import { environment } from '../../../environments/environment';
                     }
                   </section>
                 }
-              </article>
+                  </article>
+                }
+              </section>
             }
           </section>
 
@@ -240,7 +262,11 @@ import { environment } from '../../../environments/environment';
                   class="validation-summary"
                   [class.validation-ready]="validation.checkoutReady"
                   [class.validation-problem]="!validation.checkoutReady">
-                  <strong>{{ validation.checkoutReady ? 'Ready for checkout' : 'Needs attention' }}</strong>
+                  <strong>
+                    {{ validation.checkoutReady
+                      ? (buyerCheckoutEnabled ? 'Ready for checkout' : 'Cart checks passed')
+                      : 'Needs attention' }}
+                  </strong>
                   <span>
                     {{ validation.checkoutReady
                       ? 'Current price, stock, store and currency checks passed.'
@@ -264,7 +290,7 @@ import { environment } from '../../../environments/environment';
                   <p class="checkout-copy">
                     {{ buyerCheckoutEnabled
                       ? 'Resolve cart issues before checkout.'
-                      : 'Checkout is not enabled in this cart-only demo.' }}
+                      : 'Checkout is not enabled yet.' }}
                   </p>
                 }
                 <button type="button" class="clear-button" [disabled]="busy()" (click)="clear()">Clear cart</button>
@@ -361,6 +387,63 @@ import { environment } from '../../../environments/environment';
       gap: 0.8rem;
     }
 
+    .store-group {
+      display: grid;
+      gap: 0.72rem;
+      padding-block: 0.25rem 0.85rem;
+      border-bottom: 1px solid var(--market-line);
+    }
+
+    .store-group-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.2rem 0.15rem;
+    }
+
+    .store-group-header > div:first-child {
+      display: grid;
+      gap: 0.18rem;
+    }
+
+    .store-group-header > div:first-child > span {
+      color: #725f7c;
+      font-size: 0.72rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .store-group-header a,
+    .store-group-header strong {
+      color: var(--market-ink);
+      font-family: var(--font-display);
+      font-size: 1.08rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      text-decoration: none;
+    }
+
+    .store-group-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.35rem 0.55rem;
+      color: #6a5874;
+      font-size: 0.8rem;
+      font-weight: 800;
+    }
+
+    .store-group-meta > * + * {
+      padding-left: 0.55rem;
+      border-left: 1px solid rgba(73, 42, 84, 0.16);
+    }
+
+    .store-group-meta .verified {
+      color: #176452;
+      font-weight: 950;
+    }
+
     .section-title {
       grid-template-columns: minmax(0, 1fr) max-content;
       align-items: end;
@@ -418,7 +501,6 @@ import { environment } from '../../../environments/environment';
       gap: 0.44rem;
     }
 
-    .store-stamp,
     .item-facts {
       display: flex;
       flex-wrap: wrap;
@@ -429,15 +511,9 @@ import { environment } from '../../../environments/environment';
       line-height: 1.4;
     }
 
-    .store-stamp > * + *,
     .item-facts > * + * {
       padding-left: 0.55rem;
       border-left: 1px solid rgba(73, 42, 84, 0.16);
-    }
-
-    .store-stamp .verified {
-      color: #176452;
-      font-weight: 950;
     }
 
     .item-title {
@@ -729,7 +805,7 @@ import { environment } from '../../../environments/environment';
       outline-offset: 3px;
     }
 
-    @media (max-width: 900px) {
+    @media (max-width: 1280px) {
       .cart-layout {
         grid-template-columns: 1fr;
       }
@@ -768,10 +844,15 @@ import { environment } from '../../../environments/environment';
 
     @media (max-width: 520px) {
       .cart-header,
-      .section-title {
+      .section-title,
+      .store-group-header {
         align-items: flex-start;
         grid-template-columns: 1fr;
         flex-direction: column;
+      }
+
+      .store-group-meta {
+        justify-content: flex-start;
       }
 
       .packing-card {
@@ -843,11 +924,26 @@ export class CartComponent implements OnInit {
     });
   }
 
-  changeQuantity(item: CartItem, quantity: number): void {
-    if (quantity < 1 || quantity > 999 || this.busy()) {
+  // Uses the latest validation as a UI guard while the backend remains authoritative for stock.
+  changeQuantity(item: CartItem, quantity: number, validation?: CartValidationItem): void {
+    if (quantity < 1
+        || quantity > 999
+        || (validation?.availableQuantity !== null
+          && validation?.availableQuantity !== undefined
+          && quantity > validation.availableQuantity)
+        || this.busy()) {
       return;
     }
     this.runMutation(this.cartService.update(item.listingId, { quantity }), 'Quantity updated.');
+  }
+
+  canIncreaseQuantity(item: CartItem, validation?: CartValidationItem): boolean {
+    if (this.busy() || item.quantity >= 999) {
+      return false;
+    }
+    return validation?.availableQuantity === null
+      || validation?.availableQuantity === undefined
+      || item.quantity < validation.availableQuantity;
   }
 
   remove(item: CartItem): void {
@@ -952,6 +1048,30 @@ export class CartComponent implements OnInit {
     return !!validation
       && ((validation.currentPrice !== null && validation.currentPrice !== item.observedPrice)
         || (validation.currentCurrency !== null && validation.currentCurrency !== item.currency));
+  }
+
+  // Groups buyer-visible lines by the authoritative live store slug without exposing internal IDs.
+  storeGroups(): CartStoreGroup[] {
+    const groups = new Map<string, CartStoreGroup>();
+    for (const item of this.cartService.cart()?.items || []) {
+      const validation = this.validationItem(item.listingId);
+      const storeSlug = this.storeSlug(item, validation);
+      const key = storeSlug ? `store:${storeSlug}` : `listing:${item.listingId}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.items.push(item);
+        continue;
+      }
+      groups.set(key, {
+        key,
+        storeName: this.storeLabel(item, validation),
+        storeSlug,
+        businessVerified: this.businessVerified(item, validation),
+        location: this.storeLocation(item, validation),
+        items: [item],
+      });
+    }
+    return [...groups.values()];
   }
 
   savedTotals(): CartCurrencyTotal[] {

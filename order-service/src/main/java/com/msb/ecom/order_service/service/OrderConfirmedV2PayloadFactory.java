@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 final class OrderConfirmedV2PayloadFactory {
 
     private static final Pattern ULID = Pattern.compile("[0-7][0-9A-HJKMNP-TV-Z]{25}");
+    private static final Pattern BUSINESS_ID = Pattern.compile("[0-9A-Z]{26}");
 
     private OrderConfirmedV2PayloadFactory() {
     }
@@ -37,7 +38,7 @@ final class OrderConfirmedV2PayloadFactory {
                 || businessIds.isEmpty()
                 || businessIds.size() > 50
                 || businessIds.stream().distinct().count() != businessIds.size()
-                || businessIds.stream().anyMatch(id -> !validId(id))
+                || businessIds.stream().anyMatch(id -> !validBusinessId(id))
                 || confirmedAt == null) {
             throw serializationFailure();
         }
@@ -65,6 +66,10 @@ final class OrderConfirmedV2PayloadFactory {
 
     private static boolean validId(String value) {
         return value != null && ULID.matcher(value).matches();
+    }
+
+    private static boolean validBusinessId(String value) {
+        return value != null && BUSINESS_ID.matcher(value).matches();
     }
 
     private static OrderConfirmationException serializationFailure() {

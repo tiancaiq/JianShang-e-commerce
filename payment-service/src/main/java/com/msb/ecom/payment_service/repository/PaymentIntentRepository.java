@@ -54,37 +54,37 @@ public class PaymentIntentRepository {
     }
 
     public Optional<PaymentIntent> find(String paymentIntentId) {
-        return jdbc.query(
+        return withBusinessScopes(jdbc.query(
                 "SELECT * FROM payment_intents WHERE id = ?",
                 (rs, rowNum) -> map(rs),
-                paymentIntentId).stream().findFirst();
+                paymentIntentId).stream().findFirst());
     }
 
     public Optional<PaymentIntent> findByCheckout(String checkoutId) {
-        return jdbc.query(
+        return withBusinessScopes(jdbc.query(
                 "SELECT * FROM payment_intents WHERE checkout_id = ?",
                 (rs, rowNum) -> map(rs),
-                checkoutId).stream().findFirst();
+                checkoutId).stream().findFirst());
     }
 
     public Optional<PaymentIntent> findOwned(String paymentIntentId, String buyerId) {
-        return jdbc.query(
+        return withBusinessScopes(jdbc.query(
                 "SELECT * FROM payment_intents WHERE id = ? AND buyer_id = ?",
                 (rs, rowNum) -> map(rs),
-                paymentIntentId, buyerId).stream().findFirst();
+                paymentIntentId, buyerId).stream().findFirst());
     }
 
     public Optional<PaymentIntent> findByProviderReferenceForUpdate(
             String provider,
             String providerReference) {
-        return jdbc.query("""
+        return withBusinessScopes(jdbc.query("""
                         SELECT * FROM payment_intents
                         WHERE provider = ? AND provider_reference = ?
                         FOR UPDATE
                         """,
                 (rs, rowNum) -> map(rs),
                 provider,
-                providerReference).stream().findFirst();
+                providerReference).stream().findFirst());
     }
 
     // Uses the aggregate version and source status to reject concurrent state writers.
@@ -336,15 +336,14 @@ public class PaymentIntentRepository {
     }
 
     private PaymentIntent map(ResultSet rs) throws SQLException {
-        String id = rs.getString("id");
         return new PaymentIntent(
-                id,
+                rs.getString("id"),
                 rs.getString("checkout_id"),
                 rs.getLong("checkout_version"),
                 rs.getString("checkout_snapshot_hash"),
                 rs.getString("buyer_id"),
                 rs.getString("caller_scope"),
-                businessIds(id),
+                List.of(),
                 rs.getBigDecimal("amount"),
                 rs.getString("currency"),
                 rs.getString("payment_method_type"),
@@ -361,6 +360,18 @@ public class PaymentIntentRepository {
                 rs.getString("safe_error_message"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant());
+    }
+
+    // Loads child scopes only after MySQL has closed the parent result set on the transaction connection.
+    private Optional<PaymentIntent> withBusinessScopes(Optional<PaymentIntent> intent) {
+        return intent.map(current -> new PaymentIntent(
+                current.id(), current.checkoutId(), current.checkoutVersion(),
+                current.checkoutSnapshotHash(), current.buyerId(), current.callerScope(),
+                businessIds(current.id()), current.amount(), current.currency(),
+                current.paymentMethodType(), current.captureMethod(), current.merchantOfRecord(),
+                current.fundsFlow(), current.provider(), current.providerReference(),
+                current.providerActionType(), current.status(), current.version(), current.expiresAt(),
+                current.safeErrorCode(), current.safeErrorMessage(), current.createdAt(), current.updatedAt()));
     }
 
     private List<String> businessIds(String paymentIntentId) {

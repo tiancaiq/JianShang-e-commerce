@@ -322,10 +322,11 @@ services:
       CHAT_SERVICE_URL: http://chat-service:8092
       AUTH_SERVICE_URL: http://auth-service:8085
       AGENT_SERVICE_URL: http://agent-service:8086
-      ORDER_SERVICE_URL: http://order-service-disabled:8081
+      ORDER_SERVICE_URL: ${ORDER_SERVICE_URL:-http://order-service-disabled:8081}
       INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
       PAYMENT_SERVICE_URL: http://payment-service-disabled:8084
       GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}
+      GATEWAY_FEATURE_CART: ${GATEWAY_FEATURE_CART:-false}
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
       KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://keycloak:8080/realms/msb-local}

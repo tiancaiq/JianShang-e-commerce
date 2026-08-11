@@ -1,6 +1,10 @@
 export type CheckoutStatus =
   | 'RESERVING'
   | 'PENDING_PAYMENT'
+  | 'PAYMENT_PROCESSING'
+  | 'PAYMENT_REVIEW'
+  | 'REFUND_REQUIRED'
+  | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
   | 'EXPIRED';
@@ -57,6 +61,7 @@ export interface CheckoutItem {
   listingId: string;
   businessId: string;
   storeId: string;
+  storeName: string | null;
   catalogVersion: number;
   title: string;
   sku: string | null;
@@ -88,4 +93,28 @@ export interface CheckoutPolicy {
   shippingText: string;
   cancellationText: string;
   returnText: string;
+}
+
+export interface CheckoutPaymentIntent {
+  id: string;
+  checkoutId: string;
+  status: 'REQUIRES_ACTION' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+  version: number;
+  amount: number;
+  currency: string;
+  expiresAt: string;
+  action: { type: string; reference: string } | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface DemoPaymentCompletion {
+  paymentIntentId: string;
+  status: string;
+  outcome: string;
+  replayed: boolean;
+}
+
+export interface CheckoutOrderResolution {
+  orderId: string | null;
+  confirmed: boolean;
 }

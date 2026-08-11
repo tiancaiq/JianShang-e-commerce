@@ -17,16 +17,22 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 public class CartService {
 
     private static final Logger log = LoggerFactory.getLogger(CartService.class);
+    private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("[A-Za-z0-9._:-]{8,128}");
 
     private final CurrentActorProvider currentActorProvider;
     private final CartRepository repository;
@@ -65,50 +71,88 @@ public class CartService {
     }
 
     // Adds or replaces one business item only after current catalog and stock checks.
-    public CartResponse add(String listingId, int quantity) {
+    public CartResponse add(String listingId, int quantity, String ifMatch, String idempotencyKey) {
         String userId = userId();
         String normalizedListingId = listingId(listingId);
+        long expectedVersion = expectedVersion(ifMatch);
+        String key = idempotencyKey(idempotencyKey);
+        String requestHash = requestHash("ADD", normalizedListingId, quantity, expectedVersion);
+        CartDocument replay = repository.replay(userId, key, requestHash).orElse(null);
+        if (replay != null) {
+            return response(replay);
+        }
         requireQuantity(quantity);
         ProductCommerceClient.ProductContext product = requireEligibleProduct(normalizedListingId);
         requireAvailable(product, quantity);
+        var now = clock.instant();
         CartDocument cart = repository.upsert(userId, new CartStoredItem(
                 normalizedListingId,
                 quantity,
                 product.priceAmount(),
                 product.currency(),
-                clock.instant()));
+                now,
+                now),
+                expectedVersion,
+                key,
+                requestHash);
         log.info("Cart item stored userId={} listingId={} quantity={} version={}",
                 userId, normalizedListingId, quantity, cart.version());
         return response(cart);
     }
 
     // Replaces quantity while preserving the originally observed cart price.
-    public CartResponse update(String listingId, int quantity) {
+    public CartResponse update(String listingId, int quantity, String ifMatch, String idempotencyKey) {
         String userId = userId();
         String normalizedListingId = listingId(listingId);
+        long expectedVersion = expectedVersion(ifMatch);
+        String key = idempotencyKey(idempotencyKey);
+        String requestHash = requestHash("UPDATE", normalizedListingId, quantity, expectedVersion);
+        CartDocument replay = repository.replay(userId, key, requestHash).orElse(null);
+        if (replay != null) {
+            return response(replay);
+        }
         requireQuantity(quantity);
         ProductCommerceClient.ProductContext product = requireEligibleProduct(normalizedListingId);
         requireAvailable(product, quantity);
-        CartDocument cart = repository.replaceQuantity(userId, normalizedListingId, quantity);
+        CartDocument cart = repository.replaceQuantity(
+                userId,
+                normalizedListingId,
+                quantity,
+                expectedVersion,
+                key,
+                requestHash);
         log.info("Cart quantity replaced userId={} listingId={} quantity={} version={}",
                 userId, normalizedListingId, quantity, cart.version());
         return response(cart);
     }
 
-    public CartResponse remove(String listingId) {
+    public CartResponse remove(String listingId, String ifMatch, String idempotencyKey) {
         String userId = userId();
         String normalizedListingId = listingId(listingId);
-        CartDocument cart = repository.remove(userId, normalizedListingId);
+        long expectedVersion = expectedVersion(ifMatch);
+        String key = idempotencyKey(idempotencyKey);
+        CartDocument cart = repository.remove(
+                userId,
+                normalizedListingId,
+                expectedVersion,
+                key,
+                requestHash("REMOVE", normalizedListingId, null, expectedVersion));
         log.info("Cart item removed userId={} listingId={} version={}",
                 userId, normalizedListingId, cart.version());
         return response(cart);
     }
 
-    public CartResponse clear() {
+    public CartResponse clear(String ifMatch, String idempotencyKey) {
         String userId = userId();
-        repository.clear(userId);
-        log.info("Cart cleared userId={}", userId);
-        return response(CartDocument.empty());
+        long expectedVersion = expectedVersion(ifMatch);
+        String key = idempotencyKey(idempotencyKey);
+        CartDocument cart = repository.clear(
+                userId,
+                expectedVersion,
+                key,
+                requestHash("CLEAR", null, null, expectedVersion));
+        log.info("Cart cleared userId={} version={}", userId, cart.version());
+        return response(cart);
     }
 
     private ProductCommerceClient.ProductContext requireEligibleProduct(String listingId) {
@@ -183,7 +227,8 @@ public class CartService {
 
     private ProductCommerceClient.ProductContext displayProduct(String listingId) {
         try {
-            return productClient.find(listingId).orElse(null);
+            var product = productClient.find(listingId);
+            return product == null ? null : product.orElse(null);
         } catch (CartException exception) {
             log.warn("Cart display context unavailable listingId={} code={}", listingId, exception.code());
             return null;
@@ -201,6 +246,59 @@ public class CartService {
     private void requireQuantity(int quantity) {
         if (quantity < 1 || quantity > maxQuantity) {
             throw new IllegalArgumentException("Quantity must be between 1 and " + maxQuantity + ".");
+        }
+    }
+
+    private long expectedVersion(String ifMatch) {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new CartException(
+                    HttpStatus.BAD_REQUEST,
+                    "CART_VERSION_REQUIRED",
+                    "If-Match must contain the current cart version.");
+        }
+        String value = ifMatch.trim();
+        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
+            value = value.substring(1, value.length() - 1);
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed < 0) {
+                throw new NumberFormatException("negative");
+            }
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new CartException(
+                    HttpStatus.BAD_REQUEST,
+                    "CART_VERSION_REQUIRED",
+                    "If-Match must contain the current cart version.");
+        }
+    }
+
+    private String idempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || !IDEMPOTENCY_KEY.matcher(idempotencyKey).matches()) {
+            throw new CartException(
+                    HttpStatus.BAD_REQUEST,
+                    "CART_IDEMPOTENCY_KEY_REQUIRED",
+                    "A valid Idempotency-Key is required.");
+        }
+        return idempotencyKey;
+    }
+
+    private String requestHash(String operation, String listingId, Integer quantity, long expectedVersion) {
+        return sha256(String.join(
+                "\n",
+                operation,
+                listingId == null ? "" : listingId,
+                quantity == null ? "" : Integer.toString(quantity),
+                Long.toString(expectedVersion)));
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required for cart idempotency.", exception);
         }
     }
 }

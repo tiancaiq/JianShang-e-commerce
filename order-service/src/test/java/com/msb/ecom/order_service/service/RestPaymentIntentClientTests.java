@@ -75,7 +75,9 @@ class RestPaymentIntentClientTests {
                             "type":"FAKE_HOSTED_ACTION",
                             "reference":"fake-action-reference"
                           },
-                          "error":null
+                          "error":null,
+                          "createdAt":"2026-07-20T01:00:00Z",
+                          "updatedAt":"2026-07-20T01:00:01Z"
                         }
                         """, MediaType.APPLICATION_JSON));
 

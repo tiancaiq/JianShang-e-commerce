@@ -3,6 +3,8 @@ package com.msb.ecom.order_service.controller;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.order_service.dto.CheckoutPaymentIntentResponse;
 import com.msb.ecom.order_service.dto.CheckoutResponse;
+import com.msb.ecom.order_service.dto.CheckoutOrderResolutionResponse;
+import com.msb.ecom.order_service.dto.DemoPaymentCompletionResponse;
 import com.msb.ecom.order_service.dto.CreateCheckoutRequest;
 import com.msb.ecom.order_service.service.CheckoutPaymentService;
 import com.msb.ecom.order_service.service.CheckoutService;
@@ -68,5 +70,22 @@ public class CheckoutController {
                 checkoutId,
                 idempotencyKey,
                 CorrelationIdFilter.current(servletRequest));
+    }
+
+    @PostMapping("/{checkoutId}/complete-demo-payment")
+    public DemoPaymentCompletionResponse completeDemoPayment(
+            @PathVariable String checkoutId,
+            HttpServletRequest servletRequest) {
+        return checkoutPaymentService.completeDemo(
+                checkoutId,
+                CorrelationIdFilter.current(servletRequest));
+    }
+
+    @GetMapping("/{checkoutId}/confirmed-order")
+    public ResponseEntity<CheckoutOrderResolutionResponse> confirmedOrder(
+            @PathVariable String checkoutId) {
+        CheckoutOrderResolutionResponse response = checkoutPaymentService.confirmedOrder(checkoutId);
+        return ResponseEntity.status(response.confirmed() ? HttpStatus.OK : HttpStatus.ACCEPTED)
+                .body(response);
     }
 }

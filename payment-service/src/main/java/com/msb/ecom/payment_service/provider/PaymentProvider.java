@@ -7,4 +7,8 @@ public interface PaymentProvider {
     PaymentProviderResult createIntent(PaymentProviderCommand command);
 
     String actionReference(String paymentIntentId);
+
+    default PaymentRefundResult refund(PaymentRefundCommand command) {
+        throw new UnsupportedOperationException("Refunds are not supported by this provider.");
+    }
 }

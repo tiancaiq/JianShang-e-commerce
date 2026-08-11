@@ -3,6 +3,7 @@ package com.msb.ecom.order_service.repository;
 import com.msb.ecom.order_service.model.CheckoutAggregate;
 import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
+import com.msb.ecom.order_service.model.CartStoredItem;
 import com.msb.ecom.order_service.config.CheckoutPaymentProperties;
 import com.msb.ecom.order_service.config.CheckoutProperties;
 import com.msb.ecom.order_service.service.BuyerIdentityClient;
@@ -28,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 class CheckoutRepositoryIntegrationTests {
 
@@ -71,6 +73,7 @@ class CheckoutRepositoryIntegrationTests {
         assertThat(stored.address().sourceVersion()).isEqualTo(2);
         assertThat(stored.items()).singleElement().satisfies(item -> {
             assertThat(item.sku()).isEqualTo("SKU-1");
+            assertThat(item.storeName()).isEqualTo("Demo Store");
             assertThat(item.condition()).isEqualTo("NEW");
             assertThat(item.policyVersion()).isEqualTo("LOCAL_DEMO_V1");
         });
@@ -156,6 +159,41 @@ class CheckoutRepositoryIntegrationTests {
     }
 
     @Test
+    void purchasedCartWorkBecomesVisibleOnlyAfterCheckoutCompletes() {
+        Instant now = Instant.parse("2026-07-19T12:00:00Z");
+        String checkoutId = "01C00000000000000000000001";
+        repository.insert(checkoutAt(checkoutId, "01U00000000000000000000001", "1", now));
+        repository.insertCartReconciliation(
+                checkoutId,
+                "keycloak-subject-1",
+                3,
+                List.of(new CartStoredItem(
+                        "01L00000000000000000000001",
+                        2,
+                        new BigDecimal("12.5000"),
+                        "USD",
+                        now.minusSeconds(60),
+                        now.minusSeconds(30))),
+                now);
+
+        assertThat(repository.findPendingCartReconciliations(now, 20)).isEmpty();
+        repository.markPending(checkoutId, "01R00000000000000000000001", "ACTIVE", 1, now);
+        repository.markPaymentProcessing(checkoutId, now);
+        repository.markCompleted(checkoutId, "COMMITTED", 2, now);
+
+        assertThat(repository.findPendingCartReconciliations(now, 20)).singleElement()
+                .satisfies(work -> {
+                    assertThat(work.cartOwnerKey()).isEqualTo("keycloak-subject-1");
+                    assertThat(work.cartVersion()).isEqualTo(3);
+                    assertThat(work.lines()).singleElement()
+                            .satisfies(line -> assertThat(line.lineIdentity())
+                                    .isEqualTo(now.minusSeconds(30)));
+                });
+        assertThat(repository.markCartReconciled(checkoutId, now.plusSeconds(1))).isEqualTo(1);
+        assertThat(repository.findPendingCartReconciliations(now.plusSeconds(1), 20)).isEmpty();
+    }
+
+    @Test
     void paymentAdapterReadsThePersistedPendingSnapshotWithoutClientOwnedAmounts() {
         Instant now = Instant.now();
         String checkoutId = "01C00000000000000000000001";
@@ -232,7 +270,8 @@ class CheckoutRepositoryIntegrationTests {
                         "payment-test-token",
                         Duration.ofSeconds(1),
                         Duration.ofSeconds(2)),
-                payments);
+                payments,
+                mock(OrderConfirmationRepository.class));
 
         var response = service.create(
                 checkoutId,
@@ -307,6 +346,7 @@ class CheckoutRepositoryIntegrationTests {
                         "01L00000000000000000000001",
                         "01B00000000000000000000001",
                         "01S00000000000000000000001",
+                        "Demo Store",
                         7,
                         "Store item",
                         "SKU-1",

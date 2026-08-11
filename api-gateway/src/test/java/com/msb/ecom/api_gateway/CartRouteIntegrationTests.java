@@ -51,6 +51,7 @@ class CartRouteIntegrationTests {
     private static final AtomicReference<String> ROLES = new AtomicReference<>();
     private static final AtomicReference<String> CORRELATION_ID = new AtomicReference<>();
     private static final AtomicReference<String> METHOD = new AtomicReference<>();
+    private static final AtomicReference<String> REQUEST_BODY = new AtomicReference<>();
     private static final AtomicInteger REQUESTS = new AtomicInteger();
     private static final HttpServer ORDER_UPSTREAM = startOrderUpstream();
 
@@ -79,6 +80,7 @@ class CartRouteIntegrationTests {
         ROLES.set(null);
         CORRELATION_ID.set(null);
         METHOD.set(null);
+        REQUEST_BODY.set(null);
         REQUESTS.set(0);
         when(jwtDecoder.decode(anyString())).thenReturn(
                 Jwt.withTokenValue("relayed-cart-token")
@@ -149,6 +151,32 @@ class CartRouteIntegrationTests {
                 .statusCode(200);
 
         assertThat(METHOD.get()).isEqualTo("POST");
+        assertThat(REQUEST_BODY.get())
+                .isEqualTo("{\"listingId\":\"01L00000000000000000000001\",\"quantity\":1}");
+        assertThat(REQUESTS.get()).isEqualTo(1);
+    }
+
+    @Test
+    void authenticatedCsrfReadyCartPatchRelaysJsonBody() {
+        Response session = RestAssured.given()
+                .header("Authorization", "Bearer relayed-cart-token")
+                .when()
+                .get("/api/v1/auth/session");
+        String csrfToken = session.jsonPath().getString("csrf.token");
+
+        RestAssured.given()
+                .header("Authorization", "Bearer relayed-cart-token")
+                .header("X-CSRF-TOKEN", csrfToken)
+                .cookies(session.cookies())
+                .contentType("application/json")
+                .body("{\"quantity\":2}")
+                .when()
+                .patch("/api/v1/cart/items/01L00000000000000000000001")
+                .then()
+                .statusCode(200);
+
+        assertThat(METHOD.get()).isEqualTo("PATCH");
+        assertThat(REQUEST_BODY.get()).isEqualTo("{\"quantity\":2}");
         assertThat(REQUESTS.get()).isEqualTo(1);
     }
 
@@ -195,6 +223,7 @@ class CartRouteIntegrationTests {
         KEYCLOAK_SUB.set(exchange.getRequestHeaders().getFirst("X-Keycloak-Sub"));
         ROLES.set(exchange.getRequestHeaders().getFirst("X-Roles"));
         CORRELATION_ID.set(exchange.getRequestHeaders().getFirst("X-Correlation-Id"));
+        REQUEST_BODY.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         byte[] body = "{\"version\":0,\"expiresAt\":null,\"itemCount\":0,\"totalQuantity\":0,\"totals\":[],\"items\":[]}"
                 .getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");

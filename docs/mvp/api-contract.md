@@ -2061,7 +2061,10 @@ POST /checkouts/{checkoutId}/cancel
 ```
 
 Create request references cart and address ID. Response contains authoritative
-snapshots, totals, expiry, and reservation state.
+snapshots, totals, expiry, and reservation state. Each item includes the
+immutable nullable `storeName` captured with its `storeId`; clients use the
+name when present and a neutral `Store` fallback rather than displaying the
+opaque ID as a heading.
 
 The approved local-demo implementation uses `ZERO_LOCAL_DEMO_V1` tax,
 `FREE_LOCAL_DEMO_V1` shipping, immutable platform policy
@@ -2166,6 +2169,13 @@ already validated while creating the payment intent. The event handler then:
   processed-event completion, the unchanged version-1 `order.confirmed` outbox
   row, and a notification-compatible version-2 row.
 
+Checkout creation also persists one Order-owned cart-reconciliation command.
+After checkout reaches `COMPLETED`, an independent retry worker atomically
+removes only purchased Redis lines whose mutation identity still matches the
+checkout snapshot. A wholly unchanged cart is removed by its exact cart
+version; buyer changes made after checkout began are preserved. Redis failure
+does not change payment or order outcome.
+
 `V2-NOT-01A` adds a second, backward-compatible internal
 `order.confirmed` version-2 outbox event. Version 1 remains unchanged and is
 unsupported by Notification Service. The version-2 payload retains the
@@ -2219,6 +2229,7 @@ The list response is:
         {
           "businessOrderId": "01...",
           "businessId": "01...",
+          "storeName": "Demo Store",
           "status": "PENDING_ACCEPTANCE",
           "totalAmount": 25.0000,
           "currency": "USD"
@@ -2251,6 +2262,7 @@ persisted buyer-facing `storeId` and `items`:
       "businessOrderId": "01...",
       "businessId": "01...",
       "storeId": "01...",
+      "storeName": "Demo Store",
       "status": "PENDING_ACCEPTANCE",
       "totalAmount": 25.0000,
       "currency": "USD",
@@ -2325,12 +2337,18 @@ pagination. `status` is optional and accepts exactly:
 ```text
 PENDING_ACCEPTANCE
 ACCEPTED
-PARTIALLY_SHIPPED
+PROCESSING
 SHIPPED
 DELIVERED
-CANCELLATION_PENDING
 CANCELLED
 ```
+
+`CANCELLED` is the seller-facing terminal queue filter and matches stored
+`business_orders.cancellation_status = 'CANCELLED'`. The other values match
+stored fulfillment status and exclude finally cancelled groups. Response
+`status` remains the stored fulfillment status so fulfillment history is not
+rewritten; seller clients render `Cancelled` as the primary operational status
+whenever `cancellationStatus` is `CANCELLED`.
 
 Queue items contain only business order ID and seller-visible number,
 business/store IDs, stored fulfillment and cancellation statuses, buyer order
@@ -2345,10 +2363,12 @@ price/currency, quantity, line total, and policy version), and the minimum
 immutable shipping snapshot (`recipientName`, phone, address lines, city,
 region, postal code, and country code).
 
+Detail also returns the business-group optimistic `version`, safe status
+timeline (`status`, `occurredAt`), and optional single manual shipment snapshot.
 Neither response exposes buyer identity or email, address-book source
 identifiers, payment intent/provider/event data, hashes, leases, idempotency
-records, outbox/history internals, sibling business groups, shipments, or an
-invented aggregate version. Malformed IDs, status, cursor, and limit return
+records, outbox/history actor internals, or sibling business groups. Malformed
+IDs, status, cursor, and limit return
 their bounded `BUSINESS_ORDER_*_INVALID` errors. Auth or Order dependency
 failure returns `503 BUSINESS_ORDERS_DEPENDENCY_UNAVAILABLE`.
 
@@ -2375,14 +2395,15 @@ Retry requires `FINANCE_ADMIN` or a narrower configured permission.
 
 ```text
 POST /businesses/{businessId}/orders/{businessOrderId}/accept
+POST /businesses/{businessId}/orders/{businessOrderId}/processing
 POST /businesses/{businessId}/orders/{businessOrderId}/shipments
-POST /businesses/{businessId}/shipments/{shipmentId}/mark-shipped
-GET  /orders/{orderId}/shipments
-POST /webhooks/shipping
+POST /businesses/{businessId}/orders/{businessOrderId}/delivery-demo
 ```
 
-Shipment create request includes carrier, tracking number, and item quantities.
-State-changing commands require idempotency.
+The bounded shipment request includes manual carrier/service display names,
+tracking number, and shipped time for the whole group. State-changing commands
+require idempotency and optimistic `If-Match`. Multiple/partial shipments,
+carrier APIs/webhooks, and labels remain deferred.
 
 `V2-SHP-01A` defines the first command as authenticated and independently
 default disabled through `business-orders.acceptance-enabled=false`. Disabled
@@ -2542,6 +2563,43 @@ for POST commands, and uses the standard circuit-breaker fallback. The Angular
 notification center is also false by default; when enabled it calls only the
 three NOT-01B routes, renders only `ORDER_CONFIRMED_V1`, allowlists `/account`,
 and fails closed for unsafe routes, corrupt args, or internal fields.
+
+`V2-NOT-01D` expands the same default-off boundary with a count route and
+business-scoped seller routes:
+
+```text
+GET   /api/v1/notifications/unread-count
+GET   /api/v1/businesses/{businessId}/notifications?cursor=&limit=
+GET   /api/v1/businesses/{businessId}/notifications/unread-count
+POST  /api/v1/businesses/{businessId}/notifications/{notificationId}/read
+POST  /api/v1/businesses/{businessId}/notifications/read-all
+```
+
+Unread-count responses are `{"data":{"unreadCount":N}}` and always come
+from Notification-owned SQL. Buyer calls resolve the active user through the
+existing Auth bearer-relay contract. Business calls additionally resolve the
+current membership through Auth and require active `ORDER_VIEW` or
+`ORDER_FULFILL` permission. The requested business ID is the SQL recipient
+scope; client-supplied user, role, or membership headers are never trusted.
+Missing and cross-scope notification IDs return the same safe
+`404 NOTIFICATION_NOT_FOUND` response.
+
+Supported presentation types are `BUYER_ORDER_CONFIRMED`,
+`BUYER_ORDER_CANCELLED`, `BUYER_REFUND_COMPLETED`, `BUYER_ORDER_ACCEPTED`,
+`BUYER_ORDER_PROCESSING`, `BUYER_ORDER_SHIPPED`, `BUYER_ORDER_DELIVERED`,
+`SELLER_NEW_ORDER`, and `SELLER_ORDER_CANCELLED`. Buyer safe routes are exactly
+`/account/orders/{orderId}`; seller safe routes are exactly
+`/seller/orders/{businessOrderId}`. Presentation arguments contain only the
+required canonical order IDs and optional bounded store display name. The
+Order detail endpoints perform their normal authorization after navigation.
+
+The default-off internal `POST /api/v1/internal/notification-events` accepts
+only the service-token-authenticated, versioned commerce projection contract.
+It returns `202` for newly created and identical replayed sources, `409` for a
+same-event-ID hash conflict, `422` for nonretryable invalid mappings, `503` for
+retryable persistence failure, and hidden `404` while disabled. It is not a
+gateway/browser route. Order's scheduled outbox adapter is the only runtime
+caller in this slice.
 
 These preference routes remain deferred:
 
@@ -3208,3 +3266,21 @@ Version-1 payload is reference-only:
 
 Source bodies, category snapshots, admin identity, and credentials never
 appear in the event.
+
+## Post-delivery business-group returns (V2-RET-01)
+
+```text
+GET  /api/v1/orders/{orderId}/groups/{businessOrderId}/return
+POST /api/v1/orders/{orderId}/groups/{businessOrderId}/returns
+GET  /api/v1/businesses/{businessId}/orders/{businessOrderId}/return
+POST /api/v1/businesses/{businessId}/orders/{businessOrderId}/returns/{returnId}/authorize
+POST /api/v1/businesses/{businessId}/orders/{businessOrderId}/returns/{returnId}/receive
+```
+
+Mutations require `If-Match` and `Idempotency-Key`. Buyer creation accepts one
+allowlisted reason and an optional 500-character comment. Seller receipt accepts
+only `RESTOCK_SELLABLE` or `DO_NOT_RESTOCK`. Missing and cross-scope resources
+are non-enumerating. Browser requests never contain refund amount, currency,
+payment intent, provider identifiers, business membership, inventory movement,
+or outbox metadata. Responses expose only policy, bounded state/timeline, demo
+shipment disclosure, and safe refund projection.

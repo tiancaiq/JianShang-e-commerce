@@ -1,7 +1,7 @@
 # V2-CART-03A Cart-Only Capability Boundary And Business Add-To-Cart Entry
 
-Status: implemented locally; runtime/browser publication remains deferred until
-the matching gateway and frontend release gates are run.
+Status: implemented and locally deployed with cart enabled in the production
+frontend build; checkout remains disabled.
 
 Release: V2.
 
@@ -28,8 +28,9 @@ Included:
   gateway flag is enabled.
 - Checkout routes remain disabled unless the checkout gateway flag is enabled.
 - The Angular cart route, navbar badge, and listing-detail purchase box are
-  controlled by one false-default frontend cart capability.
-- A `demo-cart` Angular build enables cart only; checkout stays disabled.
+  controlled by one frontend cart capability.
+- Production and `demo-cart` Angular builds enable cart only; checkout stays
+  disabled. Development remains disabled for controlled source work.
 - Business listing detail pages render a compact purchase box with display
   price, store identity, quantity `1..999`, Add to cart, added/error state,
   and a Go to cart link after success.
@@ -62,8 +63,8 @@ Required focused checks:
   strips spoofed identity headers, requires CSRF for POST, propagates
   correlation, and checkout remains disabled.
 - Gateway defaults: cart and checkout are both disabled.
-- Frontend defaults: cart route/nav/listing purchase box are absent and make
-  no cart requests.
+- Frontend disabled configuration: cart route/nav/listing purchase box are
+  absent and make no cart requests.
 - Frontend opt-in: business listing detail renders the purchase box, clamps
   quantity to `1..999`, sends only listing ID and quantity, refreshes cart
   state after success, and shows no individual listing cart action.

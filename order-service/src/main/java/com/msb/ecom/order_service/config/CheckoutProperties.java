@@ -13,6 +13,7 @@ public class CheckoutProperties {
     public static final String LOCAL_TAX_ADAPTER = "ZERO_LOCAL_DEMO_V1";
     public static final String LOCAL_SHIPPING_ADAPTER = "FREE_LOCAL_DEMO_V1";
     public static final String LOCAL_POLICY_VERSION = "LOCAL_DEMO_V1";
+    public static final String LOCAL_CANCELLATION_POLICY_VERSION = "LOCAL_DEMO_CANCELLATION_V1";
 
     private final boolean enabled;
     private final String calculationMode;
@@ -51,7 +52,8 @@ public class CheckoutProperties {
         if (!"LOCAL_DEMO".equals(this.calculationMode)
                 || !LOCAL_TAX_ADAPTER.equals(this.taxAdapter)
                 || !LOCAL_SHIPPING_ADAPTER.equals(this.shippingAdapter)
-                || !LOCAL_POLICY_VERSION.equals(this.policyVersion)) {
+                || !(LOCAL_POLICY_VERSION.equals(this.policyVersion)
+                        || LOCAL_CANCELLATION_POLICY_VERSION.equals(this.policyVersion))) {
             throw new IllegalArgumentException("Only the approved local-demo checkout configuration is implemented.");
         }
         if (environment.acceptsProfiles(Profiles.of("prod", "production"))) {

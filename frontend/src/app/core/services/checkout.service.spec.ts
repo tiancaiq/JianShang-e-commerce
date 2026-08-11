@@ -57,4 +57,19 @@ describe('CheckoutService', () => {
     expect(request.request.headers.get('Idempotency-Key')).toBeTruthy();
     request.flush({});
   });
+
+  it('derives the payment-intent key from checkout identity so refreshes replay safely', () => {
+    const checkoutId = '01C00000000000000000000001';
+
+    service.createPaymentIntent(checkoutId).subscribe();
+    const request = http.expectOne(
+      `${environment.apiGatewayUrl}/api/v1/checkouts/${checkoutId}/payment-intent`,
+    );
+
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    expect(request.request.headers.get('Idempotency-Key'))
+      .toBe(`checkout-payment:${checkoutId}`);
+    request.flush({});
+  });
 });

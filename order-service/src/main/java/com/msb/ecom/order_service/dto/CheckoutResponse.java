@@ -51,6 +51,7 @@ public record CheckoutResponse(
             String listingId,
             String businessId,
             String storeId,
+            String storeName,
             long catalogVersion,
             String title,
             String sku,

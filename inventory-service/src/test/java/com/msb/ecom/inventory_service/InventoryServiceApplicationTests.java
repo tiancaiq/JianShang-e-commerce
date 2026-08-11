@@ -42,7 +42,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "commerce.internal-service-token=test-commerce-token",
-        "inventory.reservations.expiry-enabled=false"
+        "inventory.reservations.expiry-enabled=false",
+        "inventory.cancellation-restock.enabled=true",
+        "inventory.return-restock-enabled=true"
 })
 @AutoConfigureMockMvc
 class InventoryServiceApplicationTests {
@@ -83,6 +85,8 @@ class InventoryServiceApplicationTests {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("delete from inventory_return_restocks");
+        jdbcTemplate.update("delete from inventory_cancellation_restocks");
         jdbcTemplate.update("delete from inventory_reservation_history");
         jdbcTemplate.update("delete from inventory_reservation_items");
         jdbcTemplate.update("delete from inventory_reservations");
@@ -306,6 +310,96 @@ class InventoryServiceApplicationTests {
         assertBalance(LISTING_ID, 5, 0, 2);
         assertEventCount("inventory.reservation.committed.v1", 1);
         assertCount("inventory_reservation_history", 2);
+    }
+
+    @Test
+    void cancellationRestockRestoresCommittedMultiLineQuantitiesExactlyOnce() throws Exception {
+        initialize("initialize-cancel-1", LISTING_ID, "{\"onHand\":8,\"note\":null}")
+                .andExpect(status().isCreated());
+        initialize("initialize-cancel-2", SECOND_LISTING_ID, "{\"onHand\":4,\"note\":null}")
+                .andExpect(status().isCreated());
+        String items = """
+                {"listingId":"%s","quantity":3},
+                {"listingId":"%s","quantity":2}
+                """.formatted(LISTING_ID, SECOND_LISTING_ID);
+        String reservationId = responseId(reservation(
+                "reserve-cancel", reservationBody(
+                        "01C00000000000000000000020", Instant.now().plusSeconds(3600), items))
+                .andExpect(status().isCreated()).andReturn());
+        commit(reservationId, "commit-cancel").andExpect(status().isOk());
+        assertBalance(LISTING_ID, 5, 0, 2);
+        assertBalance(SECOND_LISTING_ID, 2, 0, 2);
+
+        String body = """
+                {"orderId":"01K00000000000000000000020",
+                 "cancellationRequestId":"01K00000000000000000000021"}
+                """;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post(
+                            "/api/v1/internal/inventory/reservations/{id}/cancellation-restocks",
+                            reservationId)
+                            .header("X-Internal-Service-Token", "test-commerce-token")
+                            .header("Idempotency-Key", "cancel-restock-key-20")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status", equalTo("COMPLETED")))
+                    .andExpect(jsonPath("$.restoredQuantity", equalTo(5)));
+        }
+
+        assertBalance(LISTING_ID, 8, 0, 3);
+        assertBalance(SECOND_LISTING_ID, 4, 0, 3);
+        assertCount("inventory_cancellation_restocks", 1);
+        Integer movements = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM inventory_movements
+                WHERE reason_code = 'ORDER_CANCELLATION_RESTOCK'
+                  AND note LIKE '%01K00000000000000000000020%'
+                """, Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(2, movements);
+    }
+
+    @Test
+    void customerReturnRestockRestoresOnlyTheCommandedBusinessGroupExactlyOnce() throws Exception {
+        initialize("initialize-return-1", LISTING_ID, "{\"onHand\":8,\"note\":null}")
+                .andExpect(status().isCreated());
+        initialize("initialize-return-2", SECOND_LISTING_ID, "{\"onHand\":4,\"note\":null}")
+                .andExpect(status().isCreated());
+        String items = """
+                {"listingId":"%s","quantity":3},
+                {"listingId":"%s","quantity":2}
+                """.formatted(LISTING_ID, SECOND_LISTING_ID);
+        String reservationId = responseId(reservation(
+                "reserve-return", reservationBody(
+                        "01C00000000000000000000030", Instant.now().plusSeconds(3600), items))
+                .andExpect(status().isCreated()).andReturn());
+        commit(reservationId, "commit-return").andExpect(status().isOk());
+
+        String body = """
+                {"returnId":"01K00000000000000000000031",
+                 "orderId":"01K00000000000000000000032",
+                 "businessId":"%s"}
+                """.formatted(BUSINESS_ID);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/v1/internal/inventory/reservations/{id}/return-restocks",
+                            reservationId)
+                            .header("X-Internal-Service-Token", "test-commerce-token")
+                            .header("Idempotency-Key", "return-restock-key-30")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status", equalTo("COMPLETED")))
+                    .andExpect(jsonPath("$.restoredQuantity", equalTo(5)));
+        }
+
+        assertBalance(LISTING_ID, 8, 0, 3);
+        assertBalance(SECOND_LISTING_ID, 4, 0, 3);
+        assertCount("inventory_return_restocks", 1);
+        Integer movements = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM inventory_movements
+                WHERE reason_code = 'CUSTOMER_RETURN_RESTOCK'
+                  AND actor_user_id = '01K00000000000000000000031'
+                """, Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(2, movements);
     }
 
     @Test

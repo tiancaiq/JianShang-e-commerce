@@ -491,19 +491,47 @@ export class NotificationCenterComponent implements OnInit {
   }
 
   title(notification: NotificationItem): string {
-    return notification.messageKey === 'ORDER_CONFIRMED_V1'
-      ? 'Order confirmed'
-      : 'Notification';
+    return ({
+      BUYER_ORDER_CONFIRMED_V1: 'Order confirmed',
+      BUYER_ORDER_CANCELLED_V1: 'Cancellation completed',
+      BUYER_REFUND_COMPLETED_V1: 'Demo refund completed',
+      BUYER_ORDER_ACCEPTED_V1: 'Seller accepted your order',
+      BUYER_ORDER_PROCESSING_V1: 'Order processing',
+      BUYER_ORDER_SHIPPED_V1: 'Order shipped',
+      BUYER_ORDER_DELIVERED_V1: 'Order delivered',
+      ORDER_CONFIRMED_V1: 'Order confirmed',
+      SELLER_NEW_ORDER_V1: 'New paid order',
+      SELLER_ORDER_CANCELLED_V1: 'Order cancelled',
+      BUYER_RETURN_AUTHORIZED_V1: 'Return authorized',
+      BUYER_RETURN_RECEIVED_V1: 'Return received',
+      BUYER_RETURN_REFUND_COMPLETED_V1: 'Return refund completed',
+      SELLER_RETURN_REQUESTED_V1: 'Return requested',
+    } as Record<string, string>)[notification.messageKey] || 'Notification';
   }
 
   body(notification: NotificationItem): string {
-    return notification.messageKey === 'ORDER_CONFIRMED_V1'
-      ? 'Your order is confirmed. Order details will appear here as the order tools become available.'
-      : 'Open your account for details.';
+    const store = notification.presentationArgs.storeDisplayName;
+    const messages: Record<string, string> = {
+      BUYER_ORDER_CONFIRMED_V1: 'Your order has been confirmed.',
+      BUYER_ORDER_CANCELLED_V1: 'Your cancellation has completed.',
+      BUYER_REFUND_COMPLETED_V1: 'Your demo refund has completed.',
+      BUYER_ORDER_ACCEPTED_V1: `${store || 'The seller'} accepted your order.`,
+      BUYER_ORDER_PROCESSING_V1: `${store || 'The seller'} is processing your order.`,
+      BUYER_ORDER_SHIPPED_V1: `${store || 'The seller'} shipped your order.`,
+      BUYER_ORDER_DELIVERED_V1: 'Your order was marked delivered in the local demo.',
+      ORDER_CONFIRMED_V1: 'Your order has been confirmed.',
+      SELLER_NEW_ORDER_V1: 'You have a new order waiting for acceptance.',
+      SELLER_ORDER_CANCELLED_V1: 'The buyer cancellation has completed for this order.',
+      BUYER_RETURN_AUTHORIZED_V1: `${store || 'The seller'} authorized your return.`,
+      BUYER_RETURN_RECEIVED_V1: `${store || 'The seller'} received your return.`,
+      BUYER_RETURN_REFUND_COMPLETED_V1: 'Your demo return refund has completed.',
+      SELLER_RETURN_REQUESTED_V1: 'A buyer requested a return for this order.',
+    };
+    return messages[notification.messageKey] || 'Open the order for details.';
   }
 
   safeRoute(notification: NotificationItem): string {
-    return notification.safeRoute === '/account' ? '/account' : '/account';
+    return notification.safeRoute;
   }
 
   private handleLoadError(error: unknown): void {

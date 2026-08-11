@@ -4,6 +4,7 @@ import com.msb.ecom.order_service.config.SecurityConfig;
 import com.msb.ecom.order_service.controller.CartController;
 import com.msb.ecom.order_service.dto.CartResponse;
 import com.msb.ecom.order_service.dto.CartValidationResponse;
+import com.msb.ecom.order_service.model.CartException;
 import com.msb.ecom.order_service.service.CartService;
 import com.msb.ecom.order_service.service.CartValidationService;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Bean;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
@@ -83,12 +85,36 @@ class CartControllerTests {
                 List.of());
         mockMvc.perform(post("/api/v1/cart/items")
                         .with(jwt())
+                        .header("If-Match", "\"0\"")
+                        .header("Idempotency-Key", "cart-add-001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"listingId":"%s","quantity":1}
                                 """.formatted(LISTING_ID)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.itemCount", equalTo(1)));
+    }
+
+    @Test
+    void cartMutationsRequireVersionAndIdempotencyKey() throws Exception {
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .with(jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"listingId":"%s","quantity":1}
+                                """.formatted(LISTING_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("CART_VERSION_REQUIRED")));
+
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .with(jwt())
+                        .header("If-Match", "0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"listingId":"%s","quantity":1}
+                                """.formatted(LISTING_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code", equalTo("CART_IDEMPOTENCY_KEY_REQUIRED")));
     }
 
     @Test
@@ -103,6 +129,8 @@ class CartControllerTests {
 
         mockMvc.perform(patch("/api/v1/cart/items/{listingId}", LISTING_ID)
                         .with(jwt())
+                        .header("If-Match", "1")
+                        .header("Idempotency-Key", "cart-update-001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity":2}
@@ -117,11 +145,17 @@ class CartControllerTests {
                 0,
                 List.of(),
                 List.of());
-        mockMvc.perform(delete("/api/v1/cart/items/{listingId}", LISTING_ID).with(jwt()))
+        mockMvc.perform(delete("/api/v1/cart/items/{listingId}", LISTING_ID)
+                        .with(jwt())
+                        .header("If-Match", "\"2\"")
+                        .header("Idempotency-Key", "cart-remove-001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.itemCount", equalTo(0)));
 
-        mockMvc.perform(delete("/api/v1/cart").with(jwt()))
+        mockMvc.perform(delete("/api/v1/cart")
+                        .with(jwt())
+                        .header("If-Match", "3")
+                        .header("Idempotency-Key", "cart-clear-001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalQuantity", equalTo(0)));
     }
@@ -172,23 +206,42 @@ class CartControllerTests {
         }
 
         @Override
-        public CartResponse add(String listingId, int quantity) {
+        public CartResponse add(String listingId, int quantity, String ifMatch, String idempotencyKey) {
+            requireMutationHeaders(ifMatch, idempotencyKey);
             return response;
         }
 
         @Override
-        public CartResponse update(String listingId, int quantity) {
+        public CartResponse update(String listingId, int quantity, String ifMatch, String idempotencyKey) {
+            requireMutationHeaders(ifMatch, idempotencyKey);
             return response;
         }
 
         @Override
-        public CartResponse remove(String listingId) {
+        public CartResponse remove(String listingId, String ifMatch, String idempotencyKey) {
+            requireMutationHeaders(ifMatch, idempotencyKey);
             return response;
         }
 
         @Override
-        public CartResponse clear() {
+        public CartResponse clear(String ifMatch, String idempotencyKey) {
+            requireMutationHeaders(ifMatch, idempotencyKey);
             return response;
+        }
+
+        private void requireMutationHeaders(String ifMatch, String idempotencyKey) {
+            if (ifMatch == null || ifMatch.isBlank()) {
+                throw new CartException(
+                        HttpStatus.BAD_REQUEST,
+                        "CART_VERSION_REQUIRED",
+                        "If-Match must contain the current cart version.");
+            }
+            if (idempotencyKey == null || idempotencyKey.isBlank()) {
+                throw new CartException(
+                        HttpStatus.BAD_REQUEST,
+                        "CART_IDEMPOTENCY_KEY_REQUIRED",
+                        "A valid Idempotency-Key is required.");
+            }
         }
     }
 

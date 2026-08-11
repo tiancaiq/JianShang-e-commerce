@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.servlet.function.*;
 
 import java.net.URI;
@@ -22,6 +23,35 @@ import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFuncti
 
 @Configuration(proxyBeanMethods = false)
 public class Routes {
+
+        private RequestPredicate returnPaths() {
+                return RequestPredicates.path("/api/v1/orders/*/groups/*/return")
+                                .or(RequestPredicates.path("/api/v1/orders/*/groups/*/returns"))
+                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/return"))
+                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/returns/**"));
+        }
+
+        @Bean
+        @Order(-2)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "returns", havingValue = "true")
+        public RouterFunction<ServerResponse> businessOrderReturnRoute() {
+                return route("business_order_returns")
+                                .route(returnPaths(), http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(-2)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "returns", havingValue = "false", matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledBusinessOrderReturnRoute() {
+                return disabledRoute("disabled_business_order_returns", returnPaths());
+        }
 
         @Value("${service.product.url}")
         private String productServiceUrl;
@@ -268,21 +298,13 @@ public class Routes {
         }
 
         @Bean
-        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "checkout", havingValue = "false",
-                        matchIfMissing = true)
-        public RouterFunction<ServerResponse> disabledCheckoutOrderServiceRoute() {
-                return disabledRoute("disabled_checkout_order_service",
-                                RequestPredicates.path("/api/v1/checkouts")
-                                                .or(RequestPredicates.path("/api/v1/checkouts/**")));
-        }
-
-        @Bean
         @Order(0)
-        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-orders", havingValue = "true")
-        public RouterFunction<ServerResponse> businessOrderServiceRoute() {
-                return route("business_order_service")
-                                .route(RequestPredicates.path("/api/v1/businesses/*/orders")
-                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/**")),
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "checkout", havingValue = "true")
+        public RouterFunction<ServerResponse> buyerOrderReadRoute() {
+                return route("buyer_order_read")
+                                .route(RequestPredicates.method(HttpMethod.GET).and(
+                                                RequestPredicates.path("/api/v1/orders")
+                                                        .or(RequestPredicates.path("/api/v1/orders/*"))),
                                                 http(orderServiceUrl))
                                 .before(removeRequestHeader("X-User-Id"))
                                 .before(removeRequestHeader("X-Actor-User-Id"))
@@ -292,6 +314,96 @@ public class Routes {
                                 .filter(circuitBreaker("orderServiceCircuitBreaker",
                                                 URI.create("forward:/fallbackRoute")))
                                 .build();
+        }
+
+        @Bean
+        @Order(-2)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "order-cancellation", havingValue = "true")
+        public RouterFunction<ServerResponse> orderCancellationRoute() {
+                RequestPredicate command = RequestPredicates.method(HttpMethod.POST).and(
+                                RequestPredicates.path("/api/v1/orders/*/cancellation-requests"));
+                return route("order_cancellation")
+                                .route(command, http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(-2)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "order-cancellation", havingValue = "false", matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledOrderCancellationRoute() {
+                return disabledRoute("disabled_order_cancellation",
+                                RequestPredicates.method(HttpMethod.POST).and(
+                                                RequestPredicates.path("/api/v1/orders/*/cancellation-requests")));
+        }
+
+        @Bean
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "checkout", havingValue = "false",
+                        matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledCheckoutOrderServiceRoute() {
+                return disabledRoute("disabled_checkout_order_service",
+                                RequestPredicates.path("/api/v1/checkouts")
+                                                .or(RequestPredicates.path("/api/v1/checkouts/**"))
+                                                .or(RequestPredicates.path("/api/v1/orders"))
+                                                .or(RequestPredicates.path("/api/v1/orders/**")));
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-orders", havingValue = "true")
+        public RouterFunction<ServerResponse> businessOrderServiceRoute() {
+                return route("business_order_service")
+                                .route(RequestPredicates.method(HttpMethod.GET)
+                                                .and(RequestPredicates.path("/api/v1/businesses/*/orders")
+                                                        .or(RequestPredicates.path("/api/v1/businesses/*/orders/*"))),
+                                                http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-order-fulfillment", havingValue = "true")
+        public RouterFunction<ServerResponse> businessOrderFulfillmentRoute() {
+                RequestPredicate commands = RequestPredicates.method(HttpMethod.POST).and(
+                                RequestPredicates.path("/api/v1/businesses/*/orders/*/accept")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/processing"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/shipments"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/delivery-demo")));
+                return route("business_order_fulfillment")
+                                .route(commands, http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-order-fulfillment", havingValue = "false", matchIfMissing = true)
+        public RouterFunction<ServerResponse> disabledBusinessOrderFulfillmentRoute() {
+                RequestPredicate commands = RequestPredicates.method(HttpMethod.POST).and(
+                                RequestPredicates.path("/api/v1/businesses/*/orders/*/accept")
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/processing"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/shipments"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/orders/*/delivery-demo")));
+                return disabledRoute("disabled_business_order_fulfillment", commands);
         }
 
         @Bean
@@ -314,7 +426,9 @@ public class Routes {
         public RouterFunction<ServerResponse> notificationServiceRoute() {
                 return route("notification_service")
                                 .route(RequestPredicates.path("/api/v1/notifications")
-                                                .or(RequestPredicates.path("/api/v1/notifications/**")),
+                                                .or(RequestPredicates.path("/api/v1/notifications/**"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/notifications"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/notifications/**")),
                                                 http(notificationServiceUrl))
                                 .before(removeRequestHeader("X-User-Id"))
                                 .before(removeRequestHeader("X-Actor-User-Id"))
@@ -334,7 +448,9 @@ public class Routes {
                 return disabledRoute(
                                 "disabled_notification_service",
                                 RequestPredicates.path("/api/v1/notifications")
-                                                .or(RequestPredicates.path("/api/v1/notifications/**")));
+                                                .or(RequestPredicates.path("/api/v1/notifications/**"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/notifications"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/notifications/**")));
         }
 
         @Bean

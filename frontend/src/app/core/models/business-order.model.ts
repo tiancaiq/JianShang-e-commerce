@@ -1,9 +1,14 @@
 export type BusinessOrderStatus =
   | 'PENDING_ACCEPTANCE'
   | 'ACCEPTED'
-  | 'PARTIALLY_SHIPPED'
+  | 'PROCESSING'
   | 'SHIPPED'
-  | 'DELIVERED'
+  | 'DELIVERED';
+
+export type BusinessOrderQueueStatus = BusinessOrderStatus | 'CANCELLED';
+
+export type BusinessOrderCancellationStatus =
+  | 'NONE'
   | 'CANCELLATION_PENDING'
   | 'CANCELLED';
 
@@ -13,7 +18,7 @@ export interface BusinessOrderSummary {
   businessId: string;
   storeId: string;
   status: BusinessOrderStatus;
-  cancellationStatus: string;
+  cancellationStatus: BusinessOrderCancellationStatus;
   buyerOrderId: string;
   buyerOrderNumber: string;
   itemCount: number;
@@ -63,4 +68,41 @@ export interface BusinessOrderDetail extends BusinessOrderSummary {
   paymentStatus: string;
   items: BusinessOrderItem[];
   shippingAddress: BusinessOrderShippingAddress;
+  version: number;
+  timeline: BusinessOrderTimelineEntry[];
+  shipment: BusinessOrderShipment | null;
+}
+
+export interface BusinessOrderTimelineEntry {
+  status: BusinessOrderStatus;
+  occurredAt: string;
+}
+
+export interface BusinessOrderShipment {
+  shipmentId: string;
+  source: 'LOCAL_DEMO_MANUAL';
+  carrierDisplayName: string;
+  serviceDisplayName: string;
+  trackingNumber: string;
+  status: 'SHIPPED' | 'DELIVERED';
+  version: number;
+  shippedAt: string;
+  deliveredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BusinessOrderFulfillmentResponse {
+  businessOrderId: string;
+  fulfillmentStatus: BusinessOrderStatus;
+  version: number;
+  updatedAt: string;
+  shipment: BusinessOrderShipment | null;
+}
+
+export interface CreateManualShipmentRequest {
+  carrierDisplayName: string;
+  serviceDisplayName: string;
+  trackingNumber: string;
+  shippedAt: string;
 }

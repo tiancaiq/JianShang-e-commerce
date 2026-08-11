@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -33,7 +34,9 @@ public class BusinessOrderAcceptanceService {
     private static final Logger log =
             LoggerFactory.getLogger(BusinessOrderAcceptanceService.class);
     private static final String OPERATION = "ACCEPT_BUSINESS_ORDER";
+    private static final int CONCURRENCY_ATTEMPTS = 3;
     private static final Pattern ULID = Pattern.compile("[0-9A-HJKMNP-TV-Z]{26}");
+    private static final Pattern BUSINESS_ID = Pattern.compile("[0-9A-Z]{26}");
     private static final Pattern IDEMPOTENCY_KEY =
             Pattern.compile("[A-Za-z0-9._:-]{8,128}");
 
@@ -98,7 +101,7 @@ public class BusinessOrderAcceptanceService {
             String idempotencyKey,
             String correlationId) {
         requireEnabled();
-        requireId(businessId);
+        requireBusinessId(businessId);
         requireId(businessOrderId);
         long expectedVersion = expectedVersion(ifMatch);
         requireIdempotencyKey(idempotencyKey);
@@ -122,16 +125,17 @@ public class BusinessOrderAcceptanceService {
                 businessId, businessOrderId, expectedVersion);
         Instant now = clock.instant();
         try {
-            AcceptanceResult result = Objects.requireNonNull(transactions.execute(status ->
-                    acceptTransaction(
-                            access.userId(),
-                            businessId,
-                            businessOrderId,
-                            expectedVersion,
-                            idempotencyKey,
-                            requestHash,
-                            correlationId,
-                            now)));
+            // Expiry cleanup is independent maintenance and must not widen mutation lock ranges.
+            repository.purgeExpired(now, properties.purgeBatchSize());
+            AcceptanceResult result = executeWithConcurrencyRetry(
+                    access.userId(),
+                    businessId,
+                    businessOrderId,
+                    expectedVersion,
+                    idempotencyKey,
+                    requestHash,
+                    correlationId,
+                    now);
             metrics.accept(result.replayed() ? "replayed" : "accepted");
             log.info(
                     "Business order acceptance result={} correlationId={} businessRef={} orderRef={}",
@@ -162,8 +166,6 @@ public class BusinessOrderAcceptanceService {
             String requestHash,
             String correlationId,
             Instant now) {
-        repository.purgeExpired(now, properties.purgeBatchSize());
-
         BusinessOrderAcceptanceCommand existing = repository.lockCommand(
                 actorUserId, businessId, OPERATION, idempotencyKey).orElse(null);
         if (existing != null) {
@@ -227,6 +229,37 @@ public class BusinessOrderAcceptanceService {
         return new AcceptanceResult(
                 response(businessOrderId, acceptedVersion, now),
                 false);
+    }
+
+    // Retries only database concurrency victims; business conflicts remain deterministic.
+    private AcceptanceResult executeWithConcurrencyRetry(
+            String actorUserId,
+            String businessId,
+            String businessOrderId,
+            long expectedVersion,
+            String idempotencyKey,
+            String requestHash,
+            String correlationId,
+            Instant now) {
+        for (int attempt = 1; attempt <= CONCURRENCY_ATTEMPTS; attempt++) {
+            try {
+                return Objects.requireNonNull(transactions.execute(status ->
+                        acceptTransaction(
+                                actorUserId,
+                                businessId,
+                                businessOrderId,
+                                expectedVersion,
+                                idempotencyKey,
+                                requestHash,
+                                correlationId,
+                                now)));
+            } catch (TransientDataAccessException exception) {
+                if (attempt == CONCURRENCY_ATTEMPTS) {
+                    throw exception;
+                }
+            }
+        }
+        throw unavailable();
     }
 
     private AcceptanceResult replay(
@@ -325,6 +358,13 @@ public class BusinessOrderAcceptanceService {
                     HttpStatus.BAD_REQUEST,
                     "BUSINESS_ORDER_ID_INVALID",
                     "Business order identifier is invalid.");
+        }
+    }
+
+    private void requireBusinessId(String value) {
+        if (value == null || !BUSINESS_ID.matcher(value).matches()) {
+            throw new BusinessOrderException(HttpStatus.BAD_REQUEST,
+                    "BUSINESS_ORDER_ID_INVALID", "Business order identifier is invalid.");
         }
     }
 

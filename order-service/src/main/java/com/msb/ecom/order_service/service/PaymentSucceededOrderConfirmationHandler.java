@@ -1,6 +1,7 @@
 package com.msb.ecom.order_service.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.msb.ecom.order_service.config.CheckoutProperties;
 import com.msb.ecom.order_service.config.OrderConfirmationProperties;
 import com.msb.ecom.order_service.model.CheckoutAggregate;
 import com.msb.ecom.order_service.model.CheckoutPaymentBinding;
@@ -39,6 +40,8 @@ public class PaymentSucceededOrderConfirmationHandler {
     private static final Logger log =
             LoggerFactory.getLogger(PaymentSucceededOrderConfirmationHandler.class);
     private static final String RECOVERY_REQUIRED = "ORDER_CONFIRMATION_REQUIRES_RECOVERY";
+    private static final Instant LOCAL_DEMO_CANCELLATION_CUTOFF =
+            Instant.parse("2037-01-01T00:00:00Z");
 
     private final OrderConfirmationProperties properties;
     private final PaymentEventValidator validator;
@@ -144,15 +147,26 @@ public class PaymentSucceededOrderConfirmationHandler {
         } catch (RuntimeException exception) {
             retry(event, claim.claimToken(), "ORDER_PERSISTENCE_RETRY_REQUIRED", clock.instant());
             log.warn(
-                    "Order confirmation persistence will retry eventRef={} checkoutRef={} code={}",
+                    "Order confirmation persistence will retry eventRef={} checkoutRef={} code={} "
+                            + "category={} causeCategory={}",
                     logReference(event.eventId()),
                     logReference(event.checkoutId()),
-                    "ORDER_PERSISTENCE_RETRY_REQUIRED");
+                    "ORDER_PERSISTENCE_RETRY_REQUIRED",
+                    exception.getClass().getSimpleName(),
+                    deepestCause(exception).getClass().getSimpleName());
             return new OrderConfirmationResult(
                     OrderConfirmationResult.Outcome.RETRY_REQUIRED,
                     null,
                     "ORDER_PERSISTENCE_RETRY_REQUIRED");
         }
+    }
+
+    private Throwable deepestCause(Throwable failure) {
+        Throwable current = failure;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private Claim claim(PaymentEventEnvelope event, String payloadHash, Instant now) {
@@ -305,7 +319,10 @@ public class PaymentSucceededOrderConfirmationHandler {
                     orderId,
                     group.businessId(),
                     group.storeId(),
+                    group.storeName(),
                     group.totals(),
+                    CheckoutProperties.LOCAL_CANCELLATION_POLICY_VERSION.equals(group.policyVersion())
+                            ? LOCAL_DEMO_CANCELLATION_CUTOFF : null,
                     now);
         }
         for (CheckoutAggregate.Item item : checkout.items()) {
@@ -562,15 +579,26 @@ public class PaymentSucceededOrderConfirmationHandler {
     private Map<String, Group> groups(CheckoutAggregate checkout) {
         Map<String, MutableTotals> totals = new TreeMap<>();
         Map<String, String> stores = new TreeMap<>();
+        Map<String, String> storeNames = new TreeMap<>();
+        Map<String, String> policyVersions = new TreeMap<>();
         for (CheckoutAggregate.Item item : checkout.items()) {
             stores.put(item.businessId(), item.storeId());
+            policyVersions.put(item.businessId(), item.policyVersion());
+            if (item.storeName() != null && !item.storeName().isBlank()) {
+                storeNames.put(item.businessId(), item.storeName());
+            }
             totals.computeIfAbsent(item.businessId(), ignored -> new MutableTotals())
                     .add(item);
         }
         Map<String, Group> result = new LinkedHashMap<>();
         totals.forEach((businessId, value) -> result.put(
                 businessId,
-                new Group(businessId, stores.get(businessId), value.snapshot())));
+                new Group(
+                        businessId,
+                        stores.get(businessId),
+                        storeNames.get(businessId),
+                        policyVersions.get(businessId),
+                        value.snapshot())));
         return result;
     }
 
@@ -646,6 +674,8 @@ public class PaymentSucceededOrderConfirmationHandler {
     private record Group(
             String businessId,
             String storeId,
+            String storeName,
+            String policyVersion,
             OrderConfirmationRepository.Totals totals
     ) {
     }

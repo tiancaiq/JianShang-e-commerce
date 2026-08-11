@@ -100,9 +100,9 @@ describe('CartComponent', () => {
     expect(text).toContain('Verified');
     expect(text).toContain('Irvine, CA');
     expect(text).toContain('20.00 USD');
-    expect(text).toContain('Ready for checkout');
+    expect(text).toContain('Cart checks passed');
     expect(text).toContain('Current subtotal');
-    expect(text).toContain('Checkout is not enabled in this cart-only demo.');
+    expect(text).toContain('Checkout is not enabled yet.');
     expect(fixture.nativeElement.querySelector('.packing-card')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.receipt-rail')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('a[href="/stores/mochi-store"]')).not.toBeNull();
@@ -246,9 +246,39 @@ describe('CartComponent', () => {
   it('shows no checkout route in cart-only mode even when validation is ready', () => {
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('Ready for checkout');
-    expect(fixture.nativeElement.textContent).toContain('Checkout is not enabled in this cart-only demo.');
+    expect(fixture.nativeElement.textContent).toContain('Cart checks passed');
+    expect(fixture.nativeElement.textContent).not.toContain('Ready for checkout');
+    expect(fixture.nativeElement.textContent).toContain('Checkout is not enabled yet.');
     expect(fixture.nativeElement.querySelector('a[href="/checkout"]')).toBeNull();
+  });
+
+  it('disables quantity increase at the latest known availability', () => {
+    cart = {
+      ...cart,
+      totalQuantity: 5,
+      items: [{ ...cart.items[0], quantity: 5 }],
+    };
+    validation = {
+      ...validation,
+      totalQuantity: 5,
+      items: [{
+        ...validation.items[0],
+        requestedQuantity: 5,
+        availableQuantity: 5,
+      }],
+    };
+    cartService.cart = signal(cart).asReadonly();
+    cartService.validation = signal(validation).asReadonly();
+    cartService.load.and.returnValue(of(cart));
+    cartService.validate.and.returnValue(of(validation));
+
+    fixture.detectChanges();
+
+    const increase = fixture.nativeElement.querySelector('[aria-label="Increase quantity"]') as HTMLButtonElement;
+    expect(increase.disabled).toBeTrue();
+    increase.click();
+
+    expect(cartService.update).not.toHaveBeenCalled();
   });
 
   it('retains cart contents and exposes retry when validation is unavailable', () => {
@@ -270,6 +300,134 @@ describe('CartComponent', () => {
     retry.click();
 
     expect(cartService.validate).toHaveBeenCalledTimes(2);
+  });
+
+  it('groups same-store lines together and keeps same-name stores separate', () => {
+    const secondSameStore = {
+      ...cart.items[0],
+      listingId: '01L00000000000000000000002',
+      title: 'Store blanket',
+      quantity: 1,
+    };
+    const differentStore = {
+      ...cart.items[0],
+      listingId: '01L00000000000000000000003',
+      title: 'Store tote',
+      storeName: 'Mochi Store',
+      storeSlug: 'mochi-store-two',
+      publicCity: 'Costa Mesa',
+      quantity: 2,
+    };
+    cart = {
+      ...cart,
+      itemCount: 3,
+      totalQuantity: 5,
+      items: [cart.items[0], secondSameStore, differentStore],
+    };
+    cartService.cart = signal(cart).asReadonly();
+    cartService.load.and.returnValue(of(cart));
+
+    fixture.detectChanges();
+
+    const groups = fixture.nativeElement.querySelectorAll('[data-testid="cart-store-group"]');
+    expect(groups.length).toBe(2);
+    expect(groups[0].querySelectorAll('.packing-card').length).toBe(2);
+    expect(groups[1].querySelectorAll('.packing-card').length).toBe(1);
+    expect(groups[0].querySelector('a[href="/stores/mochi-store"]')).not.toBeNull();
+    expect(groups[1].querySelector('a[href="/stores/mochi-store-two"]')).not.toBeNull();
+    expect(groups[1].textContent).toContain('Store tote');
+    expect(fixture.nativeElement.textContent).toContain('5 total');
+  });
+
+  it('removing the final line from one store preserves the other store group', () => {
+    const otherStore = {
+      ...cart.items[0],
+      listingId: '01L00000000000000000000004',
+      title: 'Harbor tote',
+      storeName: 'Harbor Cart Supply',
+      storeSlug: 'harbor-cart-supply',
+      publicCity: 'Costa Mesa',
+      quantity: 1,
+    };
+    const initial = { ...cart, itemCount: 2, totalQuantity: 3, items: [cart.items[0], otherStore] };
+    const remaining = {
+      ...initial,
+      version: 2,
+      itemCount: 1,
+      totalQuantity: 1,
+      items: [otherStore],
+    };
+    const cartSignal = signal(initial);
+    cartService.cart = cartSignal.asReadonly();
+    cartService.load.and.returnValue(of(initial));
+    cartService.remove.and.callFake(() => {
+      cartSignal.set(remaining);
+      return of(remaining);
+    });
+
+    fixture.detectChanges();
+    const removeFirst = fixture.nativeElement.querySelector(
+      '[aria-label="Remove Store plush"]',
+    ) as HTMLButtonElement;
+    removeFirst.click();
+    fixture.detectChanges();
+
+    const groups = fixture.nativeElement.querySelectorAll('[data-testid="cart-store-group"]');
+    expect(groups.length).toBe(1);
+    expect(groups[0].textContent).toContain('Harbor Cart Supply');
+    expect(groups[0].textContent).not.toContain('Store plush');
+  });
+
+  it('keeps validation conflicts scoped to their store line', () => {
+    const otherStore = {
+      ...cart.items[0],
+      listingId: '01L00000000000000000000005',
+      title: 'Harbor tote',
+      storeName: 'Harbor Cart Supply',
+      storeSlug: 'harbor-cart-supply',
+      quantity: 1,
+    };
+    cart = { ...cart, itemCount: 2, totalQuantity: 3, items: [cart.items[0], otherStore] };
+    validation = {
+      ...validation,
+      checkoutReady: false,
+      itemCount: 2,
+      totalQuantity: 3,
+      items: [
+        {
+          ...validation.items[0],
+          status: 'PRICE_CHANGED',
+          currentPrice: 12,
+          issues: [{
+            code: 'CART_PRICE_CHANGED',
+            message: 'The price changed.',
+            action: 'ACCEPT_CURRENT_PRICE',
+          }],
+        },
+        {
+          ...validation.items[0],
+          listingId: otherStore.listingId,
+          title: otherStore.title,
+          storeName: otherStore.storeName,
+          storeSlug: otherStore.storeSlug,
+          requestedQuantity: 1,
+          status: 'READY',
+          issues: [],
+        },
+      ],
+    };
+    cartService.cart = signal(cart).asReadonly();
+    cartService.validation = signal(validation).asReadonly();
+    cartService.load.and.returnValue(of(cart));
+    cartService.validate.and.returnValue(of(validation));
+
+    fixture.detectChanges();
+
+    const groups = fixture.nativeElement.querySelectorAll('[data-testid="cart-store-group"]');
+    expect(groups.length).toBe(2);
+    expect(groups[0].querySelectorAll('.needs-repair').length).toBe(1);
+    expect(groups[1].querySelectorAll('.needs-repair').length).toBe(0);
+    expect(groups[1].textContent).toContain('Price is current.');
   });
 
   it('shows the empty cart path with clear shopping actions', () => {

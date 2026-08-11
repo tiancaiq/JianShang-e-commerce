@@ -56,6 +56,7 @@ class CheckoutCalculationServiceTests {
             assertThat(item.sku()).isEqualTo("SKU-1");
             assertThat(item.condition()).isEqualTo("NEW");
             assertThat(item.catalogVersion()).isEqualTo(7);
+            assertThat(item.storeName()).isEqualTo("Demo Store");
             assertThat(item.policyVersion()).isEqualTo("LOCAL_DEMO_V1");
         });
         assertThat(checkout.shippingQuotes()).singleElement()
@@ -152,7 +153,12 @@ class CheckoutCalculationServiceTests {
                 new BigDecimal("12.5000"),
                 "USD",
                 "ACTIVE",
-                null);
+                null,
+                "Demo Store",
+                "demo-store",
+                true,
+                "Irvine",
+                "CA");
         CartDocument cart = new CartDocument(3, NOW.plusSeconds(3600), List.of(stored));
         return new CartAssessment(
                 cart,
@@ -187,7 +193,12 @@ class CheckoutCalculationServiceTests {
                 new BigDecimal("12.5000"),
                 "USD",
                 "ACTIVE",
-                null);
+                null,
+                "First Demo Store",
+                "first-demo-store",
+                true,
+                "Irvine",
+                "CA");
         ProductCommerceClient.ProductContext secondProduct = new ProductCommerceClient.ProductContext(
                 second.listingId(),
                 "01B00000000000000000000002",
@@ -200,7 +211,12 @@ class CheckoutCalculationServiceTests {
                 new BigDecimal("5.0000"),
                 "USD",
                 "ACTIVE",
-                null);
+                null,
+                "Second Demo Store",
+                "second-demo-store",
+                true,
+                "Anaheim",
+                "CA");
         CartDocument cart = new CartDocument(4, NOW.plusSeconds(3600), List.of(first, second));
         return new CartAssessment(
                 cart,

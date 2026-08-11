@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PaymentOutboxDispatcherMySqlIntegrationTests {
 
     private static final Instant NOW = Instant.parse("2026-07-20T01:00:00Z");
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.3.0");
+    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
 
     private static JdbcTemplate jdbc;
     private static PaymentIntentRepository intents;
@@ -186,6 +186,30 @@ class PaymentOutboxDispatcherMySqlIntegrationTests {
                 "Payment event delivery exhausted its retry limit.");
         assertThat(row.get("last_error_message").toString()).doesNotContain("secret");
         assertThat(row.get("claim_token")).isNull();
+    }
+
+    @Test
+    void leavesRefundAuditEventsUnclaimedUntilARefundConsumerIsApproved() {
+        insertEvent(50);
+        jdbc.update("UPDATE payment_outbox_events SET published_at=? WHERE id=?", NOW, id(52));
+        jdbc.update("""
+                INSERT INTO payment_outbox_events (
+                  id,aggregate_type,aggregate_id,event_type,event_version,producer,payload_json,
+                  correlation_id,causation_id,occurred_at,created_at,next_attempt_at)
+                VALUES (?,'PAYMENT_INTENT',?,'payment.refunded',1,'payment-service',CAST('{}' AS JSON),
+                  'correlation-refund',?,?,?,?)
+                """, id(53), id(50), id(54), NOW, NOW, NOW);
+
+        InMemoryTransport transport = new InMemoryTransport(0);
+        assertThat(dispatcher(transport, NOW.plusSeconds(1), 10).dispatchBatch()).isZero();
+        assertThat(transport.messages).isEmpty();
+        assertThat(jdbc.queryForMap("""
+                SELECT published_at,attempt_count,claim_token,terminal_failure_at
+                FROM payment_outbox_events WHERE id=?
+                """, id(53))).containsEntry("attempt_count", 0L)
+                .containsEntry("published_at", null)
+                .containsEntry("claim_token", null)
+                .containsEntry("terminal_failure_at", null);
     }
 
     private int dispatchAfter(

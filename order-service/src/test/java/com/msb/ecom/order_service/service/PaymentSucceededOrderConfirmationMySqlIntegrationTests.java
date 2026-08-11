@@ -111,6 +111,9 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
         assertThat(inventory.sideEffects).hasValue(1);
         assertThat(count("orders")).isEqualTo(1);
         assertThat(count("business_orders")).isEqualTo(2);
+        assertThat(jdbc.queryForList(
+                "SELECT store_name FROM business_orders ORDER BY business_id",
+                String.class)).containsExactly("Demo Store 200", "Demo Store 201");
         assertThat(count("order_items")).isEqualTo(2);
         assertThat(count("order_addresses")).isEqualTo(1);
         assertThat(count("order_status_history")).isEqualTo(1);
@@ -432,6 +435,7 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
                 id(listing),
                 id(business),
                 id(store),
+                "Demo Store " + store,
                 1,
                 "Store item " + line,
                 "SKU-" + line,

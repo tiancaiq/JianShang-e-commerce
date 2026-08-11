@@ -6,6 +6,7 @@ import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { CartService } from '../../core/services/cart.service';
 import { ToastService } from '../../core/services/toast.service';
+import { CART_ENABLED } from '../../features/cart/cart.capability';
 import { MarketplaceLayoutComponent } from './marketplace-layout.component';
 
 describe('MarketplaceLayoutComponent', () => {
@@ -33,6 +34,7 @@ describe('MarketplaceLayoutComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
+        { provide: CART_ENABLED, useValue: false },
         { provide: CartService, useValue: cartService },
         {
           provide: ChatService,
@@ -316,6 +318,22 @@ describe('MarketplaceLayoutComponent', () => {
       password: 'password-123',
       displayName: 'New Buyer',
     });
+  });
+
+  it('loads the cart after native authentication when the cart capability is enabled', () => {
+    Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
+      configurable: true,
+      value: true,
+    });
+    fixture.detectChanges();
+    cartService.load.calls.reset();
+
+    fixture.componentInstance.openAuthDialog();
+    fixture.componentInstance.authEmail = 'buyer@example.com';
+    fixture.componentInstance.authPassword = 'password-123';
+    fixture.componentInstance.submitNativeAuth();
+
+    expect(cartService.load).toHaveBeenCalledTimes(1);
   });
 
   it('shows a credential error when marketplace-native login is rejected', () => {

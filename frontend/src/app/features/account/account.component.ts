@@ -262,6 +262,14 @@ import { NOTIFICATION_CENTER_ENABLED } from './notification-center.capability';
             </a>
           }
 
+          @if (buyerCheckoutEnabled) {
+            <a routerLink="/account/orders" class="account-tile">
+              <span class="tile-icon green"><svg viewBox="0 0 24 24"><path d="M4 3h16v18H4V3zm3 4v2h10V7H7zm0 4v2h10v-2H7zm0 4v2h7v-2H7z"/></svg></span>
+              <span><b>Your orders</b><small>View confirmed purchases and store groups.</small></span>
+              <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
+            </a>
+          }
+
           @if (notificationsEnabled) {
             <a routerLink="/account/notifications" class="account-tile">
               <span class="tile-icon green">
@@ -1257,6 +1265,7 @@ import { NOTIFICATION_CENTER_ENABLED } from './notification-center.capability';
 export class AccountComponent implements OnInit {
   authService = inject(AuthService);
   readonly buyerAddressesEnabled = environment.features.buyerAddresses;
+  readonly buyerCheckoutEnabled = environment.features.buyerCheckout;
   readonly notificationsEnabled = inject(NOTIFICATION_CENTER_ENABLED);
   private readonly router = inject(Router);
   private readonly listingService = inject(ListingService);

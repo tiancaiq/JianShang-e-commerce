@@ -28,4 +28,12 @@ public class DeterministicFakePaymentProvider implements PaymentProvider {
     public String actionReference(String paymentIntentId) {
         return "fake_action_" + paymentIntentId.toLowerCase();
     }
+
+    // Produces one stable fake reference and never moves real money.
+    @Override
+    public PaymentRefundResult refund(PaymentRefundCommand command) {
+        return new PaymentRefundResult(
+                "SUCCEEDED",
+                "fake_refund_" + command.cancellationRequestId().toLowerCase());
+    }
 }

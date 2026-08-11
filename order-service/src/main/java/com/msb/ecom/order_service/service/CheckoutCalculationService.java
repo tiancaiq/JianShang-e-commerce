@@ -14,6 +14,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -65,7 +66,8 @@ public class CheckoutCalculationService {
             String buyerId,
             CartAssessment assessment,
             BuyerIdentityClient.BuyerAddress address) {
-        Instant now = clock.instant();
+        // MySQL TIMESTAMP(6) is authoritative, so outbound reservation deadlines use the same precision.
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String currency = assessment.lines().stream()
                 .map(line -> normalizedCurrency(line.product().currency()))
                 .distinct()
@@ -137,6 +139,7 @@ public class CheckoutCalculationService {
                     line.stored().listingId(),
                     line.product().businessId(),
                     line.product().storeId(),
+                    line.product().storeName(),
                     line.product().version(),
                     line.product().title(),
                     line.product().sku(),

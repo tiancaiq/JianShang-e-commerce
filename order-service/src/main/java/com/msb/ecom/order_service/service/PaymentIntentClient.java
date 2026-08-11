@@ -1,5 +1,7 @@
 package com.msb.ecom.order_service.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -7,6 +9,14 @@ import java.util.List;
 public interface PaymentIntentClient {
 
     PaymentIntent create(String idempotencyKey, String correlationId, Command command);
+
+    default DemoCompletion completeDemo(
+            String paymentIntentId,
+            String buyerId,
+            String actionReference,
+            String correlationId) {
+        throw new UnsupportedOperationException("Demo payment completion is not configured.");
+    }
 
     record Command(
             String checkoutId,
@@ -23,6 +33,7 @@ public interface PaymentIntentClient {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record PaymentIntent(
             String id,
             String checkoutId,
@@ -48,5 +59,14 @@ public interface PaymentIntentClient {
     }
 
     record SafeError(String code, String message) {
+    }
+
+    record DemoCompletion(
+            String eventId,
+            String paymentIntentId,
+            String status,
+            String outcome,
+            boolean replayed
+    ) {
     }
 }

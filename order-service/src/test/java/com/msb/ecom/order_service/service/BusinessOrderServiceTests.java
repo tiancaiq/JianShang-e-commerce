@@ -109,6 +109,18 @@ class BusinessOrderServiceTests {
     }
 
     @Test
+    void cancelledSellerQueueStatusIsAcceptedAndForwarded() {
+        when(repository.findPage(BUSINESS_ID, "CANCELLED", null, null, 21, false))
+                .thenReturn(List.of());
+
+        BusinessOrderPageResponse response =
+                service.list(BUSINESS_ID, "CANCELLED", null, null);
+
+        assertThat(response.items()).isEmpty();
+        verify(repository).findPage(BUSINESS_ID, "CANCELLED", null, null, 21, false);
+    }
+
+    @Test
     void financeProjectionIsReturnedOnlyForFinanceAuthorizedReads() {
         when(authorization.authorize("actor-token", BUSINESS_ID)).thenReturn(access(true));
         when(repository.findPage(BUSINESS_ID, null, null, null, 21, true))

@@ -2,7 +2,13 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { Checkout, CreateCheckoutRequest } from '../models/checkout.model';
+import {
+  Checkout,
+  CheckoutOrderResolution,
+  CheckoutPaymentIntent,
+  CreateCheckoutRequest,
+  DemoPaymentCompletion,
+} from '../models/checkout.model';
 
 @Injectable({ providedIn: 'root' })
 export class CheckoutService {
@@ -35,6 +41,33 @@ export class CheckoutService {
         headers: this.idempotencyHeader(this.cancelKeys, checkoutId),
         withCredentials: true,
       },
+    );
+  }
+
+  createPaymentIntent(checkoutId: string): Observable<CheckoutPaymentIntent> {
+    return this.http.post<CheckoutPaymentIntent>(
+      `${this.baseUrl}/${encodeURIComponent(checkoutId)}/payment-intent`,
+      null,
+      {
+        // The checkout is the logical payment command, including across a full browser refresh.
+        headers: new HttpHeaders({ 'Idempotency-Key': `checkout-payment:${checkoutId}` }),
+        withCredentials: true,
+      },
+    );
+  }
+
+  completeDemoPayment(checkoutId: string): Observable<DemoPaymentCompletion> {
+    return this.http.post<DemoPaymentCompletion>(
+      `${this.baseUrl}/${encodeURIComponent(checkoutId)}/complete-demo-payment`,
+      null,
+      { withCredentials: true },
+    );
+  }
+
+  confirmedOrder(checkoutId: string): Observable<CheckoutOrderResolution> {
+    return this.http.get<CheckoutOrderResolution>(
+      `${this.baseUrl}/${encodeURIComponent(checkoutId)}/confirmed-order`,
+      { withCredentials: true },
     );
   }
 

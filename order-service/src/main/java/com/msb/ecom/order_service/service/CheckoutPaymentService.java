@@ -5,6 +5,8 @@ import com.msb.ecom.common.web.security.CurrentActorProvider;
 import com.msb.ecom.order_service.config.CheckoutPaymentProperties;
 import com.msb.ecom.order_service.config.CheckoutProperties;
 import com.msb.ecom.order_service.dto.CheckoutPaymentIntentResponse;
+import com.msb.ecom.order_service.dto.CheckoutOrderResolutionResponse;
+import com.msb.ecom.order_service.dto.DemoPaymentCompletionResponse;
 import com.msb.ecom.order_service.model.CheckoutAggregate;
 import com.msb.ecom.order_service.model.CheckoutException;
 import com.msb.ecom.order_service.model.CheckoutPaymentBinding;
@@ -13,9 +15,12 @@ import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
 import com.msb.ecom.order_service.repository.CheckoutRepository;
 import com.msb.ecom.order_service.repository.CheckoutPaymentBindingRepository;
+import com.msb.ecom.order_service.repository.OrderConfirmationRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -26,8 +31,11 @@ import java.util.regex.Pattern;
 @Service
 public class CheckoutPaymentService {
 
+    private static final Logger log = LoggerFactory.getLogger(CheckoutPaymentService.class);
+
     private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("[A-Za-z0-9._:-]{8,128}");
     private static final Pattern ULID = Pattern.compile("[0-7][0-9A-HJKMNP-TV-Z]{25}");
+    private static final Pattern BUSINESS_ID = Pattern.compile("[0-9A-Z]{26}");
     private static final Pattern SNAPSHOT_HASH = Pattern.compile("[a-f0-9]{64}");
     private static final Set<String> PAYMENT_STATUSES = Set.of(
             "CREATED",
@@ -43,6 +51,7 @@ public class CheckoutPaymentService {
     private final CheckoutProperties checkoutProperties;
     private final CheckoutPaymentProperties paymentProperties;
     private final PaymentIntentClient paymentClient;
+    private final OrderConfirmationRepository orders;
     private final Clock clock;
 
     @Autowired
@@ -53,7 +62,8 @@ public class CheckoutPaymentService {
             CheckoutPaymentBindingRepository paymentBindings,
             CheckoutProperties checkoutProperties,
             CheckoutPaymentProperties paymentProperties,
-            PaymentIntentClient paymentClient) {
+            PaymentIntentClient paymentClient,
+            OrderConfirmationRepository orders) {
         this(
                 actorProvider,
                 buyerIdentityClient,
@@ -62,6 +72,7 @@ public class CheckoutPaymentService {
                 checkoutProperties,
                 paymentProperties,
                 paymentClient,
+                orders,
                 Clock.systemUTC());
     }
 
@@ -73,6 +84,7 @@ public class CheckoutPaymentService {
             CheckoutProperties checkoutProperties,
             CheckoutPaymentProperties paymentProperties,
             PaymentIntentClient paymentClient,
+            OrderConfirmationRepository orders,
             Clock clock) {
         this.actorProvider = actorProvider;
         this.buyerIdentityClient = buyerIdentityClient;
@@ -81,7 +93,38 @@ public class CheckoutPaymentService {
         this.checkoutProperties = checkoutProperties;
         this.paymentProperties = paymentProperties;
         this.paymentClient = paymentClient;
+        this.orders = orders;
         this.clock = clock;
+    }
+
+    // Completes only the deterministic fake action bound to this buyer's immutable checkout.
+    public DemoPaymentCompletionResponse completeDemo(String checkoutId, String correlationId) {
+        requireEnabled();
+        String buyerId = buyerIdentityClient.resolveBuyer(actorProvider.currentActor().subject());
+        CheckoutAggregate checkout = repository.findOwned(checkoutId, buyerId)
+                .orElseThrow(this::notFound);
+        requirePayable(checkout);
+        CheckoutPaymentBinding binding = paymentBindings.findByCheckout(checkoutId)
+                .orElseThrow(() -> new CheckoutException(
+                        HttpStatus.CONFLICT,
+                        "PAYMENT_INTENT_REQUIRED",
+                        "Create the demo payment intent before completing payment."));
+        PaymentIntentClient.DemoCompletion result = paymentClient.completeDemo(
+                binding.paymentIntentId(),
+                buyerId,
+                "fake_action_" + binding.paymentIntentId().toLowerCase(),
+                CorrelationId.acceptOrGenerate(correlationId).value());
+        return new DemoPaymentCompletionResponse(
+                result.paymentIntentId(), result.status(), result.outcome(), result.replayed());
+    }
+
+    // Resolves the confirmed order only through an owned checkout reference.
+    public CheckoutOrderResolutionResponse confirmedOrder(String checkoutId) {
+        requireEnabled();
+        String buyerId = buyerIdentityClient.resolveBuyer(actorProvider.currentActor().subject());
+        repository.findOwned(checkoutId, buyerId).orElseThrow(this::notFound);
+        String orderId = orders.orderIdByCheckout(checkoutId).orElse(null);
+        return new CheckoutOrderResolutionResponse(orderId, orderId != null);
     }
 
     // Creates a payment intent solely from the authenticated buyer's immutable checkout snapshot.
@@ -107,7 +150,8 @@ public class CheckoutPaymentService {
         }
         boolean currenciesMatch = checkout.items().stream()
                 .allMatch(item -> checkout.currency().equals(item.currency()));
-        boolean scopesValid = businessIds.stream().allMatch(id -> ULID.matcher(id).matches());
+        // Business IDs are opaque platform IDs and include approved legacy deterministic fixtures.
+        boolean scopesValid = businessIds.stream().allMatch(id -> BUSINESS_ID.matcher(id).matches());
         if (!currenciesMatch
                 || !scopesValid
                 || !"USD".equals(checkout.currency())
@@ -115,6 +159,14 @@ public class CheckoutPaymentService {
                 || checkout.cartSnapshotHash() == null
                 || !SNAPSHOT_HASH.matcher(checkout.cartSnapshotHash()).matches()
                 || checkout.total().compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn(
+                    "Checkout payment snapshot rejected checkoutId={} currenciesMatch={} scopesValid={} "
+                            + "currencySupported={} versionValid={} snapshotHashValid={} totalPositive={}",
+                    checkout.id(), currenciesMatch, scopesValid, "USD".equals(checkout.currency()),
+                    checkout.version() >= 0,
+                    checkout.cartSnapshotHash() != null
+                            && SNAPSHOT_HASH.matcher(checkout.cartSnapshotHash()).matches(),
+                    checkout.total().compareTo(BigDecimal.ZERO) > 0);
             throw invalidSnapshot();
         }
 
@@ -204,6 +256,25 @@ public class CheckoutPaymentService {
                 && validAction(intent)
                 && validError(intent);
         if (!matches) {
+            log.warn(
+                    "Payment intent response rejected checkoutId={} responsePresent={} checkoutMatches={} "
+                            + "versionMatches={} buyerMatches={} businessesMatch={} amountMatches={} "
+                            + "currencyMatches={} expiryMatches={} idValid={} providerValid={} statusValid={} "
+                            + "actionValid={} errorValid={}",
+                    command.checkoutId(), intent != null,
+                    intent != null && command.checkoutId().equals(intent.checkoutId()),
+                    intent != null && command.checkoutVersion() == intent.checkoutVersion(),
+                    intent != null && command.buyerId().equals(intent.buyerId()),
+                    intent != null && command.businessIds().equals(intent.businessIds()),
+                    intent != null && intent.amount() != null
+                            && command.amount().compareTo(intent.amount()) == 0 && validAmount(intent.amount()),
+                    intent != null && command.currency().equals(intent.currency()),
+                    intent != null && command.expiresAt().equals(intent.expiresAt()),
+                    intent != null && intent.id() != null && ULID.matcher(intent.id()).matches(),
+                    intent != null && bounded(intent.provider(), 64),
+                    intent != null && PAYMENT_STATUSES.contains(intent.status()),
+                    intent != null && validAction(intent),
+                    intent != null && validError(intent));
             throw new CheckoutException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "CHECKOUT_PAYMENT_UNAVAILABLE",

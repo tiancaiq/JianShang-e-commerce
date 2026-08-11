@@ -28,7 +28,7 @@ class OrderConfirmedV2PayloadFactoryTests {
                 id(2),
                 checkout(),
                 payment(),
-                List.of(id(100)),
+                List.of("01KXQBUSI00000000000000001"),
                 NOW);
 
         JsonNode payload = JSON.readTree(json);

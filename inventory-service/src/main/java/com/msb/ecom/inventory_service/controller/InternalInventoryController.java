@@ -5,6 +5,12 @@ import com.msb.ecom.inventory_service.dto.InternalInventoryAvailabilityResponse;
 import com.msb.ecom.inventory_service.dto.InventoryReservationReleaseRequest;
 import com.msb.ecom.inventory_service.dto.InventoryReservationRequest;
 import com.msb.ecom.inventory_service.dto.InventoryReservationResponse;
+import com.msb.ecom.inventory_service.dto.InventoryCancellationRestockRequest;
+import com.msb.ecom.inventory_service.dto.InventoryCancellationRestockResponse;
+import com.msb.ecom.inventory_service.service.InventoryCancellationRestockService;
+import com.msb.ecom.inventory_service.dto.InventoryReturnRestockRequest;
+import com.msb.ecom.inventory_service.dto.InventoryReturnRestockResponse;
+import com.msb.ecom.inventory_service.service.InventoryReturnRestockService;
 import com.msb.ecom.inventory_service.service.InternalInventoryAvailabilityService;
 import com.msb.ecom.inventory_service.service.InventoryReservationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,12 +32,18 @@ public class InternalInventoryController {
 
     private final InternalInventoryAvailabilityService availabilityService;
     private final InventoryReservationService reservationService;
+    private final InventoryCancellationRestockService cancellationRestockService;
+    private final InventoryReturnRestockService returnRestockService;
 
     public InternalInventoryController(
             InternalInventoryAvailabilityService availabilityService,
-            InventoryReservationService reservationService) {
+            InventoryReservationService reservationService,
+            InventoryCancellationRestockService cancellationRestockService,
+            InventoryReturnRestockService returnRestockService) {
         this.availabilityService = availabilityService;
         this.reservationService = reservationService;
+        this.cancellationRestockService = cancellationRestockService;
+        this.returnRestockService = returnRestockService;
     }
 
     @GetMapping("/{listingId}/availability")
@@ -88,5 +100,28 @@ public class InternalInventoryController {
                 reservationId,
                 idempotencyKey,
                 CorrelationIdFilter.current(servletRequest));
+    }
+
+    @PostMapping("/reservations/{reservationId}/cancellation-restocks")
+    public InventoryCancellationRestockResponse cancellationRestock(
+            @RequestHeader(name = INTERNAL_TOKEN_HEADER, required = false) String internalToken,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable String reservationId,
+            @RequestBody InventoryCancellationRestockRequest request,
+            HttpServletRequest servletRequest) {
+        return cancellationRestockService.restock(
+                internalToken, reservationId, idempotencyKey, request,
+                CorrelationIdFilter.current(servletRequest));
+    }
+
+    @PostMapping("/reservations/{reservationId}/return-restocks")
+    public InventoryReturnRestockResponse returnRestock(
+            @RequestHeader(name = INTERNAL_TOKEN_HEADER, required = false) String internalToken,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable String reservationId,
+            @RequestBody InventoryReturnRestockRequest request,
+            HttpServletRequest servletRequest) {
+        return returnRestockService.restock(internalToken, reservationId, idempotencyKey,
+                request, CorrelationIdFilter.current(servletRequest));
     }
 }

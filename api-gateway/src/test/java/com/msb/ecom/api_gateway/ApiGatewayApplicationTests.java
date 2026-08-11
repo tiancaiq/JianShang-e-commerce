@@ -277,6 +277,16 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void deferredBuyerOrderRouteReturnsSafeNotFoundInsteadOfUnexpectedError() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/orders")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
 	void businessOrderRouteRequiresAuthenticationEvenWhenDisabled() {
 		RestAssured.given()
 				.when()

@@ -1,7 +1,7 @@
 # V2-CART-03C Cart Integration, Header Feedback And Local Acceptance
 
-Status: cleanup green locally; runtime/browser acceptance remains deferred until
-the publication gate.
+Status: cleanup and local runtime/browser acceptance green; cart is enabled in
+the production frontend build while checkout remains disabled.
 
 Release: V2.
 
@@ -17,7 +17,7 @@ Depends on:
 ## Goal
 
 Finish the cart-only shopping path at the source level by proving the header,
-business listing entry, cart page, route gates, and default-off builds behave
+business listing entry, cart page, route gates, and capability-disabled builds behave
 as one bounded cart capability without exposing checkout, payment, order, or
 shipping paths.
 
@@ -46,7 +46,7 @@ Excluded:
 
 Source tests prove:
 
-- Disabled production configuration has no visible cart link and no cart
+- Capability-disabled configurations have no visible cart link and no cart
   service calls.
 - Cart-enabled authenticated layout shows `/cart` with an accessible count and
   loads the current cart once.
@@ -62,12 +62,12 @@ Source tests prove:
 - Individual listings remain cart-free.
 - Cart-only mode never renders a checkout route.
 
-## Deferred Runtime Acceptance
+## Runtime Acceptance
 
-Browser/runtime acceptance is recorded separately after the mandatory
-cart-only cleanup gate and publication path. This slice intentionally remains
-local-source only and does not start Docker, deploy, or mutate shared runtime
-data.
+Local browser/runtime acceptance covers business Add to cart, the authenticated
+badge, persisted quantity updates, validation, explicit availability limits,
+the checkout-disabled boundary, and two independently owned stores grouped by
+authoritative public store provenance through refresh and sign-out/sign-in.
 
 ## Cleanup Result
 
@@ -83,6 +83,5 @@ new commerce behavior:
 
 Still deferred:
 
-- Redis/Testcontainers cart persistence, Product MySQL commerce-context, and
-  browser/runtime acceptance remain CI/runtime gates because this cleanup did
-  not start Docker or shared local services.
+- Clean-host Redis/Testcontainers cart persistence and Product MySQL
+  commerce-context execution remain CI release gates.
