@@ -10,7 +10,8 @@ const SKU = 'MSB-CART-B-FIXTURE';
 const TITLE = 'Harbor Cart Fixture Tote';
 const FIXTURE_STOCK = 12;
 const FIRST_BUSINESS_ID = '01KXQBUSI00000000000000001';
-const FIRST_LISTING_ID = '01KXQMEH9KBPH5S7DPBFM0VBJ5';
+const FIRST_SKU = 'MSB-CART-A-FIXTURE';
+const FIRST_TITLE = 'Shen Cart Fixture Tag';
 const FIRST_FIXTURE_STOCK = 8;
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=',
@@ -36,12 +37,20 @@ async function main() {
   const firstAccessToken = await sellerAccessToken(firstSellerEmail, firstSellerPassword);
   const firstAuthorization = { Authorization: `Bearer ${firstAccessToken}` };
 
-  let listing = await findFixtureListing(authorization);
+  const harborConfig = {
+    businessId: BUSINESS_ID, sku: SKU, title: TITLE, stock: FIXTURE_STOCK,
+    amount: 7.5, city: 'Costa Mesa', region: 'CA', fileName: 'harbor-cart-fixture.png',
+  };
+  const shenConfig = {
+    businessId: FIRST_BUSINESS_ID, sku: FIRST_SKU, title: FIRST_TITLE, stock: FIRST_FIXTURE_STOCK,
+    amount: 1, city: 'Irvine', region: 'CA', fileName: 'shen-cart-fixture.png',
+  };
+  let listing = await findFixtureListing(authorization, harborConfig);
   if (!listing) {
     listing = await json(`${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items`, {
       method: 'POST',
       headers: jsonHeaders(authorization),
-      body: JSON.stringify(listingRequest()),
+      body: JSON.stringify(listingRequest(harborConfig)),
     }, [201]);
   }
   if (listing.businessId !== BUSINESS_ID || listing.storeId !== STORE_ID || listing.sellerType !== 'BUSINESS') {
@@ -51,40 +60,73 @@ async function main() {
     throw new Error('The deterministic fixture listing was removed and must be restored by an approved fixture migration.');
   }
 
-  if (listing.status === 'ACTIVE' && !matchesListingContract(listing)) {
-    listing = await lifecycle(listing, 'pause', authorization);
+  if (listing.status === 'ACTIVE' && !matchesListingContract(listing, harborConfig)) {
+    listing = await lifecycle(listing, 'pause', authorization, BUSINESS_ID);
   }
-  if (listing.status !== 'ACTIVE' && !matchesListingContract(listing)) {
+  if (listing.status !== 'ACTIVE' && !matchesListingContract(listing, harborConfig)) {
     listing = await json(
       `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}`,
       {
         method: 'PATCH',
         headers: jsonHeaders({ ...authorization, 'If-Match': String(listing.version) }),
-        body: JSON.stringify(listingRequest()),
+        body: JSON.stringify(listingRequest(harborConfig)),
       },
     );
   }
 
-  listing = await ensureConfirmedImage(listing, authorization);
+  listing = await ensureConfirmedImage(listing, authorization, harborConfig);
   if (listing.status === 'DRAFT') {
-    listing = await lifecycle(listing, 'publish', authorization);
+    listing = await lifecycle(listing, 'publish', authorization, BUSINESS_ID);
   } else if (listing.status === 'PAUSED') {
-    listing = await lifecycle(listing, 'relist', authorization);
+    listing = await lifecycle(listing, 'relist', authorization, BUSINESS_ID);
   }
   if (listing.status !== 'ACTIVE') {
     throw new Error(`Fixture listing did not become active; status=${listing.status}.`);
   }
 
+  let firstListing = await findFixtureListing(firstAuthorization, shenConfig);
+  if (!firstListing) {
+    firstListing = await json(`${PRODUCT_URL}/api/v1/businesses/${FIRST_BUSINESS_ID}/store/items`, {
+      method: 'POST', headers: jsonHeaders(firstAuthorization),
+      body: JSON.stringify(listingRequest(shenConfig)),
+    }, [201]);
+  }
+  if (firstListing.businessId !== FIRST_BUSINESS_ID || firstListing.sellerType !== 'BUSINESS') {
+    throw new Error('The first deterministic fixture SKU is bound to an unexpected business.');
+  }
+  if (firstListing.status === 'REMOVED') {
+    throw new Error('The first deterministic fixture listing was removed and cannot be reused.');
+  }
+  if (firstListing.status === 'ACTIVE' && !matchesListingContract(firstListing, shenConfig)) {
+    firstListing = await lifecycle(firstListing, 'pause', firstAuthorization, FIRST_BUSINESS_ID);
+  }
+  if (firstListing.status !== 'ACTIVE' && !matchesListingContract(firstListing, shenConfig)) {
+    firstListing = await json(
+      `${PRODUCT_URL}/api/v1/businesses/${FIRST_BUSINESS_ID}/store/items/${firstListing.id}`,
+      { method: 'PATCH', headers: jsonHeaders({ ...firstAuthorization, 'If-Match': String(firstListing.version) }),
+        body: JSON.stringify(listingRequest(shenConfig)) },
+    );
+  }
+  firstListing = await ensureConfirmedImage(firstListing, firstAuthorization, shenConfig);
+  if (firstListing.status === 'DRAFT') {
+    firstListing = await lifecycle(firstListing, 'publish', firstAuthorization, FIRST_BUSINESS_ID);
+  } else if (firstListing.status === 'PAUSED') {
+    firstListing = await lifecycle(firstListing, 'relist', firstAuthorization, FIRST_BUSINESS_ID);
+  }
+  if (firstListing.status !== 'ACTIVE') {
+    throw new Error(`First fixture listing did not become active; status=${firstListing.status}.`);
+  }
+
   const inventory = await ensureInventory(BUSINESS_ID, listing.id, FIXTURE_STOCK, authorization, 'business-b');
   const firstInventory = await ensureInventory(
-    FIRST_BUSINESS_ID, FIRST_LISTING_ID, FIRST_FIXTURE_STOCK, firstAuthorization, 'business-a',
+    FIRST_BUSINESS_ID, firstListing.id, FIRST_FIXTURE_STOCK, firstAuthorization, 'business-a',
   );
   const crossBusinessStatus = await statusOnly(
     `${PRODUCT_URL}/api/v1/businesses/${FIRST_BUSINESS_ID}/store/items/${listing.id}`,
     { headers: authorization },
   );
   const reverseBusinessStatus = await statusOnly(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${FIRST_LISTING_ID}`,
+    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${firstListing.id}`,
     { headers: authorization },
   );
   if (![403, 404].includes(crossBusinessStatus) || ![403, 404].includes(reverseBusinessStatus)) {
@@ -109,7 +151,7 @@ async function main() {
       price: listing.priceAmount,
       currency: listing.currency,
       inventoryAvailable: inventory.available,
-      firstBusinessListingId: FIRST_LISTING_ID,
+      firstBusinessListingId: firstListing.id,
       firstBusinessInventoryAvailable: firstInventory.available,
       reusableFixture: true,
       evidenceOrdersModified: false,
@@ -144,44 +186,44 @@ async function sellerAccessToken(username, password) {
   return token.access_token;
 }
 
-async function findFixtureListing(authorization) {
+async function findFixtureListing(authorization, config) {
   const page = await json(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/search?q=${encodeURIComponent(TITLE)}&limit=50`,
+    `${PRODUCT_URL}/api/v1/businesses/${config.businessId}/store/items/search?q=${encodeURIComponent(config.title)}&limit=50`,
     { headers: authorization },
   );
-  return page.data.find(item => item.sku === SKU) || null;
+  return page.data.find(item => item.sku === config.sku) || null;
 }
 
-function listingRequest() {
+function listingRequest(config) {
   return {
     sellerType: 'BUSINESS',
-    businessId: BUSINESS_ID,
+    businessId: config.businessId,
     categoryId: '01K00000000000000000000001',
-    title: TITLE,
-    description: 'Deterministic local-demo tote for multi-business cart acceptance.',
+    title: config.title,
+    description: 'Deterministic local-demo item for multi-business cart acceptance.',
     condition: 'NEW',
     conditionNotes: 'New local-demo fixture item.',
-    price: { amount: 7.5, currency: 'USD' },
+    price: { amount: config.amount, currency: 'USD' },
     negotiable: false,
-    location: { city: 'Costa Mesa', region: 'CA' },
-    sku: SKU,
-    quantity: FIXTURE_STOCK,
+    location: { city: config.city, region: config.region },
+    sku: config.sku,
+    quantity: config.stock,
   };
 }
 
-function matchesListingContract(listing) {
-  return listing.title === TITLE
-    && listing.sku === SKU
-    && Number(listing.priceAmount) === 7.5
+function matchesListingContract(listing, config) {
+  return listing.title === config.title
+    && listing.sku === config.sku
+    && Number(listing.priceAmount) === config.amount
     && listing.currency === 'USD'
-    && listing.quantity === FIXTURE_STOCK
-    && listing.publicCity === 'Costa Mesa'
-    && listing.publicRegion === 'CA';
+    && listing.quantity === config.stock
+    && listing.publicCity === config.city
+    && listing.publicRegion === config.region;
 }
 
-async function lifecycle(listing, action, authorization) {
+async function lifecycle(listing, action, authorization, businessId) {
   return json(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}/${action}`,
+    `${PRODUCT_URL}/api/v1/businesses/${businessId}/store/items/${listing.id}/${action}`,
     {
       method: 'POST',
       headers: { ...authorization, 'If-Match': String(listing.version) },
@@ -189,19 +231,19 @@ async function lifecycle(listing, action, authorization) {
   );
 }
 
-async function ensureConfirmedImage(listing, authorization) {
+async function ensureConfirmedImage(listing, authorization, config) {
   if (listing.images.some(image => image.uploadStatus === 'UPLOADED')) {
     return listing;
   }
   const checksum = createHash('sha256').update(PNG).digest('hex');
   const media = await json(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}/media/upload-request`,
+    `${PRODUCT_URL}/api/v1/businesses/${config.businessId}/store/items/${listing.id}/media/upload-request`,
     {
       method: 'POST',
       headers: jsonHeaders(authorization),
       body: JSON.stringify({
         contentType: 'image/png',
-        fileName: 'harbor-cart-fixture.png',
+        fileName: config.fileName,
         sizeBytes: PNG.length,
         checksumSha256: checksum,
       }),
@@ -211,7 +253,7 @@ async function ensureConfirmedImage(listing, authorization) {
   // The approved local-demo adapter is metadata-only; confirmation validates
   // the declared object metadata without requiring an external object store.
   await json(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}/media/${media.id}/confirm`,
+    `${PRODUCT_URL}/api/v1/businesses/${config.businessId}/store/items/${listing.id}/media/${media.id}/confirm`,
     {
       method: 'POST',
       headers: jsonHeaders(authorization),
@@ -219,14 +261,14 @@ async function ensureConfirmedImage(listing, authorization) {
     },
   );
   await json(
-    `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}/images`,
+    `${PRODUCT_URL}/api/v1/businesses/${config.businessId}/store/items/${listing.id}/images`,
     {
       method: 'PUT',
       headers: jsonHeaders(authorization),
-      body: JSON.stringify({ images: [{ mediaId: media.id, altText: 'Harbor cart fixture tote' }] }),
+      body: JSON.stringify({ images: [{ mediaId: media.id, altText: config.title }] }),
     },
   );
-  return json(`${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}`, {
+  return json(`${PRODUCT_URL}/api/v1/businesses/${config.businessId}/store/items/${listing.id}`, {
     headers: authorization,
   });
 }

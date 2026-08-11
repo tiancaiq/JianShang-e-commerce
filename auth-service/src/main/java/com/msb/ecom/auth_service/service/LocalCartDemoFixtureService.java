@@ -19,6 +19,9 @@ public class LocalCartDemoFixtureService {
     public static final String OWNER_USER_ID = "01D00000000000000000000002";
     public static final String OWNER_KEYCLOAK_SUB = "33333333-3333-4333-8333-333333333333";
     private static final String SHEN_OWNER_USER_ID = "01KXQ91NH440XN9GWEM4YEZ728";
+    private static final String SHEN_APPLICATION_ID = "01KXQAPPL00000000000000001";
+    private static final String SHEN_BUSINESS_ID = "01KXQBUSI00000000000000001";
+    private static final String SHEN_STORE_ID = SHEN_BUSINESS_ID;
     private static final String REVIEW_EVENT_ID = "01KZCARTB00000000000000004";
     private static final String REVIEWER_USER_ID = "01KZCARTB00000000000000009";
     private static final String STORE_NAME = "Harbor Cart Supply";
@@ -85,8 +88,27 @@ public class LocalCartDemoFixtureService {
                     resolvedOwnerSubject, now, OWNER_USER_ID);
         }
         if (shenOwnerSubject != null && !shenOwnerSubject.isBlank()) {
-            jdbcTemplate.update("update users set keycloak_sub = ?, updated_at = ? where id = ?",
-                    requireKeycloakSubject(shenOwnerSubject), now, SHEN_OWNER_USER_ID);
+            jdbcTemplate.update("""
+                    insert into users (
+                        id, keycloak_sub, email, email_verified, display_name, public_handle,
+                        phone, phone_verified, avatar_url, status, version, created_at, updated_at
+                    ) values (?, ?, ?, true, ?, ?, null, false, null, 'ACTIVE', 0, ?, ?)
+                    on duplicate key update
+                        keycloak_sub = values(keycloak_sub),
+                        email = values(email),
+                        email_verified = true,
+                        display_name = values(display_name),
+                        public_handle = values(public_handle),
+                        status = 'ACTIVE',
+                        updated_at = values(updated_at)
+                    """,
+                    SHEN_OWNER_USER_ID,
+                    requireKeycloakSubject(shenOwnerSubject),
+                    "shen.ban2@mycnmipss.org",
+                    "Shen Ban",
+                    "shen-ban",
+                    now,
+                    now);
         }
 
         jdbcTemplate.update("""
@@ -111,6 +133,9 @@ public class LocalCartDemoFixtureService {
                 values (?, 'PLATFORM_ADMIN', null, ?)
                 on duplicate key update granted_at = granted_at
                 """, REVIEWER_USER_ID, now);
+        if (shenOwnerSubject != null && !shenOwnerSubject.isBlank()) {
+            ensureShenBusiness(now);
+        }
         jdbcTemplate.update("""
                 insert into business_applications (
                     id, applicant_user_id, legal_name, business_type, country,
@@ -227,6 +252,59 @@ public class LocalCartDemoFixtureService {
                 true,
                 PUBLIC_CITY,
                 PUBLIC_REGION);
+    }
+
+    // Restores the first seller tenant that the multi-business Commerce fixture depends on.
+    private void ensureShenBusiness(Timestamp now) {
+        Integer existing = jdbcTemplate.queryForObject(
+                "select count(*) from businesses where id = ?", Integer.class, SHEN_BUSINESS_ID);
+        if (existing != null && existing == 0) {
+            jdbcTemplate.update("""
+                    insert into business_applications (
+                        id, applicant_user_id, legal_name, business_type, country,
+                        contact_email, contact_phone, public_city, public_region,
+                        website_url, description, status, submitted_at, reviewer_user_id,
+                        approved_business_id, decision_reason, decided_at, version,
+                        created_at, updated_at
+                    ) values (?, ?, ?, 'SOLE_PROPRIETORSHIP', 'US', ?, null, ?, ?, null, ?,
+                              'APPROVED', ?, ?, null, ?, ?, 1, ?, ?)
+                    """,
+                    SHEN_APPLICATION_ID, SHEN_OWNER_USER_ID, "Shen Ban Demo Store",
+                    "shen.ban2@mycnmipss.org", "Irvine", "CA",
+                    "Deterministic first-business fixture for local Commerce acceptance.",
+                    now, REVIEWER_USER_ID, "Approved local Commerce acceptance fixture.", now, now, now);
+            jdbcTemplate.update("""
+                    insert into businesses (
+                        id, application_id, legal_name, business_type, country, status,
+                        approved_at, approved_by, version, created_at, updated_at
+                    ) values (?, ?, ?, 'SOLE_PROPRIETORSHIP', 'US', 'ACTIVE', ?, ?, 0, ?, ?)
+                    """,
+                    SHEN_BUSINESS_ID, SHEN_APPLICATION_ID, "Shen Ban Demo Store",
+                    now, REVIEWER_USER_ID, now, now);
+            jdbcTemplate.update(
+                    "update business_applications set approved_business_id = ?, updated_at = ? where id = ?",
+                    SHEN_BUSINESS_ID, now, SHEN_APPLICATION_ID);
+        }
+        jdbcTemplate.update(
+                "update businesses set status = 'ACTIVE', updated_at = ? where id = ?",
+                now, SHEN_BUSINESS_ID);
+        jdbcTemplate.update("""
+                insert into stores (
+                    id, business_id, slug, name, description, logo_url, banner_url,
+                    support_email, support_phone, status, version, created_at, updated_at
+                ) values (?, ?, 'shen-ban-demo-store', 'Shen Ban Demo Store',
+                          'Local-demo storefront for multi-business Commerce verification.',
+                          null, null, 'shen.ban2@mycnmipss.org', null, 'ACTIVE', 0, ?, ?)
+                on duplicate key update
+                    slug = values(slug), name = values(name), description = values(description),
+                    support_email = values(support_email), status = 'ACTIVE', updated_at = values(updated_at)
+                """, SHEN_STORE_ID, SHEN_BUSINESS_ID, now, now);
+        jdbcTemplate.update("""
+                insert into business_memberships (
+                    business_id, user_id, role, status, invited_by, created_at, updated_at
+                ) values (?, ?, 'OWNER', 'ACTIVE', ?, ?, ?)
+                on duplicate key update role = 'OWNER', status = 'ACTIVE', updated_at = values(updated_at)
+                """, SHEN_BUSINESS_ID, SHEN_OWNER_USER_ID, REVIEWER_USER_ID, now, now);
     }
 
     private String requireKeycloakSubject(String value) {

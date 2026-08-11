@@ -38,7 +38,15 @@ function Set-LocalFixturePassword([string]$Username, [string]$Password) {
 Set-LocalFixturePassword 'trade.buyer@msb.local' $env:LOCAL_DEMO_BUYER_PASSWORD
 Set-LocalFixturePassword 'trade.seller@msb.local' $env:LOCAL_DEMO_BUYER_B_PASSWORD
 
-node (Join-Path $PSScriptRoot 'cart_second_business_fixture.mjs')
+$fixtureJson = node (Join-Path $PSScriptRoot 'cart_second_business_fixture.mjs') | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Deterministic commerce listing/inventory preparation failed.' }
+$fixture = $fixtureJson | ConvertFrom-Json
+$env:COMMERCE_RC_HARBOR_LISTING_ID = $fixture.fixture.listingId
+$env:COMMERCE_RC_SHEN_LISTING_ID = $fixture.fixture.firstBusinessListingId
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
+    Add-Content -LiteralPath $env:GITHUB_ENV -Value "COMMERCE_RC_HARBOR_LISTING_ID=$($env:COMMERCE_RC_HARBOR_LISTING_ID)"
+    Add-Content -LiteralPath $env:GITHUB_ENV -Value "COMMERCE_RC_SHEN_LISTING_ID=$($env:COMMERCE_RC_SHEN_LISTING_ID)"
+}
+Write-Output $fixtureJson.Trim()
 
 Write-Output 'Reusable commerce fixtures are ready. Preserved evidence orders were not deleted or rewritten.'

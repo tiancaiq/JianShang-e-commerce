@@ -64,9 +64,11 @@ class LocalCartDemoFixtureApplicationTests {
         }
 
         String persistedSubject = "44444444-4444-4444-8444-444444444444";
+        String shenSubject = "55555555-5555-4555-8555-555555555555";
         mockMvc.perform(post("/api/v1/internal/demo-fixtures/cart/second-business")
                         .header("X-Internal-Service-Token", "test-commerce-token")
-                        .header("X-Local-Demo-Owner-Subject", persistedSubject))
+                        .header("X-Local-Demo-Owner-Subject", persistedSubject)
+                        .header("X-Local-Demo-Shen-Owner-Subject", shenSubject))
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/internal/demo-fixtures/cart/second-business")
                         .header("X-Internal-Service-Token", "test-commerce-token"))
@@ -84,6 +86,16 @@ class LocalCartDemoFixtureApplicationTests {
         assertThat(jdbcTemplate.queryForObject(
                 "select keycloak_sub from users where id = '01D00000000000000000000002'",
                 String.class)).isEqualTo(persistedSubject);
+        assertThat(jdbcTemplate.queryForObject(
+                "select keycloak_sub from users where id = '01KXQ91NH440XN9GWEM4YEZ728'",
+                String.class)).isEqualTo(shenSubject);
+        assertThat(count("businesses", "id", "01KXQBUSI00000000000000001")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from business_memberships
+                where business_id = '01KXQBUSI00000000000000001'
+                  and user_id = '01KXQ91NH440XN9GWEM4YEZ728'
+                  and role = 'OWNER' and status = 'ACTIVE'
+                """, Integer.class)).isEqualTo(1);
     }
 
     @Test
