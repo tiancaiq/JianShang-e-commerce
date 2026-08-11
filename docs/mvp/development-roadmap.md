@@ -1169,6 +1169,12 @@ Approved slice order:
      inventory commit, multi-business immutable order snapshots, checkout
      `PAYMENT_PROCESSING -> COMPLETED`, history, and transactional
      `order.confirmed` outbox.
+   - `V2-ORD-01B` post-purchase reconciliation: implemented on 2026-08-03.
+     Checkout creation now records exact cart-line mutation identities; a
+     durable retry worker atomically removes only unchanged purchased lines
+     after confirmation and preserves newer buyer edits. Checkout/order store
+     names are immutable snapshots, and seller queue copy uses a redacted
+     marketplace-buyer label plus order number.
    - Cleanup: `V2-PAY-ORD-CLEAN-P0-01` verified the payment producer/order
      consumer boundary, disabled transport gates, strict non-coercing envelope,
      bounded money and response metadata, provider-event causation identity,
@@ -1218,9 +1224,19 @@ Approved slice order:
      Forward-only Order V5 owns optimistic group versioning, durable P7D
      command idempotency, append-only group history, and transactional
      `business_order.accepted` outbox persistence. Source verification is
-     pending; the business lane remains `0/3` until green.
+     complete; its MySQL concurrency failures were resolved on 2026-08-03 by
+     moving expiry purge outside the mutation transaction and retrying only
+     fresh-transaction concurrency victims.
+   - `V2-SHP-01B/C` bounded local-demo fulfillment is implemented and
+     source/MySQL/UI verified on 2026-08-03. Order V8 owns
+     `ACCEPTED -> PROCESSING -> SHIPPED -> DELIVERED`, exactly one manual
+     shipment per business group, append-only group/shipment histories,
+     durable idempotency, optimistic locking, and transactional outbox rows.
+     `DELIVERED` is explicitly a local simulation. Browser verification is
+     pending.
    - Reference:
      `docs/v2/commerce/v2-shp-01a-accept-paid-business-fulfillment-group.md`.
+     `docs/v2/commerce/v2-shp-01b-c-bounded-manual-fulfillment.md`.
 12. V2-NOT-01 notifications.
    - `V2-NOT-01A` reconstructs Notification Service for default-off,
      Notification-owned MySQL persistence and a direct/fake
@@ -1236,14 +1252,28 @@ Approved slice order:
      center over the NOT-01B API. It remains local/source-only; NOT-01A/B
      disposable MySQL verification is still mandatory before the business lane
      can advance.
-   - Kafka, email, preferences, purge, polling, badge counts, and runtime
-     activation remain deferred.
+   - `V2-NOT-01D` maps the authoritative confirmation, acceptance,
+     processing, shipment, demo-delivery, and completed-cancellation outbox
+     events into durable buyer/business in-app notifications. It adds
+     retryable local HTTP delivery, server-authoritative badge counts, seller
+     and expanded buyer centers, and bounded commerce-runtime activation
+     without changing a commerce state machine.
+   - Kafka, WebSockets, email, SMS, push, preferences, purge, marketing, and
+     provider delivery remain deferred.
    - Reference:
      `docs/v2/commerce/v2-not-01a-order-confirmed-in-app-notification.md`.
    - Reference:
      `docs/v2/commerce/v2-not-01b-authenticated-notification-read-api.md`.
    - Reference:
      `docs/v2/commerce/v2-not-01c-notification-center-ui-gateway.md`.
+   - Reference:
+     `docs/v2/commerce/v2-not-01d-event-driven-commerce-notifications.md`.
+13. V2-RET-01 post-delivery business-group returns.
+   - Dedicated default-off return aggregate, deterministic 30-day local-demo
+     policy, demo shipment, explicit disposition, group-merchandise fake refund,
+     event-driven notifications, and isolated buyer/seller UI.
+   - Reference:
+     `docs/v2/commerce/v2-ret-01-post-delivery-business-group-returns.md`.
 
 ### V3
 
@@ -1300,8 +1330,10 @@ this sequence.
 9. `V2-NOT-01A`: buyer `ORDER_CONFIRMED` persistence and fake consumer.
 10. `V2-NOT-01B`: authenticated buyer read API.
 11. `V2-NOT-01C`: default-off notification center UI and gateway boundary.
-12. Later `V2-NOT-01` slices: transport, badge/count behavior, preferences,
-    email, then other approved buyer/business event classes.
+12. `V2-NOT-01D`: bounded transport, buyer/business event projections,
+    server-authoritative badge/count behavior, runtime and browser acceptance.
+13. Later `V2-NOT-01` slices: preferences, email, and other channels only
+    after separate product/provider approval.
 
 No real payment provider is activated until reconciliation, recovery,
 production legal/provider decisions, and explicit rollout approval are green.
@@ -1340,3 +1372,14 @@ The next checkpoint is not measured only by test totals. It requires:
 - each state-changing command has an actor, precondition, idempotency key,
   immutable history/outbox effect, and explicit compensation boundary; and
 - shared frontend, browser, gateway, and runtime ownership remains serialized.
+
+### 8.6 V2 commerce release-candidate stabilization
+
+- `V2-COM-RC-01`: one non-feature stabilization gate for the completed bounded
+  V2 commerce lifecycle. It standardizes the local composition and compiled
+  frontend profile, clean MySQL 8.4 migrations, deterministic reusable
+  fixtures, real-service fulfillment/return and cancellation journeys,
+  restart/replay and concurrency gates, authorization/accounting invariants,
+  safe diagnostics, browser acceptance, CI, and the authoritative runtime
+  runbook. Real providers, carriers, payouts, and later-release features remain
+  deferred. See `docs/v2/commerce/v2-com-rc-01-commerce-release-candidate-gate.md`.

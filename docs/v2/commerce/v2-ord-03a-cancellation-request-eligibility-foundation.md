@@ -121,6 +121,11 @@ V6 adds one immutable future/test version,
 selected checkout policy and does not activate cancellation for current
 orders.
 
+The seed uses `2037-01-01T00:00:00Z`, which remains future-dated for this
+bounded local test policy while fitting MySQL's `TIMESTAMP(6)` range. The
+previous `2099-01-01` value was outside that range and caused MySQL 8.4 to
+reject V6 with error 1292 before the cancellation foundation could migrate.
+
 Every business group is eligible only when:
 
 - the buyer order is `CONFIRMED` with payment status `SUCCEEDED`;

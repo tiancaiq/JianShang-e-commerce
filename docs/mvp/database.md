@@ -622,6 +622,14 @@ prevents duplicate increments when completion events are retried.
 
 Ownership is defined by V2-COM-00:
 
+The V2 commerce release-candidate gate adds a forward-only Order schema
+constraint in `V14__enforce_return_terminal_state_consistency.sql`. A received
+or completed business-group return must have `received_at` and an explicit
+inventory disposition; a completed return must also have a succeeded refund,
+refund identifier, positive refund amount, and completion timestamp. Earlier
+return states must not carry receipt or completion evidence. This hardens the
+existing state model without changing schema ownership or adding a new state.
+
 - `inventory-service` owns `inventory_items`, `inventory_movements`, and
   `inventory_reservations`.
 - `order-service` owns the Redis cart namespace plus checkout, order,
@@ -737,7 +745,7 @@ Immutable snapshot:
 
 - checkout
 - listing and business IDs
-- title, SKU, condition
+- immutable store name, title, SKU, condition
 - quantity
 - unit price
 - shipping, tax, discount allocations
@@ -757,12 +765,22 @@ Buyer-facing order header:
 
 Unique order number and checkout reference.
 
+### `checkout_cart_reconciliations`
+
+Order Service Flyway V7 stores one durable post-purchase cart command per
+checkout plus its original cart version and opaque Redis owner key.
+`checkout_cart_reconciliation_items` stores each listing ID and exact cart-line
+mutation identity. Work becomes eligible only when the checkout is
+`COMPLETED`; Redis reconciliation is atomic and independently retryable, so a
+cart outage never rolls back or duplicates a confirmed order. Untouched
+purchased lines are removed while lines changed after checkout began remain.
+
 ### `business_orders`
 
 One fulfillment group per business within an order:
 
 - order
-- business/store
+- business/store and immutable store name
 - seller-visible number
 - fulfillment status
 - cancellation status
@@ -808,6 +826,17 @@ The event aggregate and partition identity are the business-order ID. Payload
 is limited to event identity/version/time, business-order ID, parent order ID,
 business ID, `ACCEPTED`, and business-order version.
 
+Order Service Flyway V8 expands the authoritative group states to
+`PENDING_ACCEPTANCE|ACCEPTED|PROCESSING|SHIPPED|DELIVERED` and the existing
+append-only history constraint to the corresponding linear transitions.
+It does not update parent order, payment, inventory, or sibling groups.
+
+### `business_order_fulfillment_commands`
+
+V8 stores durable processing, manual-shipment, and local-demo delivery
+commands with canonical request hashes, completed result metadata, P7D expiry,
+and unique `(actor_user_id, business_id, operation, idempotency_key)`.
+
 ### `order_items`
 
 Immutable listing snapshot tied to `business_order_id`.
@@ -841,7 +870,7 @@ recovered after restart.
 
 `orders`, `business_orders`, `order_items`, `order_addresses`, and
 `order_status_history` copy the immutable checkout totals, business/store
-scope, item fields, policy version, and shipping address. Unique checkout and
+scope and store name, item fields, policy version, and shipping address. Unique checkout and
 payment-intent keys enforce one buyer order; unique `(order_id, business_id)`
 enforces one fulfillment group per business. Platform fee projection remains
 null until a later approved money-movement slice.
@@ -852,16 +881,16 @@ checkout `COMPLETED`, processed-event completion, and version-1
 
 ### `shipments`
 
-Business order, carrier, tracking number, status, shipped/delivered timestamps,
-and provider reference.
+V8 stores exactly one `LOCAL_DEMO_MANUAL` shipment per business order group,
+manual carrier/service/tracking, `SHIPPED|DELIVERED`, shipment version, and
+shipped/delivered/create/update timestamps. Unique `business_order_id`
+enforces the one-shipment boundary.
 
-### `shipment_items`
+### `shipment_status_history`
 
-Maps partial shipment quantities to order items.
-
-### `shipment_events`
-
-Append-only carrier status events with provider event ID.
+V8 stores append-only `NOT_CREATED -> SHIPPED -> DELIVERED` local-demo
+transitions with actor, correlation, causation, and unique shipment version.
+`shipment_items` and external carrier events remain deferred.
 
 ## 7. Payment Schema (V2)
 
@@ -907,6 +936,16 @@ Forward-only payment-service migrations:
 
 Stores order/payment, amount, reason, status, provider reference, requester,
 approver where required, and idempotency key.
+
+### `payout_projections`
+
+### Post-delivery return tables (`V2-RET-01`)
+
+Order V13 owns `business_order_returns`, append-only return history, durable
+commands, and one stable demo return shipment. Unique business-order scope
+enforces one return per group. Inventory V5 owns one idempotent group-scoped
+return-restock record. Payment V7 owns one deterministic group refund and
+attempt history per return; cancellation refund records remain unchanged.
 
 ### `payout_projections`
 
@@ -1006,6 +1045,15 @@ allowlisted route, read state, and timestamps. There is no cross-service
 foreign key and no source envelope, email, address, payment, provider data,
 source hash, raw JSON, or consumer metadata in the UI/API projection.
 
+`V2-NOT-01D` adds `recipient_scope_type` and `recipient_scope_id` so this
+table isolates `USER` and `BUSINESS` streams, plus optional `business_id` and
+`business_order_id` deep-link projection fields. Durable unique
+`(recipient_scope_type, recipient_scope_id, source_event_id, type)` prevents
+duplicate user-visible projections while allowing one source event to notify
+a buyer and multiple businesses independently. Scope-created and scope-unread
+indexes support newest-first pages and count/read commands. The legacy
+`recipient_user_id` remains for NOT-01A/B compatibility.
+
 ### `notification_source_events`
 
 Durable `(consumer_name, source_event_id)` deduplication with source
@@ -1015,6 +1063,14 @@ metadata. Supported creation and notification projection commit atomically.
 Same-ID/same-hash replay is safe; same-ID/different-hash conflicts. Unsupported
 events and identifiable poison are terminally rejected. Purge is unavailable
 and disabled pending legal and operations approval.
+
+### `order_outbox_events` notification delivery cursor
+
+`V2-NOT-01D` adds Notification-specific attempt count, next-attempt time,
+published time, and bounded last-error code to Order Service's existing
+outbox. These columns do not change event creation or commerce state.
+Supported rows retry independently until Notification Service durably accepts
+them; consumer uniqueness makes an uncertain HTTP outcome safe to replay.
 
 ### `notification_preferences`
 

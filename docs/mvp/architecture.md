@@ -353,8 +353,14 @@ strict direct/fake `order.confirmed` version-2 events. `V2-NOT-01B` adds a
 default-off authenticated read API that resolves the active application user
 through Auth Service `GET /api/v1/users/me` using only the relayed bearer and
 correlation ID. `V2-NOT-01C` adds the default-off gateway boundary and buyer
-account notification center over that read API. Kafka, email, preferences,
-polling, badge counts, and runtime activation remain deferred.
+account notification center over that read API. `V2-NOT-01D` adds a retryable
+Order-outbox-to-Notification HTTP adapter for approved commerce events,
+business-scoped seller projections, server-authoritative unread counts,
+buyer/seller centers, and bounded runtime activation. Delivery occurs only
+after the authoritative commerce transaction commits, so an unavailable
+Notification Service cannot roll that transaction back. Kafka, WebSockets,
+email, SMS, push, preferences, provider deliveries, and marketing remain
+deferred.
 
 Responsibilities:
 
@@ -743,3 +749,12 @@ Resolve before related implementation:
 5. Realtime chat transport: WebSocket or SSE plus HTTP commands.
 
 These choices may change adapters, not the domain contracts in this document.
+
+## V2-RET-01 return ownership addendum
+
+Post-delivery returns are a dedicated Order Service business-group aggregate,
+not cancellation state. Inventory Service owns group-scoped return movements;
+Payment Service extends its deterministic refund adapter for immutable group
+merchandise refunds; Notification Service consumes committed return outbox
+events. Each service writes only its schema and all capabilities remain
+default-off outside the bounded commerce runtime.
