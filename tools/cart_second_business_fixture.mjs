@@ -208,12 +208,8 @@ async function ensureConfirmedImage(listing, authorization) {
     },
     [201],
   );
-  const uploadPath = new URL(media.uploadUrl, PRODUCT_URL).pathname;
-  await empty(`${PRODUCT_URL}${uploadPath}`, {
-    method: 'PUT',
-    headers: { ...authorization, 'Content-Type': 'image/png' },
-    body: PNG,
-  }, [204]);
+  // The approved local-demo adapter is metadata-only; confirmation validates
+  // the declared object metadata without requiring an external object store.
   await json(
     `${PRODUCT_URL}/api/v1/businesses/${BUSINESS_ID}/store/items/${listing.id}/media/${media.id}/confirm`,
     {
@@ -287,14 +283,6 @@ async function json(url, options = {}, expected = [200]) {
     throw new Error(`${options.method || 'GET'} ${new URL(url).pathname} failed (${response.status}): ${body.slice(0, 300)}`);
   }
   return checkedJson(response);
-}
-
-async function empty(url, options = {}, expected = [200]) {
-  const response = await fetch(url, options);
-  if (!expected.includes(response.status)) {
-    const body = await response.text();
-    throw new Error(`${options.method || 'GET'} ${new URL(url).pathname} failed (${response.status}): ${body.slice(0, 300)}`);
-  }
 }
 
 async function checkedJson(response) {
