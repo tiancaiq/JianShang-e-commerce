@@ -5,7 +5,7 @@
 [![Spring Boot 3.4.2](https://img.shields.io/badge/Spring%20Boot-3.4.2-6DB33F.svg)](pom.xml)
 [![Angular 20](https://img.shields.io/badge/Angular-20-DD0031.svg)](frontend/package.json)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg)](agent-service/pyproject.toml)
-[![Pull Request Quality](https://github.com/Arkrly/msb-ecom/actions/workflows/pull-request-quality.yml/badge.svg?branch=dev)](https://github.com/Arkrly/msb-ecom/actions/workflows/pull-request-quality.yml)
+[![Pull Request Quality](https://github.com/tiancaiq/JianShang-e-commerce/actions/workflows/pull-request-quality.yml/badge.svg?branch=dev)](https://github.com/tiancaiq/JianShang-e-commerce/actions/workflows/pull-request-quality.yml)
 [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](docker-compose.yml)
 [![Kafka](https://img.shields.io/badge/Apache%20Kafka-Event%20Bus-231F20.svg)](docker-compose.yml)
 [![Keycloak](https://img.shields.io/badge/Keycloak-OIDC-4D4D4D.svg)](infra/keycloak/)
@@ -17,7 +17,7 @@
 
 MSB Commerce is a full-stack marketplace and commerce platform built to explore how a system can support two different transaction models without conflating them: peer-to-peer listings, where buyers and individual sellers arrange payment and delivery themselves, and business-store commerce, where the platform owns cart, inventory, checkout, payment, and order workflows.
 
-The repository is an engineering portfolio project. It demonstrates service boundaries, identity and tenant isolation, transactional data modeling, asynchronous workflows, secure media handling, and a guarded AI-agent architecture across a Java/Spring backend, Angular frontend, and Python/FastAPI agent service. The public marketplace, seller workflows, chat, and moderation form the implemented MVP. Commerce and AI capabilities are developed behind default-off feature gates until their release evidence is complete.
+The repository is an engineering portfolio project. It demonstrates service boundaries, identity and tenant isolation, transactional data modeling, asynchronous workflows, secure media handling, and a guarded AI-agent architecture across a Java/Spring backend, Angular frontend, and Python/FastAPI agent service. The marketplace, seller, chat, moderation, and administrator-enforcement milestones are implemented. The bounded V2 local/demo commerce lifecycle has passed its release-candidate gate; external provider rollout and AI capabilities remain explicitly gated.
 
 The authoritative product and technical contracts live in [`docs/mvp`](docs/mvp/), with V2 commerce plans in [`docs/v2/commerce`](docs/v2/commerce/).
 
@@ -38,6 +38,16 @@ The project is deliberately broader than an online catalog. It is a working envi
 | **Identity and security** | Keycloak OIDC, Spring Security, CSRF, tenant isolation, service authentication |
 | **AI engineering** | RAG, LangChain ReAct tools, citations, deterministic evaluation, default-off release gates |
 | **Delivery and quality** | Docker Compose, GitHub Actions, Testcontainers, browser and architecture tests |
+
+### Current Release Status
+
+| Capability | Status |
+| --- | --- |
+| Marketplace MVP | Implemented and verified |
+| Admin moderation and enforcement | Milestones complete |
+| Bounded V2 local/demo commerce | Release-candidate gate passed |
+| AI agent capabilities | Source-complete and default-off pending rollout evidence |
+| External commerce integrations | Deferred until provider and operational decisions are approved |
 
 ## Architecture
 
@@ -84,7 +94,7 @@ The live site is a curated demo deployment. It may trail the repository, and def
 
 ![MSB Commerce public marketplace](marketplace-images-fixed.png)
 
-Authenticated seller, admin, cart, and AI-assistant screenshots will be added after their release gates and browser acceptance checks are complete.
+Additional authenticated seller, admin, commerce, and AI-assistant screenshots are planned; the live deployment may not expose every repository capability.
 
 ## Highlights
 
@@ -123,25 +133,24 @@ Feature status is intentionally explicit: source-complete does not mean enabled 
 - Individual seller profiles plus versioned listing and media creation/edit flows.
 - Business onboarding, store profiles and business listing management.
 - Participant-authorized listing chat.
-- Admin business approval, listing moderation, request-changes, approval and removal workflows with history.
+- Fine-grained admin roles, business approval, listing moderation, user/business/listing enforcement, dry-run impact previews, reversible controls, ownership protection, and normalized audit timelines.
+- Bounded local/demo business commerce covering Redis cart, inventory reservation, checkout, fake-provider payment, orders, fulfillment, cancellation compensation, returns, refunds, and durable in-app notifications. The `V2-COM-RC-01` release-candidate gate is green.
 - Responsive Angular surfaces for marketplace, account, seller, and admin jobs.
 - Shared correlation/error handling, storage adapters, test utilities and architecture checks.
 
-### In progress / default-off
+### Default-off / rollout-gated
 
-- **Business cart:** Redis-backed, store-only cart APIs, validation and an Amazon-style cart UI are implemented behind independent gateway/frontend flags. Redis concurrency/retry, publication and browser acceptance evidence remain release gates.
-- **Business checkout and inventory:** inventory reservations, immutable checkout snapshots, totals and recovery foundations exist with local-demo policy adapters; activation and browser release evidence remain gated.
-- **Payment and orders:** fake provider intents, HMAC-verified webhooks, durable outbox dispatch, payment-confirmed order creation, and buyer/business order read models are implemented but not connected to live payment or event transport.
-- **Notifications:** persistence, authenticated reads, gateway routing and account UI are source-complete and default-off; delivery transports and broader event coverage are deferred.
+- **Business commerce:** the bounded lifecycle is release-candidate verified for local/demo use. Production activation still requires real payment, carrier, payout, dispute, reconciliation, and operational rollout decisions.
+- **Notifications:** durable in-app persistence, authenticated reads, gateway routing, event coverage, and account UI are implemented. External delivery transports and operational preferences remain deferred.
 - **AI customer service and discovery:** authenticated sessions, hybrid RAG, citations, ReAct discovery, comparison and clarification behavior, history, and Angular chat surfaces are implemented behind capability and kill-switch gates. Offline evaluation is deterministic; production quality, latency, cost and rollout evidence are still blocking activation.
 - **AI listing proposals:** image-to-listing proposals and seller-confirmed field application are implemented behind default-off gates; the seller remains the final authority and Product Service performs the versioned write.
-- **Cancellation foundation:** buyer cancellation eligibility and immutable request history are source-complete but await the remaining database/release evidence and downstream refund/compensation work.
 
 ### Planned
 
 - Production payment-provider onboarding, capture, transfers, payouts, refunds, disputes and reconciliation.
-- Cancellation completion with refund orchestration and inventory compensation.
-- Notification transport, unread counts, preferences, retention and additional domain-event coverage.
+- Production carrier integration, partial-return handling, and operational compensation/reconciliation tooling.
+- Notification delivery transports, preferences, and retention policies.
+- Admin reporting, appeals, and later-phase trust tooling beyond the completed enforcement milestone.
 - Production AI evaluation, policy approval, controlled rollout, cost/latency monitoring and rollback evidence.
 - Removal of legacy infrastructure paths after all active services and local tooling no longer depend on them.
 
@@ -159,7 +168,7 @@ See the [MVP roadmap](docs/mvp/development-roadmap.md) and [V2 commerce plan](do
 | Order Service | 8081 | Redis cart, checkout snapshots, order orchestration and order views | MySQL `order_service`; Redis for temporary cart state |
 | Inventory Service | 8082 | Business stock and reservation lifecycle | MySQL `inventory_service` |
 | Notification Service | 8083 | Durable in-app notification projection and reads | MySQL `notification_service` |
-| Payment Service | 8084 | Provider-neutral intent, verified webhook and outbox foundations | MySQL `payment_service`; outside the default Maven reactor |
+| Payment Service | 8084 | Provider-neutral intent, verified webhook and outbox foundations | MySQL `payment_service` |
 | Agent Service | 8086 | RAG, customer assistance, discovery, proposal workflows and evaluation | MySQL `agent`; OpenSearch is derived |
 
 ## Repository Structure
@@ -172,7 +181,7 @@ See the [MVP roadmap](docs/mvp/development-roadmap.md) and [V2 commerce plan](do
 | `chat-service/` | Listing conversations and messages |
 | `inventory-service/` | Business inventory and reservations |
 | `order-service/` | Cart, checkout, order orchestration and buyer/business order views |
-| `payment-service/` | Default-off provider-neutral payment foundations; built independently of the root reactor |
+| `payment-service/` | Provider-neutral payment, verified webhook, refund, and outbox foundations |
 | `notification-service/` | Default-off durable in-app notification projection and API |
 | `agent-service/` | FastAPI AI runtime, RAG ingestion/retrieval, agents, persistence and evaluations |
 | `frontend/` | Angular marketplace, account, seller and admin interfaces plus browser tests |
@@ -196,8 +205,8 @@ See the [MVP roadmap](docs/mvp/development-roadmap.md) and [V2 commerce plan](do
 ### 1. Clone and configure local defaults
 
 ```powershell
-git clone https://github.com/Arkrly/msb-ecom.git
-Set-Location msb-ecom
+git clone https://github.com/tiancaiq/JianShang-e-commerce.git
+Set-Location JianShang-e-commerce
 docker compose config --quiet
 ```
 
@@ -244,6 +253,13 @@ npm run build
 npm test -- --watch=false --browsers=ChromeHeadless
 ```
 
+Browser acceptance (after starting the required local/demo stack):
+
+```powershell
+Set-Location frontend
+npx playwright test --project=chromium
+```
+
 Agent Service:
 
 ```powershell
@@ -273,22 +289,12 @@ The Agent process can start without an API key for health checks, but readiness 
 - **AI quality is not implied by a successful model call.** Grounding, citations, source-version checks, tool authorization, injection resistance, offline evaluation and rollout gates are separate engineering concerns.
 - **Feature flags require end-to-end verification.** A disabled feature should perform no repository, downstream API or provider work—not merely hide its Angular route.
 
-## What I Learned
-
-- How to decompose a product into bounded services without creating a shared business-logic layer.
-- Why authentication at the gateway must be paired with authorization and tenant isolation inside every owning service.
-- How outboxes, idempotency, optimistic locking and immutable history make asynchronous workflows recoverable.
-- How forward-only migrations, contract tests and default-off flags reduce risk while a large system evolves.
-- How to treat model output, retrieved text and tool calls as untrusted inputs rather than privileged application logic.
-- How CI, disposable infrastructure tests and browser acceptance complement one another; none alone proves a distributed feature is ready.
-
 ## Future Improvements
 
-- Close the remaining cart mutation concurrency/idempotency contract and run the full local browser acceptance matrix.
-- Activate commerce slices only after exact-revision CI, disposable database, runtime and browser evidence is green.
-- Select and integrate a real marketplace payment provider after legal, payout, refund and dispute ownership decisions are approved.
-- Complete cancellation, refund, inventory compensation and reconciliation workflows.
-- Add notification delivery transports and operational preferences without weakening in-app durability.
+- Select and integrate production payment, carrier, payout, dispute, and reconciliation providers after ownership and compliance decisions are approved.
+- Extend the verified bounded commerce lifecycle with partial returns and production-grade operational recovery tooling.
+- Add notification delivery transports and operational preferences without weakening durable in-app delivery.
+- Add admin reporting and appeals while retaining the current permission, ownership, concurrency, and audit boundaries.
 - Collect controlled production evidence for AI answer quality, privacy, latency and cost before enabling a cohort.
 - Simplify local orchestration and retire legacy database/tooling paths once no verified workflow depends on them.
 
