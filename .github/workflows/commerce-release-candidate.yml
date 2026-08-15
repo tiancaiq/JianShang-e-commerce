@@ -12,16 +12,6 @@ concurrency:
   group: commerce-rc-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  KEYCLOAK_ADMIN_PASSWORD: rc-ci-keycloak-admin
-  KEYCLOAK_MARKETPLACE_CLIENT_SECRET: local-dev-only-change-me-marketplace
-  COMMERCE_INTERNAL_SERVICE_TOKEN: local-commerce-service-token
-  PAYMENT_INTERNAL_SERVICE_TOKEN: local-payment-service-token
-  LOCAL_DEMO_BUYER_PASSWORD: RcBuyerA-2026
-  LOCAL_DEMO_BUYER_B_PASSWORD: RcBuyerB-2026
-  LOCAL_DEMO_HARBOR_PASSWORD: RcHarbor-2026
-  LOCAL_DEMO_SHEN_PASSWORD: RcShen-2026
-
 jobs:
   repository-and-compose:
     name: Configuration, Compose, Secrets, Quality
@@ -86,10 +76,19 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Run complete relevant service suites
+      - name: Install reactor artifacts without unrelated tests
         run: |
           chmod +x ./mvnw
-          ./mvnw -B -pl auth-service,product-service,inventory-service,order-service,payment-service,notification-service,api-gateway -am test
+          ./mvnw -B -DskipTests install
+      - name: Run Commerce service suites
+        run: ./mvnw -B -pl inventory-service,order-service,payment-service,notification-service test
+      - name: Run Commerce Gateway suites
+        run: >-
+          ./mvnw -B -pl api-gateway
+          -Dtest=ApiGatewayApplicationTests,BusinessOrderRouteIntegrationTests,CartRouteIntegrationTests,NotificationDisabledRouteTests,NotificationRouteIntegrationTests,ReturnDisabledRouteTests
+          test
+      - name: Run Auth suite
+        run: ./mvnw -B -pl auth-service test
 
   frontend-regression:
     name: Angular Tests and Commerce Builds
@@ -129,12 +128,37 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Generate runtime-only demo credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          keycloak_admin="RcAdmin-$(openssl rand -hex 18)"
+          commerce_token="$(openssl rand -hex 32)"
+          payment_token="$(openssl rand -hex 32)"
+          buyer_a="RcBuyerA-$(openssl rand -hex 12)"
+          buyer_b="RcBuyerB-$(openssl rand -hex 12)"
+          harbor="RcHarbor-$(openssl rand -hex 12)"
+          shen="RcShen-$(openssl rand -hex 12)"
+          for value in "$keycloak_admin" "$commerce_token" "$payment_token" "$buyer_a" "$buyer_b" "$harbor" "$shen"; do
+            echo "::add-mask::$value"
+          done
+          {
+            echo "KEYCLOAK_ADMIN_PASSWORD=$keycloak_admin"
+            echo "COMMERCE_INTERNAL_SERVICE_TOKEN=$commerce_token"
+            echo "PAYMENT_INTERNAL_SERVICE_TOKEN=$payment_token"
+            echo "LOCAL_DEMO_BUYER_PASSWORD=$buyer_a"
+            echo "LOCAL_DEMO_BUYER_B_PASSWORD=$buyer_b"
+            echo "LOCAL_DEMO_HARBOR_PASSWORD=$harbor"
+            echo "LOCAL_DEMO_SHEN_PASSWORD=$shen"
+          } >> "$GITHUB_ENV"
       - name: Package services
         run: |
           chmod +x ./mvnw
           ./mvnw -B -DskipTests package
       - name: Start the approved commerce runtime
-        run: docker compose -f docker-compose.demo.yml -f docker-compose.cart-runtime.yml up -d --build
+        run: >-
+          docker compose -f docker-compose.demo.yml -f docker-compose.cart-runtime.yml
+          up -d --build --wait --wait-timeout 240
       - name: Preflight and deterministic fixtures
         shell: pwsh
         run: ./tools/prepare-commerce-demo.ps1

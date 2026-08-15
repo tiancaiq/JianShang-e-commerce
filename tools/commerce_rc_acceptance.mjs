@@ -8,13 +8,15 @@ const KEYCLOAK = 'http://127.0.0.1:8181';
 const GATEWAY = 'http://127.0.0.1:9000';
 const HARBOR_BUSINESS = '01KZCARTB00000000000000002';
 const SHEN_BUSINESS = '01KXQBUSI00000000000000001';
-const HARBOR_LISTING = '01KZ3CF59Z42DG2M0AZ8FQ1729';
-const SHEN_LISTING = '01KXQMEH9KBPH5S7DPBFM0VBJ5';
+const HARBOR_LISTING = process.env.COMMERCE_RC_HARBOR_LISTING_ID || '01KZ3CF59Z42DG2M0AZ8FQ1729';
+const SHEN_LISTING = process.env.COMMERCE_RC_SHEN_LISTING_ID || '01KXQMEH9KBPH5S7DPBFM0VBJ5';
 const RUN_ID = Date.now().toString(36);
+process.env.KEYCLOAK_MARKETPLACE_CLIENT_SECRET ||= containerEnv('msb-demo-api-gateway', 'KEYCLOAK_MARKETPLACE_CLIENT_SECRET');
 const required = [
   'LOCAL_DEMO_BUYER_PASSWORD', 'LOCAL_DEMO_BUYER_B_PASSWORD',
   'LOCAL_DEMO_HARBOR_PASSWORD', 'LOCAL_DEMO_SHEN_PASSWORD',
   'KEYCLOAK_MARKETPLACE_CLIENT_SECRET', 'PAYMENT_INTERNAL_SERVICE_TOKEN',
+  'COMMERCE_RC_HARBOR_LISTING_ID', 'COMMERCE_RC_SHEN_LISTING_ID',
 ];
 for (const name of required) {
   if (!process.env[name]) throw new Error(`Set ${name} before running the Commerce RC acceptance gate.`);
@@ -290,6 +292,9 @@ async function poll(action, accepted, name, attempts = 40) {
 }
 
 function docker(action, container) { execFileSync('docker', [action, container], { stdio: 'ignore' }); }
+function containerEnv(container, name) {
+  return execFileSync('docker', ['exec', container, 'printenv', name], { encoding: 'utf8' }).trim();
+}
 async function waitHealthy(url) { await poll(async () => (await fetch(url)).status, status => status === 200, `health ${url}`, 60); }
 function sql(query) {
   return execFileSync('docker', ['exec', 'msb-demo-mysql', 'sh', '-lc', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -N -e "$1"', '--', query], { encoding: 'utf8' }).trim();

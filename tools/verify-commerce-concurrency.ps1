@@ -2,7 +2,13 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
-$mavenWrapper = if ($env:OS -eq 'Windows_NT') { Join-Path $root 'mvnw.cmd' } else { Join-Path $root 'mvnw' }
+$mavenWrapper = if ($env:MAVEN_WRAPPER) {
+    $env:MAVEN_WRAPPER
+} elseif ($env:OS -eq 'Windows_NT') {
+    Join-Path $root 'mvnw.cmd'
+} else {
+    Join-Path $root 'mvnw'
+}
 
 function Invoke-ConcurrencyGate([string]$Module, [string]$Tests) {
     Push-Location $root

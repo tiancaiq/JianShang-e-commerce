@@ -217,10 +217,13 @@ services:
     environment:
       COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
       CART_DEMO_SECOND_BUSINESS_FIXTURE_ENABLED: "true"
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
 
   product-service:
     environment:
       COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
+      LISTING_MEDIA_STORAGE: local-demo
 
   frontend:
     environment:
