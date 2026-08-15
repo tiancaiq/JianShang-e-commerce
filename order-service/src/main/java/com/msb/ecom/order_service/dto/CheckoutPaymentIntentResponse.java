@@ -14,7 +14,10 @@ public record CheckoutPaymentIntentResponse(
         ProviderAction action,
         SafeError error
 ) {
-    public record ProviderAction(String type, String reference) {
+    public record ProviderAction(String type, String reference, String publicKey, String returnUrl) {
+        public ProviderAction(String type, String reference) {
+            this(type, reference, null, null);
+        }
     }
 
     public record SafeError(String code, String message) {

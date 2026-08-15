@@ -22,7 +22,10 @@ public record PaymentIntentResponse(
         Instant createdAt,
         Instant updatedAt
 ) {
-    public record ProviderAction(String type, String reference) {
+    public record ProviderAction(String type, String reference, String publicKey, String returnUrl) {
+        public ProviderAction(String type, String reference) {
+            this(type, reference, null, null);
+        }
     }
 
     public record SafeProviderError(String code, String message) {

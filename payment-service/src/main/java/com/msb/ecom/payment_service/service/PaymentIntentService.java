@@ -178,7 +178,7 @@ public class PaymentIntentService {
         try {
             providerResult = provider.createIntent(new PaymentProviderCommand(
                     created.id(),
-                    idempotencyKey,
+                    "payment:create:" + created.id() + ":v1",
                     created.checkoutId(),
                     created.amount(),
                     created.currency(),
@@ -192,11 +192,9 @@ public class PaymentIntentService {
                     "Payment provider adapter failed paymentIntentId={} correlationId={}",
                     created.id(),
                     correlationId);
-            providerResult = new PaymentProviderResult(
-                    PaymentIntentStatus.FAILED,
-                    null,
-                    null,
-                    "PROVIDER_ADAPTER_ERROR",
+            throw new PaymentIntentException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "PAYMENT_PROVIDER_UNAVAILABLE",
                     "Payment provider is temporarily unavailable.");
         }
         PaymentProviderResult result = providerResult;
@@ -246,7 +244,9 @@ public class PaymentIntentService {
                 ? null
                 : new PaymentIntentResponse.ProviderAction(
                         intent.providerActionType(),
-                        provider.actionReference(intent.id()));
+                        provider.actionReference(intent.id(), intent.providerReference()),
+                        provider.publicClientKey(),
+                        provider.returnUrl(intent.checkoutId()));
         PaymentIntentResponse.SafeProviderError error = intent.safeErrorCode() == null
                 ? null
                 : new PaymentIntentResponse.SafeProviderError(

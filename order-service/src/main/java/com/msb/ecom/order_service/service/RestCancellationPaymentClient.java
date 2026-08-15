@@ -34,12 +34,13 @@ public class RestCancellationPaymentClient implements CancellationPaymentClient 
                     .retrieve().body(Map.class);
             Object refundId = body == null ? null : body.get("refundId");
             Object providerReference = body == null ? null : body.get("providerReference");
+            Object status = body == null ? null : body.get("status");
             if (!(refundId instanceof String refundIdValue) || refundIdValue.isBlank()
-                    || !(providerReference instanceof String providerReferenceValue)
-                    || providerReferenceValue.isBlank()) {
+                    || !(status instanceof String statusValue) || statusValue.isBlank()) {
                 throw new IllegalStateException("Payment refund response was incomplete.");
             }
-            return new RefundResult(refundIdValue, providerReferenceValue);
+            String providerReferenceValue = providerReference instanceof String value ? value : null;
+            return new RefundResult(refundIdValue, providerReferenceValue, statusValue);
         } catch (RestClientException exception) {
             throw new IllegalStateException("Payment cancellation refund failed.", exception);
         }

@@ -328,7 +328,11 @@ public class CheckoutPaymentService {
         }
         return "REQUIRES_ACTION".equals(intent.status())
                 && bounded(intent.providerAction().type(), 64)
-                && bounded(intent.providerAction().reference(), 512);
+                && bounded(intent.providerAction().reference(), 512)
+                && (intent.providerAction().publicKey() == null
+                    || bounded(intent.providerAction().publicKey(), 128))
+                && (intent.providerAction().returnUrl() == null
+                    || bounded(intent.providerAction().returnUrl(), 512));
     }
 
     private boolean validError(PaymentIntentClient.PaymentIntent intent) {
@@ -358,7 +362,9 @@ public class CheckoutPaymentService {
                 ? null
                 : new CheckoutPaymentIntentResponse.ProviderAction(
                         intent.providerAction().type(),
-                        intent.providerAction().reference());
+                        intent.providerAction().reference(),
+                        intent.providerAction().publicKey(),
+                        intent.providerAction().returnUrl());
         CheckoutPaymentIntentResponse.SafeError error = intent.error() == null
                 ? null
                 : new CheckoutPaymentIntentResponse.SafeError(

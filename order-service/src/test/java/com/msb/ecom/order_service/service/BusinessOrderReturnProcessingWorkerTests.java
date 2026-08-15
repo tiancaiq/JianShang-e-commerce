@@ -65,6 +65,27 @@ class BusinessOrderReturnProcessingWorkerTests {
                 anyString(), anyString(), anyString(), anyString());
     }
 
+    @Test
+    void acceptedButPendingProviderRefundDoesNotCompleteTheReturn() {
+        BusinessOrderReturnRepository repository = mock(BusinessOrderReturnRepository.class);
+        ReturnInventoryClient inventory = mock(ReturnInventoryClient.class);
+        ReturnPaymentClient payment = mock(ReturnPaymentClient.class);
+        var record = record("DO_NOT_RESTOCK");
+        when(repository.due(any(), eq(20))).thenReturn(List.of(record));
+        when(repository.claimProcessing(record.id())).thenReturn(true);
+        when(repository.lockBusinessGroup(record.businessId(), record.businessOrderId()))
+                .thenReturn(Optional.of(group()));
+        when(payment.refund(anyString(), anyString(), anyString(), anyString(), any(), anyString(), anyString()))
+                .thenReturn(new ReturnPaymentClient.Result(
+                        id(10), new BigDecimal("20.0000"), "PROCESSING"));
+
+        worker(repository, inventory, payment).process();
+
+        verify(repository).retry(eq(record.id()), any(), eq("RETURN_DEPENDENCY_UNAVAILABLE"));
+        verify(repository, never()).complete(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString());
+    }
+
     private BusinessOrderReturnProcessingWorker worker(BusinessOrderReturnRepository repository,
             ReturnInventoryClient inventory, ReturnPaymentClient payment) {
         return new BusinessOrderReturnProcessingWorker(

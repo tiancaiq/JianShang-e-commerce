@@ -103,7 +103,12 @@ export interface CheckoutPaymentIntent {
   amount: number;
   currency: string;
   expiresAt: string;
-  action: { type: string; reference: string } | null;
+  action: {
+    type: string;
+    reference: string;
+    publicKey: string | null;
+    returnUrl: string | null;
+  } | null;
   error: { code: string; message: string } | null;
 }
 

@@ -55,7 +55,10 @@ public interface PaymentIntentClient {
         }
     }
 
-    record ProviderAction(String type, String reference) {
+    record ProviderAction(String type, String reference, String publicKey, String returnUrl) {
+        public ProviderAction(String type, String reference) {
+            this(type, reference, null, null);
+        }
     }
 
     record SafeError(String code, String message) {
