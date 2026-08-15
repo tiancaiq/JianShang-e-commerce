@@ -1,0 +1,4 @@
+interface:
+  display_name: "Marketplace Results-First Discovery"
+  short_description: "Enforce results-first marketplace discovery"
+  default_prompt: "Use $marketplace-results-first-discovery to review this Marketplace Agent discovery flow."

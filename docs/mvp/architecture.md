@@ -353,8 +353,14 @@ strict direct/fake `order.confirmed` version-2 events. `V2-NOT-01B` adds a
 default-off authenticated read API that resolves the active application user
 through Auth Service `GET /api/v1/users/me` using only the relayed bearer and
 correlation ID. `V2-NOT-01C` adds the default-off gateway boundary and buyer
-account notification center over that read API. Kafka, email, preferences,
-polling, badge counts, and runtime activation remain deferred.
+account notification center over that read API. `V2-NOT-01D` adds a retryable
+Order-outbox-to-Notification HTTP adapter for approved commerce events,
+business-scoped seller projections, server-authoritative unread counts,
+buyer/seller centers, and bounded runtime activation. Delivery occurs only
+after the authoritative commerce transaction commits, so an unavailable
+Notification Service cannot roll that transaction back. Kafka, WebSockets,
+email, SMS, push, preferences, provider deliveries, and marketing remain
+deferred.
 
 Responsibilities:
 
@@ -743,3 +749,17 @@ Resolve before related implementation:
 5. Realtime chat transport: WebSocket or SSE plus HTTP commands.
 
 These choices may change adapters, not the domain contracts in this document.
+
+## V2-RET-01 return ownership addendum
+
+Post-delivery returns are a dedicated Order Service business-group aggregate,
+not cancellation state. Inventory Service owns group-scoped return movements;
+Payment Service extends its deterministic refund adapter for immutable group
+merchandise refunds; Notification Service consumes committed return outbox
+events. Each service writes only its schema and all capabilities remain
+default-off outside the bounded commerce runtime.
+## ADM-LIST-06 enforcement ownership
+
+Product Service owns listing enforcement actions, scopes, events, idempotency, effective-policy evaluation, and the local public-read filter. Public browse, detail, media, search rehydration, and derived-index inputs all revalidate against Product MySQL. Search indexes remain derived and are not trusted as the final visibility authority.
+
+Order Service calls Product Service's authenticated batch capability endpoint at each new-commerce boundary. Product returns decisions only; it does not query or mutate Order storage. Order preserves paid/existing order state and fails closed when Product cannot decide.

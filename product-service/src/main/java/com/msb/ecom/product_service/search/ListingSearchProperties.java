@@ -17,6 +17,8 @@ public record ListingSearchProperties(
     public record OpenSearchProperties(
             String baseUrl,
             String index,
+            String writeAlias,
+            String physicalIndex,
             Duration connectTimeout,
             Duration requestTimeout,
             boolean initializeIndex

@@ -974,10 +974,14 @@ implemented by `AI-CS-CLEAN-P0-03`. Its later bounded implementation must:
 - keep application state server-owned, use an ephemeral ReAct run per request,
   and preserve MySQL as the authoritative cross-turn state;
 - never persist or expose chain-of-thought;
-- enforce `ModelCallLimitMiddleware` at five model calls, a whole-turn
-  `ToolCallLimitMiddleware` at six tool calls, `SEARCH_INDIVIDUAL` at two
-  calls, and `GET_LISTING` at five calls;
-- enforce an eight-second provider budget and twelve-second whole-turn budget;
+- enforce `ModelCallLimitMiddleware` at seven model calls, a whole-turn
+  application-tool limit at six `SEARCH_INDIVIDUAL`/`GET_LISTING` calls,
+  `SEARCH_INDIVIDUAL` at two calls, and `GET_LISTING` at five calls, excluding
+  the final strict structured-output tool from the Product tool budget;
+- enforce a configurable ten-second default discovery model-call budget at
+  both the LangChain adapter await and provider request timeout boundaries,
+  an eight-second query-embedding cap, and a thirty-second whole-turn safety
+  ceiling;
 - allow only search, detail, clarify, recommend, no-results, and refuse
   outcomes, followed by deterministic final guardrails; and
 - detail-revalidate every recommendation and return three through five

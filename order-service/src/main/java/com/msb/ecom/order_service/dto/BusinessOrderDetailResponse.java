@@ -26,8 +26,25 @@ public record BusinessOrderDetailResponse(
         Instant createdAt,
         Instant updatedAt,
         List<Item> items,
-        ShippingAddress shippingAddress
+        ShippingAddress shippingAddress,
+        long version,
+        List<TimelineEntry> timeline,
+        @JsonInclude(JsonInclude.Include.NON_NULL) Shipment shipment
 ) {
+
+    public BusinessOrderDetailResponse(
+            String businessOrderId, String sellerOrderNumber, String businessId,
+            String storeId, String status, String cancellationStatus, String buyerOrderId,
+            String buyerOrderNumber, String paymentStatus, int itemCount, int totalQuantity,
+            BigDecimal subtotal, BigDecimal totalAmount, String currency,
+            BigDecimal platformFeeProjection, Instant confirmedAt, Instant createdAt,
+            Instant updatedAt, List<Item> items, ShippingAddress shippingAddress) {
+        this(businessOrderId, sellerOrderNumber, businessId, storeId, status,
+                cancellationStatus, buyerOrderId, buyerOrderNumber, paymentStatus,
+                itemCount, totalQuantity, subtotal, totalAmount, currency,
+                platformFeeProjection, confirmedAt, createdAt, updatedAt, items,
+                shippingAddress, 0, List.of(), null);
+    }
 
     public record Item(
             String listingId,
@@ -54,4 +71,20 @@ public record BusinessOrderDetailResponse(
             String countryCode
     ) {
     }
+
+    public record TimelineEntry(String status, Instant occurredAt) {}
+
+    public record Shipment(
+            String shipmentId,
+            String source,
+            String carrierDisplayName,
+            String serviceDisplayName,
+            String trackingNumber,
+            String status,
+            long version,
+            Instant shippedAt,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Instant deliveredAt,
+            Instant createdAt,
+            Instant updatedAt
+    ) {}
 }

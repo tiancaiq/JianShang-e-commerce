@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable } from '@angular/core';
-import { forkJoin, map, Observable } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { forkJoin, map, Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AdminBusinessSummary,
@@ -9,17 +9,34 @@ import {
   PlatformAdmin,
 } from '../models/admin.model';
 import { ApiDataResponse } from '../models/auth.model';
+import { AdminPermission, AdminRole, ADMIN_PERMISSIONS } from '../security/admin-permissions';
 
 @Injectable({ providedIn: 'root' })
 export class AdminService {
   private readonly baseUrl = `${environment.apiGatewayUrl}/api/v1`;
+  readonly currentAdmin = signal<PlatformAdmin | null>(null);
 
   constructor(private http: HttpClient) {}
 
   getCurrentAdmin(): Observable<ApiDataResponse<PlatformAdmin>> {
     return this.http.get<ApiDataResponse<PlatformAdmin>>(`${this.baseUrl}/admin/me`, {
       withCredentials: true,
-    });
+    }).pipe(
+      map(response => ({ data: normalizeAdmin(response.data) })),
+      tap(response => this.currentAdmin.set(response.data)),
+    );
+  }
+
+  hasPermission(permission: AdminPermission): boolean {
+    return this.currentAdmin()?.permissions.includes(permission) === true;
+  }
+
+  hasRole(role: AdminRole): boolean {
+    return this.currentAdmin()?.roles.includes(role) === true;
+  }
+
+  clearCurrentAdmin(): void {
+    this.currentAdmin.set(null);
   }
 
   getDashboardSummary(): Observable<AdminDashboardSummary> {
@@ -38,4 +55,14 @@ export class AdminService {
       }))
     );
   }
+}
+
+function normalizeAdmin(admin: Partial<PlatformAdmin> & Pick<PlatformAdmin, 'userId' | 'role'>): PlatformAdmin {
+  return {
+    userId: admin.userId,
+    role: admin.role,
+    roles: admin.roles ?? ['SUPER_ADMIN'],
+    permissions: admin.permissions ?? Object.values(ADMIN_PERMISSIONS),
+    accountState: admin.accountState ?? 'ACTIVE',
+  };
 }

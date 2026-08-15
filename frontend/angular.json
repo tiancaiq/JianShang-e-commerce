@@ -83,6 +83,27 @@
                 }
               ]
             },
+            "demo-agent-v2": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-agent-v2.ts"
+                }
+              ]
+            },
             "demo-cart": {
               "budgets": [
                 {
@@ -101,6 +122,61 @@
                 {
                   "replace": "src/environments/environment.ts",
                   "with": "src/environments/environment.demo-cart.ts"
+                }
+              ]
+            },
+            "demo-checkout": {
+              "budgets": [
+                { "type": "initial", "maximumWarning": "500kB", "maximumError": "1MB" },
+                { "type": "anyComponentStyle", "maximumWarning": "13kB", "maximumError": "16kB" }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-checkout.ts"
+                }
+              ]
+            },
+            "demo-cart-ai-discovery": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-cart-ai-discovery.ts"
+                }
+              ]
+            },
+            "demo-admin-search-maintenance": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "13kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.demo-admin-search-maintenance.ts"
                 }
               ]
             },
@@ -132,6 +208,15 @@
             },
             "demo-cart": {
               "buildTarget": "frontend:build:demo-cart"
+            },
+            "demo-checkout": {
+              "buildTarget": "frontend:build:demo-checkout"
+            },
+            "demo-cart-ai-discovery": {
+              "buildTarget": "frontend:build:demo-cart-ai-discovery"
+            },
+            "demo-admin-search-maintenance": {
+              "buildTarget": "frontend:build:demo-admin-search-maintenance"
             },
             "development": {
               "buildTarget": "frontend:build:development"

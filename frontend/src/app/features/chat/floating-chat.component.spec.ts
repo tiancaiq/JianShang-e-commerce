@@ -6,8 +6,14 @@ import { ConversationPage, ConversationSummary } from '../../core/models/chat.mo
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ListingService } from '../../core/services/listing.service';
-import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
+import {
+  AGENT_CUSTOMER_SERVICE_ENABLED,
+  AGENT_DISCOVERY_ENABLED,
+  AGENT_MARKETPLACE_V2_ENABLED,
+} from '../agent/agent-customer-service.capability';
 import { AgentCustomerService } from '../agent/agent-customer-service.service';
+import { AgentMarketplaceDiscoveryService } from '../agent/agent-marketplace-discovery.service';
+import { AgentMarketplaceV2Service } from '../agent/agent-marketplace-v2.service';
 import { FloatingChatComponent } from './floating-chat.component';
 
 describe('FloatingChatComponent', () => {
@@ -16,6 +22,9 @@ describe('FloatingChatComponent', () => {
   let authenticated = true;
   let chatService: jasmine.SpyObj<ChatService>;
   let agentService: jasmine.SpyObj<AgentCustomerService>;
+  let discoveryService: jasmine.SpyObj<AgentMarketplaceDiscoveryService>;
+  let v2Service: jasmine.SpyObj<AgentMarketplaceV2Service>;
+  let listingService: jasmine.SpyObj<ListingService>;
   let conversationRead: Subject<string>;
 
   const conversationId = '01C00000000000000000000001';
@@ -105,6 +114,50 @@ describe('FloatingChatComponent', () => {
       'AgentCustomerService',
       ['createOrResumeSession', 'getSession', 'getMessages', 'sendMessage'],
     );
+    discoveryService = jasmine.createSpyObj<AgentMarketplaceDiscoveryService>(
+      'AgentMarketplaceDiscoveryService',
+      [
+        'createOrResumeSession', 'getSession', 'getMessages', 'sendMessage',
+        'streamMessage', 'retryResponse', 'excludeListing',
+      ],
+    );
+    v2Service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
+      'AgentMarketplaceV2Service',
+      ['createSession', 'listMessages', 'streamMessage', 'retryResponse', 'stopMessage'],
+    );
+    v2Service.createSession.and.returnValue(of({
+      sessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', sessionType: 'MARKETPLACE_AGENT_V2',
+      status: 'OPEN', createdAt: '2026-08-03T01:00:00Z', updatedAt: '2026-08-03T01:00:00Z',
+    }));
+    v2Service.listMessages.and.returnValue(of({ data: [], hasMore: false }));
+    const discoverySession = {
+      id: '01D00000000000000000000001',
+      sessionType: 'MARKETPLACE_DISCOVERY' as const,
+      status: 'OPEN' as const,
+      preferenceState: {
+        query: null,
+        categoryId: null,
+        condition: null,
+        minPrice: null,
+        maxPrice: null,
+        city: null,
+        county: null,
+        selectedListingId: null,
+      },
+      preferenceVersion: 0,
+      clarificationTurnCount: 0,
+      clarificationQuestionCount: 0,
+      exclusions: [],
+      createdAt: '2026-07-20T02:00:00Z',
+      updatedAt: '2026-07-20T02:00:00Z',
+    };
+    discoveryService.createOrResumeSession.and.returnValue(of(discoverySession));
+    discoveryService.getSession.and.returnValue(of(discoverySession));
+    discoveryService.getMessages.and.returnValue(of({
+      data: [],
+      nextCursor: null,
+      hasMore: false,
+    }));
     chatService = jasmine.createSpyObj<ChatService>(
       'ChatService',
       ['getConversations', 'getConversation', 'getMessages', 'sendMessage', 'markRead', 'markDone', 'confirmCompletion', 'notifyConversationRead'],
@@ -150,7 +203,7 @@ describe('FloatingChatComponent', () => {
       currentUserCanMarkDone: false,
       currentUserCanConfirm: false,
     }));
-    const listingService = jasmine.createSpyObj<ListingService>(
+    listingService = jasmine.createSpyObj<ListingService>(
       'ListingService',
       ['searchMarketplaceListings', 'mediaUrl'],
     );
@@ -167,6 +220,8 @@ describe('FloatingChatComponent', () => {
         provideRouter([]),
         { provide: ChatService, useValue: chatService },
         { provide: AgentCustomerService, useValue: agentService },
+        { provide: AgentMarketplaceDiscoveryService, useValue: discoveryService },
+        { provide: AgentMarketplaceV2Service, useValue: v2Service },
         { provide: ListingService, useValue: listingService },
         {
           provide: AuthService,
@@ -293,7 +348,7 @@ describe('FloatingChatComponent', () => {
     expect(agentService.createOrResumeSession).not.toHaveBeenCalled();
   });
 
-  it('opens the separate network-silent agent thread only after explicit capability opt-in', () => {
+  it('opens discovery-first agent chat under the legacy assistant flag without listing selection', async () => {
     TestBed.overrideProvider(AGENT_CUSTOMER_SERVICE_ENABLED, { useValue: true });
     authenticated = true;
     createComponent();
@@ -304,13 +359,101 @@ describe('FloatingChatComponent', () => {
 
     fixture.nativeElement.querySelector('.agent-row').click();
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('Marketplace help');
-    expect(fixture.nativeElement.textContent).toContain('Choose a listing');
+    const discovery = fixture.nativeElement.querySelector(
+      'app-agent-marketplace-discovery',
+    ) as HTMLElement;
+    expect(discovery).not.toBeNull();
+    expect(discovery.textContent).toContain('How can I help?');
+    expect(discovery.querySelector<HTMLTextAreaElement>('#discovery-prompt')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Ask what you need');
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
+    expect(fixture.nativeElement.querySelector('.listing-picker')).toBeNull();
     expect(chatService.getConversation).not.toHaveBeenCalled();
     expect(chatService.getMessages).not.toHaveBeenCalled();
     expect(agentService.createOrResumeSession).not.toHaveBeenCalled();
     expect(agentService.sendMessage).not.toHaveBeenCalled();
+    expect(discoveryService.createOrResumeSession).toHaveBeenCalledOnceWith(false);
+    expect(discoveryService.getMessages)
+      .toHaveBeenCalledOnceWith('01D00000000000000000000001', null, 50);
+    expect(discoveryService.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('opens query-first discovery with no listing wall or request when discovery is enabled', async () => {
+    TestBed.overrideProvider(AGENT_CUSTOMER_SERVICE_ENABLED, { useValue: true });
+    TestBed.overrideProvider(AGENT_DISCOVERY_ENABLED, { useValue: true });
+    authenticated = true;
+    createComponent();
+    fixture.nativeElement.querySelector('.chat-launcher').click();
+    fixture.detectChanges();
+    chatService.getConversation.calls.reset();
+    chatService.getMessages.calls.reset();
+    listingService.searchMarketplaceListings.calls.reset();
+
+    fixture.nativeElement.querySelector('.agent-row').click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const discovery = fixture.nativeElement.querySelector(
+      'app-agent-marketplace-discovery',
+    ) as HTMLElement;
+    const prompt = discovery.querySelector<HTMLTextAreaElement>('#discovery-prompt');
+    expect(discovery.querySelector('h2')?.textContent)
+      .toContain('Marketplace assistant');
+    expect(discovery.textContent).toContain('How can I help?');
+    expect(fixture.nativeElement.textContent).toContain('Ask what you need');
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
+    expect(fixture.nativeElement.querySelector('.listing-picker')).toBeNull();
+    expect(document.activeElement).toBe(prompt);
+    expect(discoveryService.createOrResumeSession).toHaveBeenCalledOnceWith(false);
+    expect(discoveryService.getSession).not.toHaveBeenCalled();
+    expect(discoveryService.getMessages)
+      .toHaveBeenCalledOnceWith('01D00000000000000000000001', null, 50);
+    expect(discoveryService.sendMessage).not.toHaveBeenCalled();
+    expect(listingService.searchMarketplaceListings).not.toHaveBeenCalled();
+    expect(agentService.createOrResumeSession).not.toHaveBeenCalled();
+  });
+
+  it('cuts the floating Marketplace assistant over to V2 when its build flag is enabled', async () => {
+    TestBed.overrideProvider(AGENT_MARKETPLACE_V2_ENABLED, { useValue: true });
+    authenticated = true;
+    createComponent();
+    fixture.nativeElement.querySelector('.chat-launcher').click();
+    fixture.detectChanges();
+
+    fixture.nativeElement.querySelector('.agent-row').click();
+    fixture.detectChanges();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-v2-page')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.v2-shell.compact')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Marketplace assistant');
+    expect(fixture.nativeElement.textContent).toContain('Customer service and listing help');
+    expect(fixture.nativeElement.textContent).not.toContain('Development evaluation');
+    expect(fixture.nativeElement.textContent).not.toContain('Latest safe evaluation evidence');
+    expect(v2Service.createSession).toHaveBeenCalledOnceWith(false);
+    expect(discoveryService.createOrResumeSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Agent row in one discovery conversation with no legacy mode switch', () => {
+    TestBed.overrideProvider(AGENT_CUSTOMER_SERVICE_ENABLED, { useValue: true });
+    TestBed.overrideProvider(AGENT_DISCOVERY_ENABLED, { useValue: true });
+    authenticated = true;
+    createComponent();
+    fixture.nativeElement.querySelector('.chat-launcher').click();
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('.agent-row').click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-agent-customer-service-thread')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.agent-mode-switch')).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
   });
 
   it('opens a thread and marks it read', () => {

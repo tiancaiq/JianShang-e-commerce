@@ -8,6 +8,7 @@ import com.msb.ecom.order_service.dto.BusinessOrderDetailResponse;
 import com.msb.ecom.order_service.dto.BusinessOrderPageResponse;
 import com.msb.ecom.order_service.model.BusinessOrderException;
 import com.msb.ecom.order_service.service.BusinessOrderAcceptanceService;
+import com.msb.ecom.order_service.service.BusinessOrderFulfillmentService;
 import com.msb.ecom.order_service.service.BusinessOrderService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,9 @@ class BusinessOrderControllerTests {
 
     @MockitoBean
     BusinessOrderAcceptanceService acceptanceService;
+
+    @MockitoBean
+    BusinessOrderFulfillmentService fulfillmentService;
 
     @Test
     void businessRoutesRequireAuthentication() throws Exception {
@@ -128,8 +132,7 @@ class BusinessOrderControllerTests {
                 "outbox",
                 "sourceAddressId",
                 "sourceVersion",
-                "shipment",
-                "\"version\"");
+                "shipment");
     }
 
     @Test

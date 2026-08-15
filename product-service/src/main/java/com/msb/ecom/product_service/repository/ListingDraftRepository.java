@@ -4,6 +4,7 @@ import com.msb.ecom.product_service.model.ListingSellerType;
 import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
+import com.msb.ecom.product_service.dto.AdminBusinessListingSummaryContracts.Response;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -190,6 +191,27 @@ public class ListingDraftRepository {
                 businessId);
     }
 
+    // Aggregates a bounded page of Auth-owned businesses without exposing listing rows across services.
+    public List<Response> summarizeBusinesses(Set<String> businessIds) {
+        if (businessIds == null || businessIds.isEmpty()) return List.of();
+        String placeholders = String.join(", ", java.util.Collections.nCopies(businessIds.size(), "?"));
+        return jdbcTemplate.query("""
+                select business_id,
+                       count(*) total_count,
+                       sum(case when status = 'DRAFT' then 1 else 0 end) draft_count,
+                       sum(case when status = 'PENDING_REVIEW' then 1 else 0 end) pending_review_count,
+                       sum(case when status = 'ACTIVE' then 1 else 0 end) active_count,
+                       sum(case when status = 'PAUSED' then 1 else 0 end) paused_count,
+                       sum(case when status = 'REMOVED_BY_ADMIN' then 1 else 0 end) removed_count
+                from listings
+                where seller_type = 'BUSINESS' and business_id in (%s)
+                group by business_id order by business_id
+                """.formatted(placeholders), (rs, rowNum) -> new Response(
+                rs.getString("business_id"), rs.getLong("total_count"), rs.getLong("draft_count"),
+                rs.getLong("pending_review_count"), rs.getLong("active_count"), rs.getLong("paused_count"),
+                rs.getLong("removed_count")), businessIds.toArray());
+    }
+
     public List<ListingDraftResponse> findPendingReview() {
         return jdbcTemplate.query("""
                 select id, seller_type, individual_seller_user_id, business_id, store_id, category_id,
@@ -221,6 +243,14 @@ public class ListingDraftRepository {
                     (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                   )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 """,
                 (rs, rowNum) -> publicListingResponse(rs),
                 listingId);
@@ -235,6 +265,14 @@ public class ListingDraftRepository {
                 where l.id = ?
                   and l.status = 'ACTIVE'
                   and l.moderation_status = 'APPROVED'
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 """,
                 (rs, rowNum) -> new ChatListingEligibilityResponse(
                         rs.getString("id"),
@@ -267,6 +305,14 @@ public class ListingDraftRepository {
                     (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                   )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
                 """,
@@ -290,6 +336,14 @@ public class ListingDraftRepository {
                   and (
                     (? = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (? = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
                   )
                 order by l.published_at desc, l.updated_at desc, l.id desc
                 limit ?
@@ -317,6 +371,14 @@ public class ListingDraftRepository {
                   and (
                     (? = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (? = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
                   )
                 """);
         List<Object> parameters = new ArrayList<>();
@@ -396,6 +458,35 @@ public class ListingDraftRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> publicListingResponse(rs), parameters.toArray());
     }
 
+    // Counts broad category inventory using the same public visibility and stock rules as Product reads.
+    public long countActiveIndividualInventory(String normalizedCategory) {
+        String category = "%" + escapedLike(normalizedCategory) + "%";
+        Long count = jdbcTemplate.queryForObject("""
+                select count(*)
+                from listings l
+                join categories c on c.id = l.category_id
+                where l.seller_type = 'INDIVIDUAL'
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and l.quantity > 0
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
+                  and (
+                       lower(l.title) like ? escape '!'
+                    or lower(l.description) like ? escape '!'
+                    or lower(c.name) like ? escape '!'
+                    or lower(c.slug) like ? escape '!'
+                  )
+                """, Long.class, category, category, category, category);
+        return count == null ? 0 : count;
+    }
+
     // Supplies bounded business candidates so auth-service can enforce active business/store visibility before paging.
     public Set<String> findSelfPublishedBusinessIds(int limit) {
         return new java.util.LinkedHashSet<>(jdbcTemplate.queryForList("""
@@ -431,6 +522,14 @@ public class ListingDraftRepository {
                     or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                   )
                   and l.id in (%s)
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 """.formatted(placeholders),
                 (rs, rowNum) -> publicListingResponse(rs),
                 listingIds.toArray());
@@ -463,6 +562,14 @@ public class ListingDraftRepository {
                     (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                   )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 order by lk.updated_at desc, coalesce(l.published_at, l.updated_at) desc, l.id desc
                 limit ?
                 """,
@@ -487,9 +594,114 @@ public class ListingDraftRepository {
                     (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
                     or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                   )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
                 order by coalesce(l.published_at, l.updated_at) desc, l.id desc
                 """,
                 (rs, rowNum) -> publicListingResponse(rs));
+    }
+
+    // Pages one repeatable-read public-listing snapshot in stable ID order for an inactive rebuild.
+    public List<ListingVectorBackfillRow> findPublicListingsForVectorBackfillAfter(
+            String afterListingId,
+            int limit) {
+        if (limit < 1 || limit > 501) {
+            throw new IllegalArgumentException("Listing vector backfill page size is invalid.");
+        }
+        String cursorClause = afterListingId == null ? "" : " and l.id > ? ";
+        String sql = """
+                select l.id, l.seller_type, l.category_id, c.slug as category_slug, c.name as category_name,
+                       l.individual_seller_user_id, l.business_id,
+                       l.title, l.description, l.condition_code, l.condition_notes, l.price_amount,
+                       l.currency, l.negotiable, l.quantity, l.public_city, l.public_region,
+                       coalesce(l.published_at, l.updated_at) as published_at,
+                       coalesce(es.visit_count, 0) as visit_count,
+                       coalesce(es.like_count, 0) as like_count,
+                       l.version as listing_version
+                from listings l
+                join categories c on c.id = l.category_id
+                left join listing_engagement_stats es on es.listing_id = l.id
+                where (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE' and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
+                """ + cursorClause + " order by l.id asc limit ?";
+        Object[] arguments = afterListingId == null
+                ? new Object[]{limit}
+                : new Object[]{afterListingId, limit};
+        return jdbcTemplate.query(
+                sql,
+                (resultSet, rowNumber) -> new ListingVectorBackfillRow(
+                        publicListingResponse(resultSet),
+                        resultSet.getLong("listing_version")),
+                arguments);
+    }
+
+    // Captures a finite ID watermark for the current eligible individual-listing catalog.
+    public Optional<String> findMaximumEligibleIndividualListingId() {
+        return Optional.ofNullable(jdbcTemplate.queryForObject("""
+                select max(l.id)
+                from listings l
+                where l.seller_type = 'INDIVIDUAL'
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
+                """, String.class));
+    }
+
+    // Pages only authoritative eligible individual IDs within a durable upper-bound watermark.
+    public List<String> findEligibleIndividualListingIdsForEmbeddingBackfill(
+            String afterListingId,
+            String upperBoundListingId,
+            int limit) {
+        if (upperBoundListingId == null || upperBoundListingId.isBlank()) {
+            return List.of();
+        }
+        if (limit < 1 || limit > 501) {
+            throw new IllegalArgumentException("Listing embedding backfill page size is invalid.");
+        }
+        String cursorClause = afterListingId == null ? "" : " and l.id > ? ";
+        String sql = """
+                select l.id
+                from listings l
+                where l.seller_type = 'INDIVIDUAL'
+                  and l.status = 'ACTIVE'
+                  and l.moderation_status = 'APPROVED'
+                  and l.id <= ?
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
+                """ + cursorClause + " order by l.id asc limit ?";
+        Object[] arguments = afterListingId == null
+                ? new Object[]{upperBoundListingId, limit}
+                : new Object[]{upperBoundListingId, afterListingId, limit};
+        return jdbcTemplate.query(sql, (resultSet, rowNumber) -> resultSet.getString("id"), arguments);
     }
 
     // Finds authoritative active individual listings whose current version still needs an immutable source snapshot.
@@ -584,6 +796,12 @@ public class ListingDraftRepository {
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);
+    }
+
+    public record ListingVectorBackfillRow(
+            PublicListingResponse listing,
+            long listingVersion
+    ) {
     }
 
     public int closeActiveIndividualListingFromChat(String listingId, String sellerUserId, Instant now) {

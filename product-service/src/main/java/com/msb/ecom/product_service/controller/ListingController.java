@@ -6,6 +6,7 @@ import com.msb.ecom.product_service.dto.AdminListingModerationCaseDetailResponse
 import com.msb.ecom.product_service.dto.AdminListingModerationCaseResponse;
 import com.msb.ecom.product_service.dto.AdminListingModerationSummaryResponse;
 import com.msb.ecom.product_service.dto.AdminListingRemoveRequest;
+import com.msb.ecom.product_service.dto.AdminTimelineEntryResponse;
 import com.msb.ecom.product_service.service.ListingService;
 import com.msb.ecom.product_service.dto.CategoryResponse;
 import com.msb.ecom.product_service.dto.ChatListingEligibilityResponse;
@@ -331,6 +332,11 @@ public class ListingController {
     @GetMapping("/admin/moderation/listing-cases/{caseId}")
     public AdminListingModerationCaseDetailResponse listingModerationCaseDetail(@PathVariable String caseId) {
         return listingService.getListingModerationCaseDetail(caseId);
+    }
+
+    @GetMapping("/admin/moderation/listing-cases/{caseId}/timeline")
+    public List<AdminTimelineEntryResponse> listingModerationCaseTimeline(@PathVariable String caseId) {
+        return listingService.getListingModerationTimeline(caseId);
     }
 
     @PostMapping("/admin/moderation/listing-cases/{caseId}/claim")

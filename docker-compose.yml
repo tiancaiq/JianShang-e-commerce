@@ -181,6 +181,17 @@ services:
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "127.0.0.1:${OPENSEARCH_PORT:-9201}:9200"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent
+          http://localhost:9200/_cluster/health?wait_for_status=yellow
+          > /dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
     volumes:
       - opensearch_data:/usr/share/opensearch/data
 
@@ -193,7 +204,8 @@ services:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
     depends_on:
-      - opensearch
+      opensearch:
+        condition: service_healthy
 
 volumes:
   mongo_data:

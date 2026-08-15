@@ -77,6 +77,15 @@ class ReadinessResponse(StrictModel):
         default="DISABLED",
         alias="marketplaceDiscoveryApi",
     )
+    discovery_document_embedding: Literal[
+        "DISABLED",
+        "READY",
+        "UNAVAILABLE",
+        "DEFERRED",
+    ] = Field(
+        default="DISABLED",
+        alias="discoveryDocumentEmbedding",
+    )
 
 
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-9A-Z]{26}$")]

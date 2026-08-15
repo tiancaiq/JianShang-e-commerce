@@ -795,6 +795,19 @@ describe('ListingService gateway and listing API regression', () => {
     request.flush(moderationCaseDetail);
   });
 
+  it('loads the normalized listing moderation audit timeline', () => {
+    service.getListingModerationTimeline(moderationCase.id).subscribe(response => {
+      expect(response[0].eventType).toBe('CASE_CLAIMED');
+    });
+
+    const request = httpMock.expectOne(
+      `/api/v1/admin/moderation/listing-cases/${moderationCase.id}/timeline`
+    );
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    request.flush([{ eventType: 'CASE_CLAIMED' }]);
+  });
+
   it('resolves listing moderation cases with optimistic locking through the gateway', () => {
     service.resolveListingModerationCase(moderationCase.id, 1, {
       decision: 'APPROVE',

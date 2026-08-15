@@ -318,6 +318,7 @@ class AuthBffControllerTests {
                         "Location",
                         containsString("post_logout_redirect_uri=http://localhost:4200/login")))
                 .andExpect(header().string("Location", containsString("client%3Dseller-portal")))
+                .andExpect(header().string("Location", containsString("returnUrl%3D%252Fseller%252Fdashboard")))
                 .andExpect(header().string("Location", containsString("signedOut%3D1")));
     }
 
@@ -332,6 +333,7 @@ class AuthBffControllerTests {
                         "Location",
                         containsString("post_logout_redirect_uri=http://localhost:4200/login")))
                 .andExpect(header().string("Location", containsString("client%3Dadmin-portal")))
+                .andExpect(header().string("Location", containsString("returnUrl%3D%252Fadmin%252Fdashboard")))
                 .andExpect(header().string("Location", containsString("signedOut%3D1")));
     }
 

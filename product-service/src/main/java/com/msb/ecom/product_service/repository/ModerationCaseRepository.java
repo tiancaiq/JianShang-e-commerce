@@ -171,28 +171,33 @@ public class ModerationCaseRepository {
     }
 
     public ModerationCaseEnsureResult createOrReuseListingReviewCase(ModerationCaseInsert moderationCase) {
-        Optional<String> existingCaseId = findExistingListingReviewCaseId(moderationCase.listingId());
-        if (existingCaseId.isPresent()) {
-            reopenListingReviewCaseForSubmission(existingCaseId.get(), moderationCase.submittedByUserId(),
+        Optional<CaseState> existingCase = findExistingListingReviewCase(moderationCase.listingId());
+        if (existingCase.isPresent()) {
+            reopenListingReviewCaseForSubmission(existingCase.get().id(), moderationCase.submittedByUserId(),
                     moderationCase.now());
-            return new ModerationCaseEnsureResult(existingCaseId.get(), false);
+            return new ModerationCaseEnsureResult(
+                    existingCase.get().id(),
+                    false,
+                    existingCase.get().status(),
+                    existingCase.get().assignedAdminUserId());
         }
 
         try {
             insertListingReviewCase(moderationCase);
-            return new ModerationCaseEnsureResult(moderationCase.id(), true);
+            return new ModerationCaseEnsureResult(moderationCase.id(), true, null, null);
         } catch (DuplicateKeyException exception) {
-            String existingId = findExistingListingReviewCaseId(moderationCase.listingId())
+            CaseState existing = findExistingListingReviewCase(moderationCase.listingId())
                     .orElseThrow(() -> exception);
-            reopenListingReviewCaseForSubmission(existingId, moderationCase.submittedByUserId(),
+            reopenListingReviewCaseForSubmission(existing.id(), moderationCase.submittedByUserId(),
                     moderationCase.now());
-            return new ModerationCaseEnsureResult(existingId, false);
+            return new ModerationCaseEnsureResult(
+                    existing.id(), false, existing.status(), existing.assignedAdminUserId());
         }
     }
 
-    private Optional<String> findExistingListingReviewCaseId(String listingId) {
-        List<String> matches = jdbcTemplate.queryForList("""
-                select id
+    private Optional<CaseState> findExistingListingReviewCase(String listingId) {
+        List<CaseState> matches = jdbcTemplate.query("""
+                select id, status, assigned_admin_user_id
                 from moderation_cases
                 where case_type = 'LISTING_REVIEW'
                   and subject_listing_id = ?
@@ -202,7 +207,10 @@ public class ModerationCaseRepository {
                   id asc
                 limit 1
                 """,
-                String.class,
+                (rs, rowNum) -> new CaseState(
+                        rs.getString("id"),
+                        rs.getString("status"),
+                        rs.getString("assigned_admin_user_id")),
                 listingId);
         return matches.stream().findFirst();
     }
@@ -292,6 +300,13 @@ public class ModerationCaseRepository {
                 rs.getInt("quantity"));
     }
 
-    public record ModerationCaseEnsureResult(String id, boolean created) {
+    public record ModerationCaseEnsureResult(
+            String id,
+            boolean created,
+            String previousState,
+            String previousAssignedAdminUserId) {
+    }
+
+    private record CaseState(String id, String status, String assignedAdminUserId) {
     }
 }

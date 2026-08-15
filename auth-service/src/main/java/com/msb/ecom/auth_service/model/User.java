@@ -45,6 +45,9 @@ public class User {
     @Column(length = 32, nullable = false)
     private String status;
 
+    @Column(name = "account_type", length = 32, nullable = false)
+    private String accountType;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -73,6 +76,7 @@ public class User {
         this.publicHandle = publicHandle;
         this.phoneVerified = false;
         this.status = "ACTIVE";
+        this.accountType = "HUMAN";
     }
 
     public static User create(
@@ -149,6 +153,10 @@ public class User {
 
     public String getStatus() {
         return status;
+    }
+
+    public String getAccountType() {
+        return accountType;
     }
 
     public long getVersion() {

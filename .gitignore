@@ -90,6 +90,8 @@ junit.xml
 .env
 .env.*
 !.env.example
+.codex-runtime/
+.pnpm-store/
 *.pid
 *.pid.lock
 *.seed

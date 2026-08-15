@@ -1,8 +1,9 @@
-# AGENTS.md
+# Repository Instructions
 
-## Scope
+## Scope and source of truth
 
-These instructions apply to the entire repository.
+These instructions apply repository-wide. More specific `AGENTS.md` files add
+rules for their subtrees.
 
 The approved MVP specification is:
 
@@ -12,299 +13,115 @@ The approved MVP specification is:
 - `docs/mvp/api-contract.md`
 - `docs/mvp/development-roadmap.md`
 
-When older README or tutorial documents conflict with these files, the MVP
-documents take precedence.
+These documents override older README, tutorial, and stale planning material.
+Before implementing a slice, read its roadmap entry and related approved
+documents.
 
-## Documentation Organization
+## Delivery boundary
 
-Keep top-level MVP documents in `docs/mvp/`:
+Implement one small approved roadmap slice at a time. Do not combine slices
+unless they are inseparable and the reason is documented.
 
-- `requirements.md`
-- `architecture.md`
-- `database.md`
-- `api-contract.md`
-- `development-roadmap.md`
+The product surfaces are:
 
-Keep roadmap slice documents in feature folders:
+- Public marketplace: guest browsing and search; signed-in profile, individual
+  selling, and chat.
+- Business seller portal: approved merchant onboarding, store profile, and
+  basic business listing management.
+- Admin portal: business approval and listing moderation.
 
-- Authentication/accounts: `docs/mvp/iam/`
-  - Core IAM setup: `docs/mvp/iam/core/`
-  - Login/session work: `docs/mvp/iam/login/`
-  - Sign-up/provider work: `docs/mvp/iam/signup/`
-  - Account/profile/avatar work: `docs/mvp/iam/user-profile/`
-- Business onboarding/store: `docs/mvp/bus/`
-- Individual seller profile: `docs/mvp/ind/`
-- Listings/media: `docs/mvp/list/`
-- Search/storefront: `docs/mvp/search/`
-- Chat/messaging: `docs/mvp/chat/`
-- AI agents and automated operations: `docs/mvp/ai/`
-- Site/route surface separation: `docs/mvp/site/`
-- UI/product design direction: `docs/mvp/ui/`
-- Verification/demo fixes: `docs/mvp/fix/`
-  - General stabilization: `docs/mvp/fix/stabilization/general/`
-  - Auth/login stabilization: `docs/mvp/fix/stabilization/auth-login/`
-  - Pre-search stabilization: `docs/mvp/fix/stabilization/pre-search/`
-  - Post-search/profile stabilization: `docs/mvp/fix/stabilization/post-search/`
+Individual seller profiles and listings belong to the marketplace account
+experience, not the business seller portal.
 
-When adding a new slice document, place it in the matching feature folder and
-update references in `docs/mvp/development-roadmap.md`. Do not add new
-slice-level docs directly under `docs/mvp/` unless they define a new top-level
-MVP area and the folder structure is updated at the same time.
+Release placement remains:
 
-## Current Implementation Boundary
+- MVP: foundation, accounts, seller profiles, listings/media, guest discovery,
+  search/storefront, basic chat, and basic business/listing moderation.
+- V2: business cart, inventory, checkout/payment, orders/shipping, and
+  notifications.
+- V3: trade completion/reputation, reviews, advanced trust/admin, AI, and
+  analytics.
 
-Phase 0 and Phase 1 setup tasks in `docs/mvp/development-roadmap.md` are
-complete. MVP feature work is now active and must still be implemented one
-small roadmap slice at a time.
+Do not introduce later-release behavior into an unrelated MVP slice. This
+schedule is not a blanket rejection of agent work: explicitly requested and
+approved marketplace-agent or agent-service slices may be implemented within
+their documented contract and rollout boundaries.
 
-Before implementing a slice, read the current roadmap entry and related MVP
-documents. Do not assume an older README, tutorial note, or stale plan is the
-active source of truth.
+## Product invariants
 
-The three MVP product surfaces are:
+1. Individual listings create trades, not platform orders; buyers and sellers
+   arrange payment and delivery themselves.
+2. Never claim the platform verifies or protects off-platform payment.
+3. Beginning in V2, business listings use the distinct cart, inventory,
+   payment, order, and shipping flow. Never merge trade and order state
+   machines.
+4. Buyer, individual seller, business staff, and admin access share one user
+   identity with scoped roles. Business access always checks `businessId`
+   membership and permission.
+5. AI is optional and cannot bypass authorization, validation, or required
+   human confirmation.
+6. Individual deal negotiation is free-text chat; do not add structured offers
+   without an approved scope change.
+7. In the V3 completion flow, the seller may target only the buyer already
+   bound to the accepted trade. Never expose the buyer's exact address; show
+   only masked verified contact metadata.
+8. A public individual-sale count changes only after seller initiation and
+   authenticated buyer confirmation, exactly once.
 
-- Public marketplace site: guests can browse/search/view approved goods
-  without login; signed-in users can manage profile, sell individual items,
-  and chat.
-- Business seller portal: approved merchants manage store profile and basic
-  business listings in MVP.
-- Admin portal: platform staff manage business approval and listing
-  moderation in MVP.
+## Architecture boundaries
 
-Individual seller profile, personal listing creation, personal listing edits,
-and personal listing status belong in the marketplace account experience, not
-the business seller portal.
-
-Release placement:
-
-- MVP: foundation, accounts, seller profiles, listings/media, guest browsing,
-  search/storefront, basic chat, basic business/listing moderation
-- V2: cart, inventory, checkout/payment, orders/shipping, notifications
-- V3: trade completion/reputation, reviews, advanced trust/admin, AI,
-  analytics
-
-Do not implement V2 or V3 features while working on MVP slices. In particular,
-business inventory, cart, checkout, payment, orders, shipping, and
-notifications remain V2 even though the business seller portal exists in MVP.
-
-UI direction:
-
-- Marketplace UI should use shopping/commerce patterns: prominent search,
-  category navigation, listing cards, image-forward listing detail, seller
-  type labels, and buyer-facing calls to action.
-- Business seller portal UI should use a management dashboard style for
-  onboarding, store profile, listing management, and later operational work.
-- Admin portal UI should use a management dashboard style for queues, filters,
-  decision forms, audit context, and moderation safety.
-- Do not make seller/admin pages mimic the marketplace shopping UI. Shared
-  components are fine, but each surface should fit its user's job.
-- Prefer small shared Angular UI primitives under
-  `frontend/src/app/shared/components/ui/` for repeated structure such as
-  status pills, empty states, simple cards, and table shells. Keep primitives
-  theme-token driven so marketplace, seller, and admin surfaces remain visually
-  distinct. Do not create a broad design system or move surface-specific
-  product layout into shared components before duplication proves it is useful.
-- Follow `docs/mvp/ui/marketplace-ui-redesign.md` for public marketplace UI
-  changes.
-
-## Product Invariants
-
-1. Individual listings create **trades**, not platform orders.
-2. Individual buyers and sellers arrange payment and delivery themselves.
-3. The platform must not claim to verify or protect off-platform payment.
-4. Beginning in V2, business listings use cart, inventory reservation,
-   platform payment, order, and shipping.
-5. Buyer, individual seller, business staff, and admin access share one user
-   identity with scoped roles.
-6. Business access always checks `businessId` membership and permission.
-7. AI is optional and cannot bypass authorization, validation, or confirmation.
-8. In the V3 trade-completion flow, individual sellers never receive a buyer's
-   exact address.
-9. Seller completion can target only the buyer already bound to the accepted
-   trade created from a listing conversation; show only masked verified
-   email/phone metadata.
-10. An individual sale counts publicly only after seller initiation and
-    authenticated buyer confirmation, and it increments exactly once.
-11. Individual deal negotiation is free-text chat. Do not add structured offer,
-    counteroffer, or offer-acceptance workflows unless the product scope is
-    explicitly changed.
-
-Do not merge the individual trade and business order state machines.
-
-## Implementation Workflow
-
-Before changing code:
-
-1. Select one requirement or roadmap slice.
-2. Read its requirement ID, API contract, database ownership, and dependencies.
-3. Inspect the existing implementation and uncommitted changes.
-4. State any contract ambiguity before inventing behavior.
-
-For each slice:
-
-1. Add or update a forward-safe Flyway migration when persistence changes.
-2. Implement backend domain behavior and authorization.
-3. Update OpenAPI/API client types.
-4. Implement the smallest frontend path needed for the slice.
-5. Add unit, integration, authorization, and relevant end-to-end tests.
-6. Add structured logs and metrics for important failure paths.
-7. Update MVP documents when an approved contract changes.
-
-Do not implement multiple roadmap slices in one change unless they are
-inseparable and the reason is documented.
-
-For new or changed functions/methods, add a concise purpose comment when the
-function participates in a business flow, authorization decision, integration
-adapter, state transition, or non-obvious technical rule. Keep comments useful:
-explain what the function is responsible for or why the rule exists, not a
-line-by-line restatement of obvious code. Trivial getters/setters, framework
-boilerplate, and self-explanatory test setup do not need noise comments.
-
-## Repository Direction
-
-- Java 21 and Spring Boot remain the backend baseline.
-- Angular is the MVP frontend framework.
-- MySQL is the default transactional database for new MVP data.
-- Redis will store V2 carts, rate limits, and other temporary state.
-- Kafka will carry durable domain events when an approved slice needs them.
-- OpenSearch is a derived listing-search index.
-- S3-compatible object storage holds listing media.
-- V3 OpenAI access occurs only through the isolated agent service.
-- Stable technical code is shared through small Maven and Angular libraries,
-  not a runtime common service.
-
-Avoid adding PostgreSQL, MongoDB, RabbitMQ, Kubernetes, or another frontend
-framework to new MVP paths without an approved architecture decision.
-Existing technology may remain while a documented migration is in progress.
-
-## Shared Library Rules
-
-Approved backend shared modules:
-
-- `common-core`
-- `common-web`
-- `common-storage`
-- `common-testing`
-
-Allowed shared content includes money/value types, pagination primitives, API
-errors, correlation handling, object-storage plumbing, and testing utilities.
-
-`common-security` and `common-events` are deferred until an approved feature
-requires them. Do not create empty speculative shared modules. Keep
-`common-storage` limited to technical object-storage adapters; listing media
-rules and avatar rules stay in their owning services.
-
-Do not put JPA entities, repositories, migrations, controllers, service
-business logic, or domain aggregates in shared modules. Do not make every
-service depend on every common module. Environment variables and secrets do
-not belong in shared constants.
-
-## Service Ownership
-
-- A service owns its schema.
-- Never query or update another service's database.
-- Use synchronous APIs for immediate validation/commands.
-- Use Kafka events for asynchronous projections and notifications.
-- Publish events through a transactional outbox.
-- Consumers deduplicate by event ID.
-
-Do not create a new microservice only to hold one table or endpoint. Begin with
-a clear module boundary and split deployment only for measured scaling,
-ownership, reliability, or release reasons.
-
-## API Rules
-
-- External routes use `/api/v1`.
-- Follow `docs/mvp/api-contract.md`.
-- Use the standard error envelope and correlation ID.
-- Use cursor pagination for unbounded collections.
-- Never trust client prices, totals, roles, user IDs, business IDs, or payment
-  status.
-- Require `Idempotency-Key` for retryable money, inventory, checkout, order,
-  shipping, and webhook operations.
-- Use optimistic locking for seller/admin edits and state decisions.
-- Keep backward compatibility or version the contract.
-
-## Database Rules
-
-- Use Flyway; do not rely on Hibernate schema auto-update.
-- Use InnoDB, UTC, and `utf8mb4`.
-- Store money as decimal plus currency.
-- Keep status values stable and explicit.
-- Add indexes for actual query and queue patterns.
-- Keep immutable history for trade state, order state, payments, moderation,
-  and audit actions.
-- Use address, price, listing, and policy snapshots for orders.
-- Never store raw card data, passwords, access tokens, or external bank
-  credentials.
-- Redis and OpenSearch are never authoritative for orders, payments, trades,
-  or audit records.
-
-## Security Rules
-
-- Enforce authorization in backend services, not only the gateway or UI.
-- Test cross-user and cross-business access for every protected resource.
-- Admin operations use granular roles and produce audit records.
-- Verify webhook signatures and deduplicate provider event IDs.
-- Redact secrets, tokens, payment details, and unnecessary PII from logs.
-- Treat chat and uploaded media as untrusted input.
-- Do not expose exact individual meeting/home locations publicly.
-- Do not accept buyer email, phone, address, or replacement buyer ID in a
-  seller completion request; derive the buyer from the trade.
-- Store completion challenges hashed, single-use, expiring, and rate-limited.
-
-## AI Rules
-
-- Agents call allowlisted application tools; they do not access databases.
-- Tool calls execute with the requesting actor's permissions.
-- Validate tool arguments with strict schemas.
-- Draft actions require human confirmation before persistence.
-- AI cannot approve businesses, publish listings, charge payments, issue
-  significant refunds, suspend users, or settle disputes in MVP.
-- Log safe prompt metadata, tool calls, result status, latency, and cost.
-- Core marketplace flows must work when AI is disabled or unavailable.
-
-## Testing Expectations
-
-Minimum per slice:
-
-- Unit tests for domain rules and state transitions
-- Integration tests for persistence and API behavior
-- Authorization/tenant-isolation tests
-- Idempotency tests for retryable commands
-- Event publication/consumer deduplication tests when Kafka is involved
-- Frontend component/service tests for user-visible behavior
-
-Additional mandatory tests:
-
-- During Phase 1: build baseline, shared-module architecture rules,
-  correlation/error plumbing, configuration validation, and CI behavior
-- Later MVP: listing visibility, chat participant authorization, and basic
-  moderation authorization
-- V2: concurrent inventory reservation and payment recovery
-- V3: trade-completion idempotency and AI tool authorization
-
-Use Testcontainers for database, Redis, and Kafka integration where practical.
-
-## Change Safety
-
-- Preserve unrelated user changes in the working tree.
-- During stabilization, cleanup, refactor, or documentation-only work, do not
-  edit `.env`, `.env.*`, or other local environment files unless the user
-  explicitly asks for an environment/configuration change in that turn.
-- Do not rewrite existing migrations that may have run; add a new migration.
-- Do not perform broad refactors while implementing a small requirement.
-- Do not silently change an approved product invariant.
-- Feature-flag incomplete workflows so users cannot enter dead ends.
+- Java 21 and Spring Boot are the backend baseline; Angular is the frontend.
+- MySQL is authoritative transactional storage. Redis is temporary state,
+  OpenSearch is derived search data, and S3-compatible storage holds media.
+- Use Kafka only for approved durable asynchronous flows, with a transactional
+  outbox and event-ID deduplication.
+- Each service owns its schema. Never query or update another service's
+  database; use synchronous APIs for immediate checks and events for approved
+  asynchronous projections.
+- Do not add PostgreSQL, MongoDB, RabbitMQ, Kubernetes, another frontend
+  framework, or a new microservice without an approved architecture decision.
 - Prefer adapters around external payment, shipping, email, storage, and AI
   providers.
 
-## Completion Report
+Approved shared backend modules are `common-core`, `common-web`,
+`common-storage`, and `common-testing`. Share only stable technical primitives;
+do not place entities, repositories, migrations, controllers, domain logic, or
+aggregates in shared modules. Keep `common-storage` technical, avoid universal
+module dependencies, and never put secrets in shared constants. Do not create
+speculative `common-security` or `common-events` modules.
 
-When finishing a slice, report:
+## Workflow
 
-- Requirement/roadmap IDs completed
-- Files and contracts changed
-- Migrations added
-- Tests run and results
-- Known limitations or deferred dependencies
+Before changing code:
+
+1. Identify the requirement or roadmap slice and its dependencies.
+2. Read the relevant API, data-ownership, and service-local instructions.
+3. Inspect the implementation and uncommitted changes.
+4. Surface a contract ambiguity before inventing behavior.
+
+Implement the smallest end-to-end path required by the slice. Update contracts
+only when the approved behavior changes, add proportionate tests, and add safe
+structured logs or metrics for important failure paths.
+
+For non-obvious business flows, authorization decisions, adapters, or state
+transitions, give new or changed functions a concise purpose comment. Avoid
+comments on boilerplate and self-explanatory code.
+
+## Change safety
+
+- Preserve unrelated working-tree changes.
+- Do not edit `.env`, `.env.*`, or other local environment files during
+  cleanup, stabilization, refactoring, or documentation work unless explicitly
+  requested.
+- Never rewrite a migration that may have run; add a forward migration.
+- Avoid broad refactors in a small slice and never silently change an approved
+  product invariant.
+- Feature-flag incomplete workflows so users cannot enter dead ends.
+- Do not store or log secrets, tokens, payment details, raw card data, external
+  bank credentials, or unnecessary PII. Treat uploaded media and chat as
+  untrusted input.
+
+## Completion report
+
+Report the requirement or roadmap IDs, files and contracts changed, migrations
+added, tests run and results, and known limitations or deferred dependencies.

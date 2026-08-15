@@ -2,6 +2,12 @@ package com.msb.ecom.product_service.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.model.UserCapabilityDecisionUnavailableException;
+import com.msb.ecom.product_service.model.UserCapabilityRestrictedException;
+import com.msb.ecom.product_service.model.BusinessCapabilityRestrictedException;
+import com.msb.ecom.product_service.model.BusinessCapabilityDecisionUnavailableException;
+import com.msb.ecom.common.web.correlation.CorrelationId;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -9,22 +15,104 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
 
 @Component
 @Slf4j
 public class RestAuthServiceClient implements AuthServiceClient {
 
     private static final String LISTING_DRAFT_CREATE = "LISTING_DRAFT_CREATE";
+    private static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
 
     private final RestClient restClient;
+    private final String internalServiceToken;
 
+    @Autowired
     public RestAuthServiceClient(
             RestClient.Builder restClientBuilder,
-            @Value("${service.auth.url}") String authServiceUrl) {
+            @Value("${service.auth.url}") String authServiceUrl,
+            @Value("${commerce.internal-service-token}") String internalServiceToken) {
         this.restClient = restClientBuilder.baseUrl(authServiceUrl).build();
+        this.internalServiceToken = internalServiceToken;
+    }
+
+    public RestAuthServiceClient(RestClient.Builder restClientBuilder, String authServiceUrl) {
+        this(restClientBuilder, authServiceUrl, "local-commerce-service-token");
+    }
+
+    @Override
+    public void requireUserCapability(String userId, String scope) {
+        try {
+            UserCapabilityDecisionResponse response = restClient.post()
+                    .uri("/api/v1/internal/users/capabilities/evaluate")
+                    .header(INTERNAL_TOKEN_HEADER, internalServiceToken)
+                    .header(CorrelationId.HEADER_NAME, correlationId())
+                    .body(Map.of("userId", userId, "scopes", List.of(scope)))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                        log.warn("Auth-service capability decision failed status={} scope={}",
+                                clientResponse.getStatusCode().value(), scope);
+                        throw new UserCapabilityDecisionUnavailableException();
+                    })
+                    .body(UserCapabilityDecisionResponse.class);
+            if (response == null || response.decisions() == null || response.decisions().size() != 1) {
+                throw new UserCapabilityDecisionUnavailableException();
+            }
+            UserCapabilityDecision decision = response.decisions().getFirst();
+            if (!scope.equals(decision.scope())) {
+                throw new UserCapabilityDecisionUnavailableException();
+            }
+            if (!decision.allowed()) {
+                throw new UserCapabilityRestrictedException(
+                        decision.scope(), decision.effectiveAction(), decision.expiresAt(), decision.supportReference());
+            }
+        } catch (UserCapabilityRestrictedException | UserCapabilityDecisionUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            log.warn("Auth-service capability decision transport failure scope={} type={}",
+                    scope, exception.getClass().getSimpleName());
+            throw new UserCapabilityDecisionUnavailableException();
+        }
+    }
+
+    @Override
+    public void requireBusinessCapability(String businessId, String scope) {
+        try {
+            BusinessCapabilityDecisionResponse response = restClient.post()
+                    .uri("/api/v1/internal/businesses/capabilities/evaluate")
+                    .header(INTERNAL_TOKEN_HEADER, internalServiceToken)
+                    .header(CorrelationId.HEADER_NAME, correlationId())
+                    .body(Map.of("businessId", businessId, "scopes", List.of(scope)))
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
+                        log.warn("Auth-service business capability decision failed status={} scope={}",
+                                clientResponse.getStatusCode().value(), scope);
+                        throw new BusinessCapabilityDecisionUnavailableException();
+                    })
+                    .body(BusinessCapabilityDecisionResponse.class);
+            if (response == null || !businessId.equals(response.businessId())
+                    || response.decisions() == null || response.decisions().size() != 1) {
+                throw new BusinessCapabilityDecisionUnavailableException();
+            }
+            BusinessCapabilityDecision decision = response.decisions().getFirst();
+            if (!scope.equals(decision.scope())) {
+                throw new BusinessCapabilityDecisionUnavailableException();
+            }
+            if (!decision.allowed()) {
+                throw new BusinessCapabilityRestrictedException(decision.scope(), decision.effectiveAction(),
+                        decision.expiresAt(), decision.supportReference());
+            }
+        } catch (BusinessCapabilityRestrictedException | BusinessCapabilityDecisionUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            log.warn("Auth-service business capability transport failure scope={} type={}",
+                    scope, exception.getClass().getSimpleName());
+            throw new BusinessCapabilityDecisionUnavailableException();
+        }
     }
 
     @Override
@@ -46,6 +134,10 @@ public class RestAuthServiceClient implements AuthServiceClient {
             throw new ListingAuthorizationException("Active individual seller profile is required.");
         }
         return response.data();
+    }
+
+    private String correlationId() {
+        return CorrelationId.acceptOrGenerate(MDC.get("correlationId")).value();
     }
 
     @Override
@@ -165,9 +257,11 @@ public class RestAuthServiceClient implements AuthServiceClient {
 
         if (response == null
                 || response.data() == null
-                || !"PLATFORM_ADMIN".equals(response.data().role())) {
-            log.warn("Auth-service returned insufficient platform admin authorization role={}",
-                    response == null || response.data() == null ? "missing" : response.data().role());
+                || !"PLATFORM_ADMIN".equals(response.data().role())
+                || !"ACTIVE".equals(response.data().accountState())) {
+            log.warn("Auth-service returned insufficient admin authorization role={} accountState={}",
+                    response == null || response.data() == null ? "missing" : response.data().role(),
+                    response == null || response.data() == null ? "missing" : response.data().accountState());
             throw new ListingAuthorizationException("Platform admin access is required.");
         }
         return response.data();

@@ -550,6 +550,11 @@ class OrderCancellationMySqlIntegrationTests {
                 FROM platform_policy_versions
                 WHERE version_code = 'LOCAL_DEMO_CANCELLATION_TEST_V1'
                 """, String.class)).isEqualTo("BEFORE_FULFILLMENT");
+        assertThat(database.queryForObject("""
+                SELECT effective_from
+                FROM platform_policy_versions
+                WHERE version_code = 'LOCAL_DEMO_CANCELLATION_TEST_V1'
+                """, Timestamp.class).toInstant()).isEqualTo(Instant.parse("2037-01-01T00:00:00Z"));
     }
 
     private int number(String sql, Object... arguments) {

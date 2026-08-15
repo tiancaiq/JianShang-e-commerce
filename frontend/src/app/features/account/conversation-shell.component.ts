@@ -9,12 +9,21 @@ import { ChatService } from '../../core/services/chat.service';
 import {
   AGENT_CUSTOMER_SERVICE_ENABLED,
   AGENT_DISCOVERY_ENABLED,
+  AGENT_MARKETPLACE_V2_ENABLED,
 } from '../agent/agent-customer-service.capability';
+import { AgentMarketplaceDiscoveryComponent } from '../agent/agent-marketplace-discovery.component';
+import { AgentMarketplaceV2PageComponent } from '../agent/agent-marketplace-v2-page.component';
 
 @Component({
   selector: 'app-conversation-shell',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink],
+  imports: [
+    AgentMarketplaceDiscoveryComponent,
+    AgentMarketplaceV2PageComponent,
+    DatePipe,
+    FormsModule,
+    RouterLink,
+  ],
   template: `
     <section class="messages-page">
       <header class="messages-title">
@@ -46,10 +55,12 @@ import {
               <span class="avatar-initials agent-initials">AI</span>
               <span class="conversation-copy">
                 <span class="row-title">
-                  <strong>Marketplace discovery</strong>
+                  <strong>Marketplace assistant</strong>
                   <small>AI assistant</small>
                 </span>
-                <span class="row-subtitle">Find items or ask about a listing</span>
+                <span class="row-subtitle">
+                  {{ agentV2Enabled ? 'Customer service and listing help' : 'Search and compare listings' }}
+                </span>
               </span>
             </button>
           }
@@ -78,7 +89,7 @@ import {
                     <strong>{{ conversation.otherParticipant.displayName }}</strong>
                     <time>{{ conversationTime(conversation) }}</time>
                   </span>
-                  <small>{{ participantHandle(conversation.otherParticipant) }} · {{ conversation.listing.title }}</small>
+                  <small>{{ participantHandle(conversation.otherParticipant) }} - {{ conversation.listing.title }}</small>
                   <span class="row-preview">{{ preview(conversation) }}</span>
                 </span>
                 @if (conversation.unread) {
@@ -91,11 +102,13 @@ import {
 
         <article class="thread-panel">
           @if (agentEntryEnabled && agentSelected()) {
-            <div class="thread-placeholder agent-placeholder">
-              <span class="agent-large-icon">AI</span>
-              <strong>Opening marketplace help…</strong>
-              <span>AI sessions stay separate from buyer and seller messages.</span>
-            </div>
+            <section class="agent-discovery-pane" aria-label="Marketplace assistant">
+              @if (agentV2Enabled) {
+                <app-agent-marketplace-v2-page [embedded]="true" />
+              } @else {
+                <app-agent-marketplace-discovery />
+              }
+            </section>
           } @else if (loadingThread()) {
             <div class="empty-state">Loading messages...</div>
           } @else if (threadError()) {
@@ -194,7 +207,7 @@ import {
                     <div class="day-divider">{{ dayLabel(message.createdAt) }}</div>
                   }
                   <article class="message-bubble" [class.mine]="message.currentUser">
-                    <span>{{ senderLabel(message) }} · {{ message.createdAt | date: 'shortTime' }}</span>
+                    <span>{{ senderLabel(message) }} - {{ message.createdAt | date: 'shortTime' }}</span>
                     <p>{{ message.body }}</p>
                   </article>
                 }
@@ -239,6 +252,7 @@ import {
     .messages-page {
       display: flex;
       flex-direction: column;
+      min-height: 0;
       gap: 1rem;
       color: var(--market-ink);
     }
@@ -286,7 +300,8 @@ import {
     .messages-layout {
       display: grid;
       grid-template-columns: minmax(300px, 0.38fr) minmax(0, 1fr);
-      min-height: min(760px, calc(100vh - 210px));
+      height: min(760px, calc(100dvh - 210px));
+      min-height: 420px;
       overflow: hidden;
     }
 
@@ -446,6 +461,16 @@ import {
       height: 100%;
       overflow: hidden;
       background: #fff;
+    }
+
+    .agent-discovery-pane {
+      display: flex;
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 0.75rem;
+      background: #fffafd;
     }
 
     .listing-header {
@@ -850,10 +875,12 @@ import {
 
       .messages-layout {
         grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
+        height: min(760px, calc(100dvh - 150px));
       }
 
       .conversation-sidebar {
-        max-height: 360px;
+        max-height: 220px;
         border-right: 0;
         border-bottom: 1px solid rgba(234, 215, 242, 0.95);
       }
@@ -884,8 +911,9 @@ export class ConversationShellComponent implements OnInit {
   readonly defaultNotice = 'Payment and delivery are arranged directly by participants.';
   readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
   readonly aiDiscoveryEnabled = inject(AGENT_DISCOVERY_ENABLED);
+  readonly agentV2Enabled = inject(AGENT_MARKETPLACE_V2_ENABLED);
   get agentEntryEnabled(): boolean {
-    return this.aiAssistantEnabled || this.aiDiscoveryEnabled;
+    return this.agentV2Enabled || this.aiAssistantEnabled || this.aiDiscoveryEnabled;
   }
 
   private readonly chatService = inject(ChatService);
@@ -932,6 +960,11 @@ export class ConversationShellComponent implements OnInit {
   ngOnInit(): void {
     this.route.paramMap.subscribe(params => {
       const conversationId = params.get('conversationId');
+      if (conversationId === 'agent') {
+        this.loadConversations(null, false);
+        this.selectAgent();
+        return;
+      }
       this.loadConversations(conversationId);
     });
   }
@@ -942,7 +975,7 @@ export class ConversationShellComponent implements OnInit {
     this.openConversation(conversationId);
   }
 
-  /** Navigates to the reserved Agent route without treating it as a Chat Service conversation. */
+  /** Opens the discovery assistant without treating it as a Chat Service conversation. */
   selectAgent(): void {
     if (!this.agentEntryEnabled) {
       return;
@@ -952,7 +985,6 @@ export class ConversationShellComponent implements OnInit {
     this.selectedConversationId.set(null);
     this.messages.set([]);
     this.threadError.set('');
-    void this.router.navigate(['/account/messages/agent']);
   }
 
   sendMessage(): void {
@@ -1105,7 +1137,7 @@ export class ConversationShellComponent implements OnInit {
     if (typeof listing.quantity === 'number') {
       parts.push(`Qty ${listing.quantity}`);
     }
-    return parts.join(' · ');
+    return parts.join(' - ');
   }
 
   listingInitial(listing: ChatListingSummary | null | undefined): string {

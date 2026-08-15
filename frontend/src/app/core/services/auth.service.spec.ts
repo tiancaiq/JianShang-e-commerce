@@ -102,6 +102,7 @@ describe('AuthService', () => {
 
   it('refreshes the gateway session on throttled browser activity for signed-in users', () => {
     spyOn(Date, 'now').and.returnValues(1000, 2000);
+    spyOnProperty(document, 'visibilityState', 'get').and.returnValue('visible');
     service.setCurrentUser(currentUserFixture());
 
     service.startSessionActivityMonitor();

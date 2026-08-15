@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -20,8 +21,12 @@ from .config import AgentPersistenceSettings
 LOGGER = logging.getLogger(__name__)
 _CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _ID_PATTERN = re.compile(r"^[0-9A-Z]{26}$")
+_PRODUCT_LISTING_ID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_SAFE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
+_SAFE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,119}$")
+_REPLACEABLE_FAILED_ASSISTANT_ERROR_CODES = frozenset(
+    {"DISCOVERY_ORCHESTRATOR_RUN_FAILED_GRAPH_CANCEL"}
+)
 _REQUIRED_TABLES = {
     "agent_sessions",
     "agent_messages",
@@ -31,8 +36,12 @@ _REQUIRED_TABLES = {
 _ALLOWED_TOOLS = {
     "getListing",
     "retrieveKnowledge",
+    "CHECK_AVAILABILITY",
     "SEARCH_INDIVIDUAL",
     "GET_LISTING",
+    "check_availability",
+    "search_listings",
+    "get_listing",
 }
 _ALLOWED_SOURCE_TYPES = {
     "LISTING",
@@ -40,6 +49,25 @@ _ALLOWED_SOURCE_TYPES = {
     "SAFETY_GUIDANCE",
     "MARKETPLACE_FAQ",
     "CATEGORY_GUIDANCE",
+}
+_LEGACY_SOURCE_REF_KEYS = frozenset(
+    {"sourceType", "sourceId", "sourceVersion"}
+)
+_HYBRID_RETRIEVAL_SOURCE_REF_KEYS = frozenset(
+    {
+        "listingId",
+        "listingVersion",
+        "finalRank",
+        "mode",
+        "matchedBy",
+        "reasonCode",
+        "checkedAt",
+    }
+)
+_HYBRID_RETRIEVAL_EXPECTED = {
+    "HYBRID": (("LEXICAL", "VECTOR"), "LEXICAL_AND_VECTOR_MATCH"),
+    "LEXICAL_ONLY": (("LEXICAL",), "LEXICAL_MATCH"),
+    "VECTOR_ONLY": (("VECTOR",), "VECTOR_MATCH"),
 }
 
 
@@ -132,6 +160,13 @@ class AgentMessage:
     sources: tuple[dict[str, object], ...]
     actions: tuple[dict[str, object], ...]
     created_at: datetime
+    client_message_id: str | None = None
+    invocation_id: str | None = None
+    invocation_status: AgentInvocationStatus | None = None
+    invocation_error_code: str | None = None
+    invocation_retry_count: int | None = None
+    invocation_assistant_message_id: str | None = None
+    invocation_user_message_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +260,12 @@ class AgentPersistenceRepository:
         """Share the Agent-owned pool with independently gated same-schema repositories."""
 
         return self._pool
+
+    @property
+    def maximum_failed_retries(self) -> int:
+        """Expose the bounded failed-invocation retry ceiling to API contracts."""
+
+        return self._settings.maximum_failed_retries
 
     @classmethod
     async def create(
@@ -784,6 +825,10 @@ class AgentPersistenceRepository:
                     )
                     message_row = await cursor.fetchone()
                 await connection.commit()
+            except asyncio.CancelledError:
+                await connection.rollback()
+                self._metrics.record_invocation("begin", "CANCELLED")
+                raise
             except Exception:
                 await connection.rollback()
                 self._metrics.record_invocation("begin", "FAILED")
@@ -831,10 +876,20 @@ class AgentPersistenceRepository:
             if int(existing["retry_count"]) >= self._settings.maximum_failed_retries:
                 result = BeginInvocationResult.RETRY_EXHAUSTED
             else:
+                prior_assistant_id = existing.get("assistant_message_id")
+                await cursor.execute(
+                    "DELETE FROM agent_tool_calls WHERE invocation_id = %s",
+                    (existing["invocation_id"],),
+                )
+                await cursor.execute(
+                    "DELETE FROM agent_discovery_recommendations WHERE invocation_id = %s",
+                    (existing["invocation_id"],),
+                )
                 await cursor.execute(
                     """
                     UPDATE agent_invocations
                     SET result_status = 'PENDING',
+                        assistant_message_id = NULL,
                         error_code = NULL,
                         input_tokens = 0,
                         output_tokens = 0,
@@ -850,6 +905,11 @@ class AgentPersistenceRepository:
                     """,
                     (correlation_id, now, existing["invocation_id"]),
                 )
+                if prior_assistant_id is not None:
+                    await cursor.execute(
+                        "DELETE FROM agent_messages WHERE message_id = %s",
+                        (prior_assistant_id,),
+                    )
                 result = BeginInvocationResult.RETRY_STARTED
         if result is None:
             raise AgentPersistenceError(
@@ -1117,15 +1177,155 @@ class AgentPersistenceRepository:
                 self._metrics.record_invocation("fail", "FAILED")
                 raise
         self._metrics.record_invocation("fail", "RECORDED")
-        LOGGER.warning(
-            "Agent invocation failed sessionId=%s actorUserId=%s "
-            "invocationId=%s errorCode=%s",
-            updated["session_id"],
-            actor,
-            invocation,
-            safe_error,
-        )
+        LOGGER.warning("Agent invocation failed errorCode=%s", safe_error)
         return _invocation_from_row(updated)
+
+    async def fail_invocation_with_assistant(
+        self,
+        *,
+        invocation_id: str,
+        actor_user_id: str,
+        error_code: str,
+        body: str,
+        sources: Sequence[dict[str, object]],
+        actions: Sequence[dict[str, object]],
+        latency_ms: int,
+        now: datetime,
+        resolution_type: AgentResolutionType = AgentResolutionType.HANDOFF,
+        replace_failed_error_codes: Sequence[str] = (),
+    ) -> tuple[AgentInvocation, AgentMessage]:
+        """Persist one guarded assistant failure while retaining FAILED semantics.
+
+        Explicit cancellation may race a terminal failure write. Only callers that
+        name the exact replaceable failure code may attach the missing assistant to
+        that already-FAILED invocation; all other terminal states remain immutable.
+        """
+
+        invocation = _fixed_id("invocation_id", invocation_id)
+        actor = _fixed_id("actor_user_id", actor_user_id)
+        safe_error = _safe_error_code(error_code)
+        replaceable_errors = tuple(
+            _safe_error_code(value) for value in replace_failed_error_codes
+        )
+        if any(
+            value not in _REPLACEABLE_FAILED_ASSISTANT_ERROR_CODES
+            for value in replaceable_errors
+        ):
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        answer = _message_body(body, self._settings.assistant_max_characters)
+        sources_json = _json_array("sources", sources, maximum_bytes=32_000)
+        actions_json = _json_array("actions", actions, maximum_bytes=16_000)
+        if resolution_type not in {AgentResolutionType.HANDOFF, AgentResolutionType.PARTIAL}:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        if not 0 <= latency_ms <= 86_400_000:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        completed_at = _mysql_datetime(now)
+        async with self._pool.acquire() as connection:
+            try:
+                await connection.begin()
+                async with connection.cursor(aiomysql.DictCursor) as cursor:
+                    row = await self._lock_invocation_for_actor(
+                        cursor, invocation, actor
+                    )
+                    if row["result_status"] == AgentInvocationStatus.FAILED.value:
+                        if row["assistant_message_id"] is not None:
+                            message = await self._assistant_message(
+                                cursor, row["assistant_message_id"]
+                            )
+                            await connection.commit()
+                            return _invocation_from_row(row), message
+                        if row["error_code"] not in replaceable_errors:
+                            raise AgentPersistenceError(
+                                AgentPersistenceErrorCode.INVOCATION_STATE_CONFLICT
+                            )
+                        expected_status = AgentInvocationStatus.FAILED.value
+                        expected_error = row["error_code"]
+                    elif row["result_status"] == AgentInvocationStatus.PENDING.value:
+                        expected_status = AgentInvocationStatus.PENDING.value
+                        expected_error = None
+                    else:
+                        raise AgentPersistenceError(
+                            AgentPersistenceErrorCode.INVOCATION_STATE_CONFLICT
+                        )
+                    message_id = new_ulid()
+                    await cursor.execute(
+                        """
+                        INSERT INTO agent_messages (
+                            message_id, session_id, actor_user_id, role, body,
+                            resolution_type, sources_json, actions_json, created_at
+                        )
+                        VALUES (%s, %s, %s, 'ASSISTANT', %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            message_id,
+                            row["session_id"],
+                            actor,
+                            answer,
+                            resolution_type.value,
+                            sources_json,
+                            actions_json,
+                            completed_at,
+                        ),
+                    )
+                    if expected_error is None:
+                        await cursor.execute(
+                            """
+                            UPDATE agent_invocations
+                            SET assistant_message_id = %s,
+                                result_status = 'FAILED', error_code = %s,
+                                input_tokens = 0, output_tokens = 0,
+                                latency_ms = %s, estimated_cost = 0,
+                                updated_at = %s, completed_at = %s,
+                                optimistic_version = optimistic_version + 1
+                            WHERE invocation_id = %s AND actor_user_id = %s
+                              AND result_status = %s
+                              AND assistant_message_id IS NULL
+                            """,
+                            (
+                                message_id, safe_error, latency_ms, completed_at,
+                                completed_at, invocation, actor, expected_status,
+                            ),
+                        )
+                    else:
+                        await cursor.execute(
+                            """
+                            UPDATE agent_invocations
+                            SET assistant_message_id = %s,
+                                result_status = 'FAILED', error_code = %s,
+                                input_tokens = 0, output_tokens = 0,
+                                latency_ms = %s, estimated_cost = 0,
+                                updated_at = %s, completed_at = %s,
+                                optimistic_version = optimistic_version + 1
+                            WHERE invocation_id = %s AND actor_user_id = %s
+                              AND result_status = %s AND error_code = %s
+                              AND assistant_message_id IS NULL
+                            """,
+                            (
+                                message_id, safe_error, latency_ms, completed_at,
+                                completed_at, invocation, actor, expected_status,
+                                expected_error,
+                            ),
+                        )
+                    if cursor.rowcount != 1:
+                        raise AgentPersistenceError(
+                            AgentPersistenceErrorCode.INVOCATION_STATE_CONFLICT
+                        )
+                    await cursor.execute(
+                        "SELECT * FROM agent_invocations WHERE invocation_id = %s",
+                        (invocation,),
+                    )
+                    updated = await cursor.fetchone()
+                    await cursor.execute(
+                        "SELECT * FROM agent_messages WHERE message_id = %s",
+                        (message_id,),
+                    )
+                    message_row = await cursor.fetchone()
+                await connection.commit()
+            except Exception:
+                await connection.rollback()
+                raise
+        LOGGER.warning("Agent invocation failed with guarded assistant errorCode=%s", safe_error)
+        return _invocation_from_row(updated), _message_from_row(message_row)
 
     async def append_tool_call(
         self,
@@ -1289,8 +1489,11 @@ class AgentPersistenceRepository:
             cursor_id = _fixed_id("cursor.message_id", after.message_id)
             cursor_clause = """
                 AND (
-                    created_at > %s
-                    OR (created_at = %s AND message_id > %s)
+                    messages.created_at > %s
+                    OR (
+                        messages.created_at = %s
+                        AND messages.message_id > %s
+                    )
                 )
             """
             parameters.extend((cursor_time, cursor_time, cursor_id))
@@ -1311,12 +1514,25 @@ class AgentPersistenceRepository:
                     )
                 await cursor.execute(
                     f"""
-                    SELECT *
-                    FROM agent_messages
-                    WHERE session_id = %s
-                      AND actor_user_id = %s
+                    SELECT messages.*,
+                           invocations.client_message_id AS client_message_id,
+                           invocations.invocation_id AS invocation_id,
+                           invocations.result_status AS invocation_status,
+                           invocations.error_code AS invocation_error_code,
+                           invocations.retry_count AS invocation_retry_count,
+                           invocations.assistant_message_id AS invocation_assistant_message_id,
+                           invocations.user_message_id AS invocation_user_message_id
+                    FROM agent_messages messages
+                    LEFT JOIN agent_invocations invocations
+                      ON (
+                           invocations.user_message_id = messages.message_id
+                           OR invocations.assistant_message_id = messages.message_id
+                         )
+                     AND invocations.actor_user_id = messages.actor_user_id
+                    WHERE messages.session_id = %s
+                      AND messages.actor_user_id = %s
                       {cursor_clause}
-                    ORDER BY created_at, message_id
+                    ORDER BY messages.created_at, messages.message_id
                     LIMIT %s
                     """,
                     tuple(parameters),
@@ -1389,6 +1605,84 @@ class AgentPersistenceRepository:
             else messages.get(row["assistant_message_id"])
         )
         return user_message, assistant_message
+
+    async def get_invocation_for_user_message(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        user_message_id: str,
+    ) -> tuple[AgentInvocation, AgentMessage]:
+        """Resolve one actor-owned committed USER row for response-only retry."""
+
+        session = _fixed_id("session_id", session_id)
+        actor = _fixed_id("actor_user_id", actor_user_id)
+        message_id = _fixed_id("user_message_id", user_message_id)
+        async with self._pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT * FROM agent_invocations
+                    WHERE session_id = %s AND actor_user_id = %s
+                      AND user_message_id = %s
+                    """,
+                    (session, actor, message_id),
+                )
+                invocation_row = await cursor.fetchone()
+                await cursor.execute(
+                    """
+                    SELECT * FROM agent_messages
+                    WHERE session_id = %s AND actor_user_id = %s
+                      AND message_id = %s AND role = 'USER'
+                    """,
+                    (session, actor, message_id),
+                )
+                message_row = await cursor.fetchone()
+        if invocation_row is None or message_row is None:
+            raise AgentPersistenceError(
+                AgentPersistenceErrorCode.INVOCATION_NOT_FOUND
+            )
+        return _invocation_from_row(invocation_row), _message_from_row(message_row)
+
+    async def get_invocation_for_client_message(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        client_message_id: str,
+    ) -> tuple[AgentInvocation, AgentMessage]:
+        """Resolve the committed USER turn for authoritative stream-stop reconciliation."""
+
+        session = _fixed_id("session_id", session_id)
+        actor = _fixed_id("actor_user_id", actor_user_id)
+        client_message = _fixed_id("client_message_id", client_message_id)
+        async with self._pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT * FROM agent_invocations
+                    WHERE session_id = %s AND actor_user_id = %s
+                      AND client_message_id = %s
+                    """,
+                    (session, actor, client_message),
+                )
+                invocation_row = await cursor.fetchone()
+                message_row = None
+                if invocation_row is not None and invocation_row["user_message_id"] is not None:
+                    await cursor.execute(
+                        """
+                        SELECT * FROM agent_messages
+                        WHERE session_id = %s AND actor_user_id = %s
+                          AND message_id = %s AND role = 'USER'
+                        """,
+                        (session, actor, invocation_row["user_message_id"]),
+                    )
+                    message_row = await cursor.fetchone()
+        if invocation_row is None or message_row is None:
+            raise AgentPersistenceError(
+                AgentPersistenceErrorCode.INVOCATION_NOT_FOUND
+            )
+        return _invocation_from_row(invocation_row), _message_from_row(message_row)
 
     async def apply_retention(
         self,
@@ -1703,6 +1997,39 @@ def _message_from_row(row: dict[str, object]) -> AgentMessage:
         actor_user_id=str(row["actor_user_id"]),
         role=role,
         body=str(row["body"]),
+        client_message_id=(
+            None
+            if row.get("client_message_id") is None
+            else str(row["client_message_id"])
+        ),
+        invocation_id=(
+            None if row.get("invocation_id") is None else str(row["invocation_id"])
+        ),
+        invocation_status=(
+            None
+            if row.get("invocation_status") is None
+            else AgentInvocationStatus(str(row["invocation_status"]))
+        ),
+        invocation_error_code=(
+            None
+            if row.get("invocation_error_code") is None
+            else str(row["invocation_error_code"])
+        ),
+        invocation_retry_count=(
+            None
+            if row.get("invocation_retry_count") is None
+            else int(row["invocation_retry_count"])
+        ),
+        invocation_assistant_message_id=(
+            None
+            if row.get("invocation_assistant_message_id") is None
+            else str(row["invocation_assistant_message_id"])
+        ),
+        invocation_user_message_id=(
+            None
+            if row.get("invocation_user_message_id") is None
+            else str(row["invocation_user_message_id"])
+        ),
         resolution_type=(
             None
             if row["resolution_type"] is None
@@ -1888,52 +2215,105 @@ def _source_refs_json(value: Sequence[dict[str, object]]) -> str:
 
     if isinstance(value, (str, bytes, bytearray)) or len(value) > 20:
         raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, object]] = []
     for item in value:
-        if not isinstance(item, dict) or set(item) != {
-            "sourceType",
-            "sourceId",
-            "sourceVersion",
-        }:
+        if not isinstance(item, dict):
             raise AgentPersistenceError(
                 AgentPersistenceErrorCode.INVALID_ARGUMENT
             )
-        source_type = item["sourceType"]
-        source_id = item["sourceId"]
-        source_version = item["sourceVersion"]
-        if source_type not in _ALLOWED_SOURCE_TYPES:
+        keys = frozenset(item)
+        if keys == _LEGACY_SOURCE_REF_KEYS:
+            normalized.append(_legacy_source_ref(item))
+        elif keys == _HYBRID_RETRIEVAL_SOURCE_REF_KEYS:
+            normalized.append(_hybrid_retrieval_source_ref(item))
+        else:
             raise AgentPersistenceError(
                 AgentPersistenceErrorCode.INVALID_ARGUMENT
             )
-        if (
-            not isinstance(source_id, str)
-            or not 1 <= len(source_id) <= 160
-            or source_id != source_id.strip()
-            or any(
-                character.isspace()
-                or ord(character) < 32
-                or ord(character) == 127
-                for character in source_id
-            )
-        ):
-            raise AgentPersistenceError(
-                AgentPersistenceErrorCode.INVALID_ARGUMENT
-            )
-        if (
-            not isinstance(source_version, str)
-            or re.fullmatch(r"(?:0|[1-9][0-9]{0,19})", source_version) is None
-        ):
-            raise AgentPersistenceError(
-                AgentPersistenceErrorCode.INVALID_ARGUMENT
-            )
-        normalized.append(
-            {
-                "sourceType": source_type,
-                "sourceId": source_id,
-                "sourceVersion": source_version,
-            }
-        )
     return _json_array("source_refs", normalized, maximum_bytes=32_000)
+
+
+def _legacy_source_ref(item: dict[str, object]) -> dict[str, str]:
+    source_type = item["sourceType"]
+    source_id = item["sourceId"]
+    source_version = item["sourceVersion"]
+    if source_type not in _ALLOWED_SOURCE_TYPES:
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    if source_type == "LISTING":
+        normalized_source_id = _product_listing_id(source_id)
+    else:
+        normalized_source_id = _source_identity(source_id)
+    if (
+        not isinstance(source_version, str)
+        or re.fullmatch(r"(?:0|[1-9][0-9]{0,19})", source_version) is None
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    return {
+        "sourceType": source_type,
+        "sourceId": normalized_source_id,
+        "sourceVersion": source_version,
+    }
+
+
+def _hybrid_retrieval_source_ref(item: dict[str, object]) -> dict[str, object]:
+    listing_id = _product_listing_id(item["listingId"])
+    listing_version = item["listingVersion"]
+    final_rank = item["finalRank"]
+    mode = item["mode"]
+    matched_by = item["matchedBy"]
+    reason_code = item["reasonCode"]
+    checked_at = _safe_metadata("checkedAt", item["checkedAt"], 80)
+    if (
+        isinstance(listing_version, bool)
+        or not isinstance(listing_version, int)
+        or not 0 <= listing_version <= 9_223_372_036_854_775_807
+        or isinstance(final_rank, bool)
+        or not isinstance(final_rank, int)
+        or not 1 <= final_rank <= 20
+        or mode not in _HYBRID_RETRIEVAL_EXPECTED
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    expected_matched_by, expected_reason = _HYBRID_RETRIEVAL_EXPECTED[str(mode)]
+    if (
+        not isinstance(matched_by, (list, tuple))
+        or tuple(matched_by) != expected_matched_by
+        or reason_code != expected_reason
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    return {
+        "listingId": listing_id,
+        "listingVersion": listing_version,
+        "finalRank": final_rank,
+        "mode": mode,
+        "matchedBy": list(expected_matched_by),
+        "reasonCode": reason_code,
+        "checkedAt": checked_at,
+    }
+
+
+def _product_listing_id(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or _PRODUCT_LISTING_ID_PATTERN.fullmatch(value) is None
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    return value
+
+
+def _source_identity(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 160
+        or value != value.strip()
+        or any(
+            character.isspace()
+            or ord(character) < 32
+            or ord(character) == 127
+            for character in value
+        )
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    return value
 
 
 def _usage(

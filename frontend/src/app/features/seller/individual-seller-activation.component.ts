@@ -455,7 +455,7 @@ export class IndividualSellerActivationComponent implements OnInit {
           this.errorMsg.set('Individual seller profile is already active.');
           return;
         }
-        this.errorMsg.set('Seller profile could not be activated.');
+        this.errorMsg.set(error?.error?.error?.message || 'Seller profile could not be activated.');
       },
     });
   }

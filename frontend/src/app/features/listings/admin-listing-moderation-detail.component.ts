@@ -2,6 +2,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { forkJoin } from 'rxjs';
 import {
   AdminListingModerationCaseDetail,
   ListingImage,
@@ -10,11 +11,20 @@ import {
 } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AdminService } from '../../core/services/admin.service';
+import { AdminTimelineEntry } from '../../core/models/admin-timeline.model';
+import { AdminAuditTimelineComponent } from '../admin/admin-audit-timeline.component';
+import {
+  ListingModerationCapabilities,
+  listingModerationCapabilities,
+} from './listing-moderation-capability';
+import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
+import { AdminListingEnforcementComponent } from './admin-listing-enforcement.component';
 
 @Component({
   selector: 'app-admin-listing-moderation-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink],
+  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, AdminAuditTimelineComponent, AdminListingEnforcementComponent],
   template: `
     <section class="listing-review-detail">
       <header class="page-header">
@@ -33,9 +43,9 @@ import { ToastService } from '../../core/services/toast.service';
       </header>
 
       @if (loading()) {
-        <div class="state-panel">Loading listing review case...</div>
+        <div class="state-panel" role="status">Loading listing review case...</div>
       } @else if (errorMsg()) {
-        <div class="state-panel error">
+        <div class="state-panel error" role="alert">
           <span>{{ errorMsg() }}</span>
           <button type="button" class="secondary-btn" (click)="loadCase()">Retry</button>
         </div>
@@ -51,6 +61,62 @@ import { ToastService } from '../../core/services/toast.service';
             </div>
             <p class="description">{{ data.listing.description }}</p>
           </section>
+
+          <app-admin-listing-enforcement
+            [listingId]="data.listing.id"
+            (enforcementChanged)="loadCase()"
+          />
+
+          @if (canResolve(data)) {
+            <section class="detail-section detail-section-wide resolution-panel">
+              <h2>Resolution</h2>
+              <form class="decision-form" (ngSubmit)="resolveCase()">
+                <label>
+                  <span>Decision</span>
+                  <select
+                    name="decision"
+                    [(ngModel)]="decision"
+                    [disabled]="saving()"
+                    [attr.aria-invalid]="decisionErrorMsg() && !decision ? 'true' : 'false'"
+                    [attr.aria-describedby]="decisionErrorMsg() ? 'listing-decision-error' : null"
+                  >
+                    <option value="">Select decision</option>
+                    <option value="APPROVE">Approve</option>
+                    <option value="REJECT">Reject</option>
+                    <option value="REQUEST_CHANGES">Request changes</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Reason</span>
+                  <textarea
+                    name="reason"
+                    data-testid="listing-decision-reason"
+                    [(ngModel)]="reason"
+                    rows="3"
+                    maxlength="1000"
+                    [disabled]="saving()"
+                    [class.invalid-field]="decisionErrorMsg()"
+                    [attr.aria-invalid]="decisionErrorMsg() ? 'true' : 'false'"
+                    [attr.aria-describedby]="decisionErrorMsg() ? 'listing-decision-error' : null"
+                  ></textarea>
+                </label>
+
+                @if (decisionErrorMsg()) {
+                  <div id="listing-decision-error" class="decision-error" role="alert">{{ decisionErrorMsg() }}</div>
+                }
+
+                <button type="submit" class="primary-btn" [disabled]="saving()">
+                  {{ saving() ? 'Resolving case' : 'Resolve case' }}
+                </button>
+              </form>
+            </section>
+          } @else {
+            <section class="detail-section detail-section-wide resolution-panel">
+              <h2>Review status</h2>
+              <p>{{ readOnlyMessage(data) }}</p>
+            </section>
+          }
 
           <section class="detail-section">
             <h2>Case</h2>
@@ -116,7 +182,7 @@ import { ToastService } from '../../core/services/toast.service';
           </section>
 
           <section class="detail-section detail-section-wide">
-            <h2>Images</h2>
+            <h2>Evidence images</h2>
             @if ((data.listing.images || []).length === 0) {
               <p>No images attached.</p>
             } @else {
@@ -137,7 +203,8 @@ import { ToastService } from '../../core/services/toast.service';
           </section>
 
           <section class="detail-section">
-            <h2>Decision History</h2>
+            <h2>Listing-wide decision history</h2>
+            <p class="section-note">Previous and current review decisions for this listing.</p>
             @if (data.decisions.length === 0) {
               <p>No decisions yet.</p>
             } @else {
@@ -153,54 +220,19 @@ import { ToastService } from '../../core/services/toast.service';
             }
           </section>
 
-          @if (canResolve(data)) {
-            <section class="detail-section">
-              <h2>Resolution</h2>
-              <form class="decision-form" (ngSubmit)="resolveCase()">
-                <label>
-                  <span>Decision</span>
-                  <select name="decision" [(ngModel)]="decision" [disabled]="saving()">
-                    <option value="">Select decision</option>
-                    <option value="APPROVE">Approve</option>
-                    <option value="REJECT">Reject</option>
-                    <option value="REQUEST_CHANGES">Request changes</option>
-                  </select>
-                </label>
-
-                <label>
-                  <span>Reason</span>
-                  <textarea
-                    name="reason"
-                    data-testid="listing-decision-reason"
-                    [(ngModel)]="reason"
-                    rows="4"
-                    maxlength="1000"
-                    [disabled]="saving()"
-                    [class.invalid-field]="decisionErrorMsg()"
-                    [attr.aria-invalid]="decisionErrorMsg() ? 'true' : 'false'"
-                  ></textarea>
-                </label>
-
-                @if (decisionErrorMsg()) {
-                  <div class="decision-error">{{ decisionErrorMsg() }}</div>
-                }
-
-                <button type="submit" class="primary-btn" [disabled]="saving()">
-                  {{ saving() ? 'Resolving case' : 'Resolve case' }}
-                </button>
-              </form>
-            </section>
-          } @else {
-            <section class="detail-section">
-              <h2>Review status</h2>
-              <p>{{ readOnlyMessage(data) }}</p>
-            </section>
-          }
+          <app-admin-audit-timeline
+            class="detail-section detail-section-wide"
+            [entries]="timeline()"
+            [loading]="timelineLoading()"
+            [error]="timelineErrorMsg()"
+            title="Case audit timeline"
+          />
 
           @if (canManageActiveListing(data)) {
             <section class="detail-section detail-section-wide">
               <h2>Active listing actions</h2>
-              <form class="active-listing-form" (ngSubmit)="saveActiveListing()">
+              @if (canEditActiveListing(data)) {
+                <form class="active-listing-form" (ngSubmit)="saveActiveListing()">
                 <label>
                   <span>Category ID</span>
                   <input name="active-category" [(ngModel)]="activeEdit.categoryId" [disabled]="savingActiveEdit()">
@@ -261,15 +293,24 @@ import { ToastService } from '../../core/services/toast.service';
                     [disabled]="savingActiveEdit()"
                     rows="3"
                     maxlength="1000"
+                    [class.invalid-field]="activeEditErrorMsg() && !activeEditReason.trim()"
+                    [attr.aria-invalid]="activeEditErrorMsg() && !activeEditReason.trim() ? 'true' : 'false'"
+                    [attr.aria-describedby]="activeEditErrorMsg() ? 'active-listing-edit-error' : null"
                   ></textarea>
                 </label>
 
                 <button type="submit" class="primary-btn" [disabled]="savingActiveEdit()">
                   {{ savingActiveEdit() ? 'Saving active listing' : 'Save active listing' }}
                 </button>
-              </form>
 
-              <div class="remove-panel">
+                @if (activeEditErrorMsg()) {
+                  <div id="active-listing-edit-error" class="decision-error form-wide" role="alert">{{ activeEditErrorMsg() }}</div>
+                }
+                </form>
+              }
+
+              @if (canRemoveActiveListing(data)) {
+                <div class="remove-panel">
                 <label>
                   <span>Remove reason</span>
                   <textarea
@@ -279,15 +320,18 @@ import { ToastService } from '../../core/services/toast.service';
                     [disabled]="removingActiveListing()"
                     rows="3"
                     maxlength="1000"
+                    [class.invalid-field]="activeRemoveErrorMsg() && !activeRemoveReason.trim()"
+                    [attr.aria-invalid]="activeRemoveErrorMsg() && !activeRemoveReason.trim() ? 'true' : 'false'"
+                    [attr.aria-describedby]="activeRemoveErrorMsg() ? 'active-listing-remove-error' : null"
                   ></textarea>
                 </label>
                 <button type="button" class="danger-btn" (click)="removeActiveListing()" [disabled]="removingActiveListing()">
                   {{ removingActiveListing() ? 'Removing listing' : 'Remove from marketplace' }}
                 </button>
-              </div>
-
-              @if (activeActionErrorMsg()) {
-                <div class="decision-error">{{ activeActionErrorMsg() }}</div>
+                @if (activeRemoveErrorMsg()) {
+                  <div id="active-listing-remove-error" class="decision-error" role="alert">{{ activeRemoveErrorMsg() }}</div>
+                }
+                </div>
               }
             </section>
           }
@@ -371,6 +415,24 @@ import { ToastService } from '../../core/services/toast.service';
       grid-column: 1 / -1;
     }
 
+    .resolution-panel {
+      position: sticky;
+      top: 4.5rem;
+      z-index: 10;
+      border-color: rgba(56, 189, 248, 0.42);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .resolution-panel .decision-form {
+      grid-template-columns: minmax(170px, 0.45fr) minmax(280px, 1.35fr) auto;
+      align-items: end;
+    }
+
+    .resolution-panel .decision-error {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
     dl {
       display: grid;
       gap: 0.65rem;
@@ -406,9 +468,13 @@ import { ToastService } from '../../core/services/toast.service';
       max-width: 72ch;
     }
 
+    .section-note {
+      font-size: 0.8rem;
+    }
+
     .image-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(160px, 220px));
       gap: 0.75rem;
       margin-top: 0.85rem;
     }
@@ -422,6 +488,8 @@ import { ToastService } from '../../core/services/toast.service';
     .image-preview {
       display: grid;
       place-items: center;
+      width: 100%;
+      max-height: 180px;
       aspect-ratio: 4 / 3;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
@@ -432,7 +500,8 @@ import { ToastService } from '../../core/services/toast.service';
     .image-preview img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
+      padding: 0.35rem;
     }
 
     .history-stack,
@@ -540,10 +609,35 @@ import { ToastService } from '../../core/services/toast.service';
         grid-template-columns: 1fr;
       }
 
+      .resolution-panel {
+        position: static;
+        box-shadow: none;
+      }
+
+      .resolution-panel .decision-form {
+        grid-template-columns: 1fr;
+      }
+
+      .resolution-panel .decision-error {
+        grid-column: auto;
+        grid-row: auto;
+      }
+
       .page-header,
       .section-header,
       .state-panel {
         flex-direction: column;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .image-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .detail-section,
+      .state-panel {
+        padding: 0.8rem;
       }
     }
   `],
@@ -553,6 +647,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
   private readonly router = inject(Router);
   readonly listingService = inject(ListingService);
   private readonly toastService = inject(ToastService);
+  private readonly adminService = inject(AdminService);
 
   readonly detail = signal<AdminListingModerationCaseDetail | null>(null);
   readonly loading = signal(false);
@@ -561,7 +656,12 @@ export class AdminListingModerationDetailComponent implements OnInit {
   readonly removingActiveListing = signal(false);
   readonly errorMsg = signal('');
   readonly decisionErrorMsg = signal('');
-  readonly activeActionErrorMsg = signal('');
+  readonly activeEditErrorMsg = signal('');
+  readonly activeRemoveErrorMsg = signal('');
+  readonly timeline = signal<AdminTimelineEntry[]>([]);
+  readonly timelineLoading = signal(false);
+  readonly timelineErrorMsg = signal('');
+  readonly currentAdminUserId = signal('');
 
   readonly conditionOptions: ListingCondition[] = ['NEW', 'OPEN_BOX', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS'];
   decision: ListingModerationDecision | '' = '';
@@ -594,15 +694,25 @@ export class AdminListingModerationDetailComponent implements OnInit {
     }
 
     this.loading.set(true);
+    this.timelineLoading.set(true);
     this.errorMsg.set('');
-    this.listingService.getListingModerationCaseDetail(caseId).subscribe({
-      next: detail => {
-        this.detail.set(detail);
-        this.populateActiveEdit(detail);
+    this.timelineErrorMsg.set('');
+    forkJoin({
+      detail: this.listingService.getListingModerationCaseDetail(caseId),
+      timeline: this.listingService.getListingModerationTimeline(caseId),
+      admin: this.adminService.getCurrentAdmin(),
+    }).subscribe({
+      next: response => {
+        this.detail.set(response.detail);
+        this.timeline.set(response.timeline);
+        this.currentAdminUserId.set(response.admin.data.userId);
+        this.populateActiveEdit(response.detail);
         this.loading.set(false);
+        this.timelineLoading.set(false);
       },
       error: error => {
         this.loading.set(false);
+        this.timelineLoading.set(false);
         this.handleLoadError(error);
       },
     });
@@ -644,6 +754,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
         this.reason = '';
         this.decision = '';
         this.toastService.success('Listing moderation case resolved.');
+        this.refreshTimeline(current.moderationCase.id);
       },
       error: error => {
         this.saving.set(false);
@@ -653,33 +764,49 @@ export class AdminListingModerationDetailComponent implements OnInit {
   }
 
   canResolve(detail: AdminListingModerationCaseDetail): boolean {
-    return detail.moderationCase.caseStatus === 'CLAIMED'
-      && detail.listing.status === 'PENDING_REVIEW'
-      && detail.listing.moderationStatus === 'PENDING';
+    return this.capabilities(detail).canResolve;
+  }
+
+  capabilities(detail: AdminListingModerationCaseDetail): ListingModerationCapabilities {
+    return listingModerationCapabilities(detail.moderationCase, this.currentAdminUserId(), {
+      canClaim: this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_MODERATION_CLAIM),
+      canResolve: this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_MODERATION_RESOLVE),
+    });
   }
 
   canManageActiveListing(detail: AdminListingModerationCaseDetail): boolean {
-    return detail.listing.status === 'ACTIVE' && detail.listing.moderationStatus === 'APPROVED';
+    return this.canEditActiveListing(detail) || this.canRemoveActiveListing(detail);
+  }
+
+  canEditActiveListing(detail: AdminListingModerationCaseDetail): boolean {
+    return this.isActiveApprovedListing(detail)
+      && this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_EDIT);
+  }
+
+  canRemoveActiveListing(detail: AdminListingModerationCaseDetail): boolean {
+    return this.isActiveApprovedListing(detail)
+      && this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_REMOVE);
   }
 
   saveActiveListing(): void {
+    this.activeRemoveErrorMsg.set('');
     const current = this.detail();
-    if (!current || !this.canManageActiveListing(current)) {
-      this.activeActionErrorMsg.set('Only active approved listings can be edited.');
+    if (!current || !this.canEditActiveListing(current)) {
+      this.activeEditErrorMsg.set('Only active approved listings can be edited.');
       return;
     }
 
     const reason = this.activeEditReason.trim();
     if (!reason) {
-      this.activeActionErrorMsg.set('Edit reason is required.');
+      this.activeEditErrorMsg.set('Edit reason is required.');
       return;
     }
     if (!this.activeEdit.title.trim() || !this.activeEdit.description.trim() || !this.activeEdit.categoryId.trim()) {
-      this.activeActionErrorMsg.set('Title, description, and category are required.');
+      this.activeEditErrorMsg.set('Title, description, and category are required.');
       return;
     }
     if (this.activeEdit.priceAmount < 0) {
-      this.activeActionErrorMsg.set('Price must be zero or greater.');
+      this.activeEditErrorMsg.set('Price must be zero or greater.');
       return;
     }
     if (!window.confirm(`Save changes to active listing ${current.listing.title}?`)) {
@@ -687,7 +814,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
     }
 
     this.savingActiveEdit.set(true);
-    this.activeActionErrorMsg.set('');
+    this.activeEditErrorMsg.set('');
     this.listingService.updateActiveListingByAdmin(current.listing.id, current.listing.version, {
       categoryId: this.activeEdit.categoryId.trim(),
       title: this.activeEdit.title.trim(),
@@ -714,24 +841,26 @@ export class AdminListingModerationDetailComponent implements OnInit {
         this.savingActiveEdit.set(false);
         this.activeEditReason = '';
         this.toastService.success('Active listing updated.');
+        this.refreshTimeline(current.moderationCase.id);
       },
       error: error => {
         this.savingActiveEdit.set(false);
-        this.handleActiveActionError(error);
+        this.handleActiveActionError(error, 'edit');
       },
     });
   }
 
   removeActiveListing(): void {
+    this.activeEditErrorMsg.set('');
     const current = this.detail();
-    if (!current || !this.canManageActiveListing(current)) {
-      this.activeActionErrorMsg.set('Only active approved listings can be removed.');
+    if (!current || !this.canRemoveActiveListing(current)) {
+      this.activeRemoveErrorMsg.set('Only active approved listings can be removed.');
       return;
     }
 
     const reason = this.activeRemoveReason.trim();
     if (!reason) {
-      this.activeActionErrorMsg.set('Remove reason is required.');
+      this.activeRemoveErrorMsg.set('Remove reason is required.');
       return;
     }
     if (!window.confirm(`Remove ${current.listing.title} from the public marketplace?`)) {
@@ -739,29 +868,26 @@ export class AdminListingModerationDetailComponent implements OnInit {
     }
 
     this.removingActiveListing.set(true);
-    this.activeActionErrorMsg.set('');
+    this.activeRemoveErrorMsg.set('');
     this.listingService.removeActiveListingByAdmin(current.listing.id, current.listing.version, { reason }).subscribe({
       next: listing => {
         this.updateListingInDetail(listing);
         this.removingActiveListing.set(false);
         this.activeRemoveReason = '';
         this.toastService.success('Listing removed from marketplace.');
+        this.refreshTimeline(current.moderationCase.id);
       },
       error: error => {
         this.removingActiveListing.set(false);
-        this.handleActiveActionError(error);
+        this.handleActiveActionError(error, 'remove');
       },
     });
   }
 
   readOnlyMessage(detail: AdminListingModerationCaseDetail): string {
-    if (detail.moderationCase.caseStatus === 'RESOLVED') {
-      return 'This case is read-only because it is already resolved.';
-    }
-    if (detail.moderationCase.caseStatus !== 'CLAIMED') {
-      return 'Claim this case from the queue before resolving it.';
-    }
-    return 'This case is read-only because the listing is no longer pending review.';
+    const capability = this.capabilities(detail);
+    return capability.readOnlyReason
+      || 'Claim this case from the queue before resolving it.';
   }
 
   locationFor(detail: AdminListingModerationCaseDetail): string {
@@ -775,6 +901,10 @@ export class AdminListingModerationDetailComponent implements OnInit {
     return image.altText || image.originalFileName || image.id;
   }
 
+  private isActiveApprovedListing(detail: AdminListingModerationCaseDetail): boolean {
+    return detail.listing.status === 'ACTIVE' && detail.listing.moderationStatus === 'APPROVED';
+  }
+
   adminImageUrl(image: ListingImage): string {
     return this.listingService.mediaUrl(
       `/api/v1/admin/listings/${image.listingId}/media/${image.mediaObjectId}/content`
@@ -783,6 +913,21 @@ export class AdminListingModerationDetailComponent implements OnInit {
 
   private caseId(): string {
     return this.route.snapshot.paramMap.get('caseId') || '';
+  }
+
+  private refreshTimeline(caseId: string): void {
+    this.timelineLoading.set(true);
+    this.timelineErrorMsg.set('');
+    this.listingService.getListingModerationTimeline(caseId).subscribe({
+      next: timeline => {
+        this.timeline.set(timeline);
+        this.timelineLoading.set(false);
+      },
+      error: () => {
+        this.timelineErrorMsg.set('Listing moderation audit history could not be loaded.');
+        this.timelineLoading.set(false);
+      },
+    });
   }
 
   private handleLoadError(error: { status?: number }): void {
@@ -808,6 +953,7 @@ export class AdminListingModerationDetailComponent implements OnInit {
     }
     if (error.status === 409) {
       this.decisionErrorMsg.set('The case changed. Refresh and try again.');
+      this.loadCase();
       return;
     }
     if (error.status === 400) {
@@ -858,23 +1004,25 @@ export class AdminListingModerationDetailComponent implements OnInit {
     }
   }
 
-  private handleActiveActionError(error: { status?: number }): void {
+  private handleActiveActionError(error: { status?: number }, action: 'edit' | 'remove'): void {
+    const errorMessage = action === 'edit' ? this.activeEditErrorMsg : this.activeRemoveErrorMsg;
     if (error.status === 401) {
       this.router.navigate(['/login']);
       return;
     }
     if (error.status === 403) {
-      this.activeActionErrorMsg.set('You need platform admin access for this action.');
+      errorMessage.set('You need platform admin access for this action.');
       return;
     }
     if (error.status === 409) {
-      this.activeActionErrorMsg.set('The listing changed. Refresh and try again.');
+      errorMessage.set('The listing changed. Refresh and try again.');
+      this.loadCase();
       return;
     }
     if (error.status === 400) {
-      this.activeActionErrorMsg.set('Only active approved listings can use this action.');
+      errorMessage.set('Only active approved listings can use this action.');
       return;
     }
-    this.activeActionErrorMsg.set('Active listing action could not be completed.');
+    errorMessage.set('Active listing action could not be completed.');
   }
 }

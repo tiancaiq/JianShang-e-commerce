@@ -9,6 +9,7 @@ import {
   BusinessApplicationDraftRequest,
 } from '../models/business-application.model';
 import { unwrapData } from './api-response';
+import { AdminTimelineEntry } from '../models/admin-timeline.model';
 
 @Injectable({ providedIn: 'root' })
 export class BusinessApplicationService {
@@ -65,6 +66,13 @@ export class BusinessApplicationService {
   getAdminApplication(id: string): Observable<ApiDataResponse<BusinessApplication>> {
     return this.http.get<ApiDataResponse<BusinessApplication>>(
       `${environment.apiGatewayUrl}/api/v1/admin/business-applications/${id}`,
+      { withCredentials: true }
+    );
+  }
+
+  getAdminTimeline(id: string): Observable<ApiDataResponse<AdminTimelineEntry[]>> {
+    return this.http.get<ApiDataResponse<AdminTimelineEntry[]>>(
+      `${environment.apiGatewayUrl}/api/v1/admin/business-applications/${id}/timeline`,
       { withCredentials: true }
     );
   }

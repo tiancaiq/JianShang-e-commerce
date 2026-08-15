@@ -37,9 +37,44 @@ class ListingDomainFoundationMigrationTests {
             assertThat(tableCount(connection, "listing_attributes")).isEqualTo(1);
             assertThat(tableCount(connection, "listing_moderation_decisions")).isEqualTo(1);
             assertThat(tableCount(connection, "moderation_cases")).isEqualTo(1);
+            assertThat(tableCount(connection, "moderation_case_events")).isEqualTo(1);
             assertThat(tableCount(connection, "listing_knowledge_versions")).isEqualTo(1);
             assertThat(tableCount(connection, "category_guidance_versions")).isEqualTo(1);
             assertThat(tableCount(connection, "outbox_events")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_search_projection_work")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_discovery_embedding_requests")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_discovery_embedding_receipts")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_search_projection_coordination")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_search_rebuild_runs")).isEqualTo(1);
+            assertThat(tableCount(connection, "listing_search_vector_apply_work")).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void embeddingReceiptAndVectorApplySchemaPermitsZeroVersionOnly() throws Exception {
+        migrate();
+
+        try (Connection connection = connection()) {
+            insertEmbeddingRequest(connection, "01R00000000000000000000001", 0);
+            insertEmbeddingReceipt(connection, "01R00000000000000000000001", 0);
+            insertVectorApplyWork(connection, "01W00000000000000000000001",
+                    "01R00000000000000000000001", 0);
+
+            insertEmbeddingRequest(connection, "01R00000000000000000000002", 1);
+            assertThatThrownBy(() -> insertEmbeddingReceipt(
+                    connection,
+                    "01R00000000000000000000002",
+                    -1))
+                    .isInstanceOf(SQLException.class);
+
+            insertEmbeddingRequest(connection, "01R00000000000000000000003", 2);
+            insertEmbeddingReceipt(connection, "01R00000000000000000000003", 2);
+            assertThatThrownBy(() -> insertVectorApplyWork(
+                    connection,
+                    "01W00000000000000000000003",
+                    "01R00000000000000000000003",
+                    -1))
+                    .isInstanceOf(SQLException.class);
         }
     }
 
@@ -97,7 +132,7 @@ class ListingDomainFoundationMigrationTests {
     }
 
     @Test
-    void listingReviewCasesRejectInvalidTypeStatusPriorityAndSellerShape() throws Exception {
+    void moderationCasesRejectMissingReportRouteInvalidStatusPriorityAndSellerShape() throws Exception {
         migrate();
 
         try (Connection connection = connection()) {
@@ -264,6 +299,90 @@ class ListingDomainFoundationMigrationTests {
                 resultSet.next();
                 return resultSet.getInt(1) > 0;
             }
+        }
+    }
+
+    private void insertEmbeddingRequest(
+            Connection connection,
+            String requestId,
+            long listingVersion) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                insert into listing_discovery_embedding_requests (
+                    request_id, event_id, listing_id, listing_version,
+                    document_schema_version, document_hash,
+                    embedding_input_schema_version, embedding_input_hash,
+                    normalizer_version, redactor_version, language,
+                    embedding_provider, embedding_model, embedding_dimensions,
+                    state, created_at
+                ) values (?, ?, '01L00000000000000000009001', ?,
+                    'MARKETPLACE_LISTING_DISCOVERY_V2', ?,
+                    'MARKETPLACE_LISTING_EMBEDDING_TEXT_V1', ?,
+                    'NFKC_WHITESPACE_V1', 'PUBLIC_CONTACT_REDACTION_V1', 'und',
+                    'openai', 'text-embedding-3-small', 1536,
+                    'REQUESTED', ?
+                )
+                """)) {
+            statement.setString(1, requestId);
+            statement.setString(2, "01E" + requestId.substring(3));
+            statement.setLong(3, listingVersion);
+            statement.setString(4, "a".repeat(64));
+            statement.setString(5, "b".repeat(64));
+            statement.setTimestamp(6, Timestamp.from(Instant.now()));
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertEmbeddingReceipt(
+            Connection connection,
+            String requestId,
+            long listingVersion) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                insert into listing_discovery_embedding_receipts (
+                    request_id, listing_id, listing_version,
+                    document_schema_version, document_hash,
+                    embedding_input_schema_version, embedding_input_hash,
+                    normalizer_version, redactor_version, language,
+                    embedding_provider, embedding_model, embedding_dimensions,
+                    vector_hash, vector_bytes, accepted_at
+                ) values (?, '01L00000000000000000009001', ?,
+                    'MARKETPLACE_LISTING_DISCOVERY_V2', ?,
+                    'MARKETPLACE_LISTING_EMBEDDING_TEXT_V1', ?,
+                    'NFKC_WHITESPACE_V1', 'PUBLIC_CONTACT_REDACTION_V1', 'und',
+                    'openai', 'text-embedding-3-small', 1536,
+                    ?, UNHEX(REPEAT('00', 6144)), ?
+                )
+                """)) {
+            statement.setString(1, requestId);
+            statement.setLong(2, listingVersion);
+            statement.setString(3, "a".repeat(64));
+            statement.setString(4, "b".repeat(64));
+            statement.setString(5, "c".repeat(64));
+            statement.setTimestamp(6, Timestamp.from(Instant.now()));
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertVectorApplyWork(
+            Connection connection,
+            String workId,
+            String requestId,
+            long listingVersion) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                insert into listing_search_vector_apply_work (
+                    work_id, request_id, listing_id, listing_version, state,
+                    attempt_count, next_attempt_at, created_at, updated_at
+                ) values (?, ?, '01L00000000000000000009001', ?,
+                    'PENDING', 0, ?, ?, ?
+                )
+                """)) {
+            Timestamp now = Timestamp.from(Instant.now());
+            statement.setString(1, workId);
+            statement.setString(2, requestId);
+            statement.setLong(3, listingVersion);
+            statement.setTimestamp(4, now);
+            statement.setTimestamp(5, now);
+            statement.setTimestamp(6, now);
+            statement.executeUpdate();
         }
     }
 

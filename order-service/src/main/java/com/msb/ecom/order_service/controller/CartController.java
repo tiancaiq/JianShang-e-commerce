@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,25 +35,35 @@ public class CartController {
     }
 
     @PostMapping("/items")
-    public CartResponse add(@Valid @RequestBody AddCartItemRequest request) {
-        return cartService.add(request.listingId(), request.quantity());
+    public CartResponse add(
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody AddCartItemRequest request) {
+        return cartService.add(request.listingId(), request.quantity(), ifMatch, idempotencyKey);
     }
 
     @PatchMapping("/items/{listingId}")
     public CartResponse update(
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @PathVariable String listingId,
             @Valid @RequestBody UpdateCartItemRequest request) {
-        return cartService.update(listingId, request.quantity());
+        return cartService.update(listingId, request.quantity(), ifMatch, idempotencyKey);
     }
 
     @DeleteMapping("/items/{listingId}")
-    public CartResponse remove(@PathVariable String listingId) {
-        return cartService.remove(listingId);
+    public CartResponse remove(
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable String listingId) {
+        return cartService.remove(listingId, ifMatch, idempotencyKey);
     }
 
     @DeleteMapping
-    public CartResponse clear() {
-        return cartService.clear();
+    public CartResponse clear(
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+        return cartService.clear(ifMatch, idempotencyKey);
     }
 
     @PostMapping("/validate")

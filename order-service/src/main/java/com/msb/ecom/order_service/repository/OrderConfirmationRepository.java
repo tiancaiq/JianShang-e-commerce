@@ -231,26 +231,31 @@ public class OrderConfirmationRepository {
             String orderId,
             String businessId,
             String storeId,
+            String storeName,
             Totals totals,
+            Instant cancellationCutoffAt,
             Instant now) {
         jdbc.update("""
                         INSERT INTO business_orders (
-                            id, order_id, business_id, store_id, seller_order_number,
+                            id, order_id, business_id, store_id, store_name, seller_order_number,
                             fulfillment_status, cancellation_status, subtotal, shipping,
-                            tax, discount, total, platform_fee_projection, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, 'PENDING_ACCEPTANCE', 'NONE',
-                                  ?, ?, ?, ?, ?, NULL, ?, ?)
+                            tax, discount, total, platform_fee_projection,
+                            cancellation_cutoff_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING_ACCEPTANCE', 'NONE',
+                                  ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                         """,
                 id,
                 orderId,
                 businessId,
                 storeId,
+                storeName,
                 id,
                 totals.subtotal(),
                 totals.shipping(),
                 totals.tax(),
                 totals.discount(),
                 totals.total(),
+                cancellationCutoffAt == null ? null : Timestamp.from(cancellationCutoffAt),
                 Timestamp.from(now),
                 Timestamp.from(now));
     }

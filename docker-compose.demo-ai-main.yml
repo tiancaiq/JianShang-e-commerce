@@ -1,0 +1,38 @@
+# Local combined Marketplace runtime. Use with docker-compose.demo.yml so
+# business/cart publication cannot silently select a non-AI `latest` image.
+services:
+  agent-service:
+    image: msb-ecom-agent-service:main-ai
+    environment:
+      AGENT_PERSISTENCE_ENABLED: "true"
+      AGENT_CUSTOMER_SERVICE_API_ENABLED: "true"
+      AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED: "false"
+      AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED: "true"
+      AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED: "true"
+      AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED: "true"
+      AGENT_DISCOVERY_API_ENABLED: "false"
+      AGENT_DISCOVERY_KILL_SWITCH_ENABLED: "false"
+      AGENT_DISCOVERY_ORCHESTRATION_ENABLED: "false"
+      AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED: "false"
+      AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED: "false"
+      AGENT_DISCOVERY_PROVIDER_ENABLED: "false"
+      AGENT_MARKETPLACE_V2_API_ENABLED: "true"
+      AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED: "false"
+      AGENT_MARKETPLACE_V2_PROVIDER_ENABLED: "true"
+      AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED: "true"
+      AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED: "false"
+      AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED: "false"
+
+  api-gateway:
+    image: msb-ecom-api-gateway:main-ai
+    environment:
+      GATEWAY_FEATURE_AGENT: "true"
+      GATEWAY_FEATURE_AGENT_DISCOVERY: "true"
+      GATEWAY_FEATURE_CART: "true"
+
+  frontend:
+    image: msb-ecom-frontend:main-ai
+    build:
+      args:
+        FRONTEND_BUILD_CONFIGURATION: demo-agent-v2
+        GATEWAY_FEATURE_AGENT_DISCOVERY: "true"

@@ -433,10 +433,14 @@ class DiscoveryApiSettings:
     kill_switch_enabled: bool = False
     orchestration_enabled: bool = False
     product_tools_enabled: bool = False
+    hybrid_retrieval_enabled: bool = False
+    query_embedding_enabled: bool = False
     provider_enabled: bool = False
     auth_service_url: str | None = None
     product_service_url: str | None = None
+    product_service_token: str | None = field(default=None, repr=False)
     dependency_timeout_seconds: float = 2.0
+    model_call_timeout_seconds: float = 10.0
 
     def validate(self, *, persistence_enabled: bool) -> None:
         """Reject partial activation and keep all Product/provider work fail closed."""
@@ -447,10 +451,18 @@ class DiscoveryApiSettings:
             0.1,
             2.0,
         )
+        _validate_number(
+            "AGENT_DISCOVERY_MODEL_CALL_TIMEOUT_SECONDS",
+            self.model_call_timeout_seconds,
+            0.1,
+            10.0,
+        )
         if not self.enabled:
             if (
                 self.orchestration_enabled
                 or self.product_tools_enabled
+                or self.hybrid_retrieval_enabled
+                or self.query_embedding_enabled
                 or self.provider_enabled
             ):
                 raise ValueError(
@@ -469,6 +481,22 @@ class DiscoveryApiSettings:
                 "AGENT_PRODUCT_SERVICE_URL",
                 self.product_service_url,
             )
+        if self.hybrid_retrieval_enabled:
+            if not self.product_tools_enabled or not self.query_embedding_enabled:
+                raise ValueError(
+                    "AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED requires Product "
+                    "tools and AGENT_DISCOVERY_QUERY_EMBEDDING_ENABLED"
+                )
+            if not self.product_service_token:
+                raise ValueError(
+                    "AGENT_PRODUCT_SERVICE_TOKEN is required when discovery "
+                    "hybrid retrieval is enabled"
+                )
+        elif self.query_embedding_enabled:
+            raise ValueError(
+                "AGENT_DISCOVERY_QUERY_EMBEDDING_ENABLED requires "
+                "AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED"
+            )
 
     @property
     def generation_enabled(self) -> bool:
@@ -482,6 +510,105 @@ class DiscoveryApiSettings:
             and self.provider_enabled
         )
 
+
+@dataclass(frozen=True)
+class MarketplaceAgentV2Settings:
+    """Keeps the parallel V2 API independently default-off and fail closed."""
+
+    enabled: bool = False
+    kill_switch_enabled: bool = False
+    provider_enabled: bool = False
+    product_tools_enabled: bool = False
+    hybrid_retrieval_enabled: bool = False
+    query_embedding_enabled: bool = False
+    auth_service_url: str | None = None
+    product_service_url: str | None = None
+    product_service_token: str | None = field(default=None, repr=False)
+    dependency_timeout_seconds: float = 2.0
+    model_call_timeout_seconds: float = 10.0
+    direct_result_max: int = 5
+    clarification_result_min: int = 10
+    max_clarification_options: int = 4
+    default_discovery_top_k: int = 5
+    max_discovery_top_k: int = 8
+
+    @property
+    def generation_enabled(self) -> bool:
+        return (
+            self.enabled
+            and not self.kill_switch_enabled
+            and self.provider_enabled
+            and self.product_tools_enabled
+        )
+
+    def validate(self, *, persistence_enabled: bool, provider_configured: bool) -> None:
+        _validate_number(
+            "AGENT_MARKETPLACE_V2_DEPENDENCY_TIMEOUT_SECONDS",
+            self.dependency_timeout_seconds,
+            0.1,
+            2.0,
+        )
+        _validate_number(
+            "AGENT_MARKETPLACE_V2_MODEL_CALL_TIMEOUT_SECONDS",
+            self.model_call_timeout_seconds,
+            0.1,
+            10.0,
+        )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_DIRECT_RESULT_MAX", self.direct_result_max, 1, 10
+        )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_CLARIFICATION_RESULT_MIN",
+            self.clarification_result_min, 2, 80,
+        )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_MAX_CLARIFICATION_OPTIONS",
+            self.max_clarification_options, 2, 4,
+        )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_DEFAULT_DISCOVERY_TOP_K",
+            self.default_discovery_top_k, 1, 8,
+        )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_MAX_DISCOVERY_TOP_K",
+            self.max_discovery_top_k, 1, 8,
+        )
+        if self.default_discovery_top_k > self.max_discovery_top_k:
+            raise ValueError(
+                "Marketplace Agent V2 default discovery top-K must not exceed its maximum"
+            )
+        if self.clarification_result_min <= self.direct_result_max:
+            raise ValueError(
+                "Marketplace Agent V2 clarification threshold must exceed direct-result maximum"
+            )
+        if not self.enabled:
+            if any((
+                self.provider_enabled,
+                self.product_tools_enabled,
+                self.hybrid_retrieval_enabled,
+                self.query_embedding_enabled,
+            )):
+                raise ValueError(
+                    "AGENT_MARKETPLACE_V2_API_ENABLED must be true when V2 generation gates are enabled"
+                )
+            return
+        if not persistence_enabled:
+            raise ValueError("AGENT_PERSISTENCE_ENABLED must be true for Marketplace Agent V2")
+        _validate_service_url("AUTH_SERVICE_URL", self.auth_service_url)
+        if self.product_tools_enabled:
+            _validate_service_url("AGENT_PRODUCT_SERVICE_URL", self.product_service_url)
+        if self.provider_enabled and not provider_configured:
+            raise ValueError("OPENAI_API_KEY is required when Marketplace Agent V2 provider is enabled")
+        if self.hybrid_retrieval_enabled and (
+            not self.product_tools_enabled
+            or not self.query_embedding_enabled
+            or not self.product_service_token
+        ):
+            raise ValueError(
+                "Marketplace Agent V2 hybrid retrieval requires Product tools, query embedding, and Product service token"
+            )
+        if self.query_embedding_enabled and not self.hybrid_retrieval_enabled:
+            raise ValueError("Marketplace Agent V2 query embedding requires hybrid retrieval")
 
 @dataclass(frozen=True)
 class ListingProposalApiSettings:
@@ -635,6 +762,130 @@ class KnowledgeIndexSettings:
 
 
 @dataclass(frozen=True)
+class DiscoveryEmbeddingSettings:
+    """Holds independently gated Product discovery-document worker settings."""
+
+    intake_enabled: bool = False
+    worker_enabled: bool = False
+    provider_enabled: bool = False
+    recovery_enabled: bool = False
+    kill_switch_enabled: bool = False
+    kafka_topic: str = "listing-discovery-embedding-request-v1"
+    kafka_group_id: str = "msb-agent-discovery-embedding-v1"
+    claim_batch_size: int = 5
+    worker_concurrency: int = 2
+    claim_seconds: int = 120
+    max_attempts: int = 8
+    retry_base_seconds: float = 5.0
+    retry_max_seconds: float = 900.0
+    source_timeout_seconds: float = 5.0
+    callback_timeout_seconds: float = 5.0
+
+    def validate(
+        self,
+        *,
+        mysql_password_configured: bool,
+        product_source_configured: bool,
+        provider_configured: bool,
+    ) -> None:
+        """Reject partial enablement before a consumer or outbound call can start."""
+
+        _validate_identifier(
+            "AGENT_DISCOVERY_EMBEDDING_KAFKA_TOPIC",
+            self.kafka_topic,
+            maximum_length=249,
+            allowed_extra="._-",
+        )
+        if self.kafka_topic != "listing-discovery-embedding-request-v1":
+            raise ValueError(
+                "AGENT_DISCOVERY_EMBEDDING_KAFKA_TOPIC must match the Product "
+                "04A event contract"
+            )
+        _validate_identifier(
+            "AGENT_DISCOVERY_EMBEDDING_KAFKA_GROUP_ID",
+            self.kafka_group_id,
+            maximum_length=255,
+            allowed_extra="._-",
+        )
+        _validate_integer(
+            "AGENT_DISCOVERY_EMBEDDING_CLAIM_BATCH_SIZE",
+            self.claim_batch_size,
+            1,
+            100,
+        )
+        _validate_integer(
+            "AGENT_DISCOVERY_EMBEDDING_WORKER_CONCURRENCY",
+            self.worker_concurrency,
+            1,
+            16,
+        )
+        if self.worker_concurrency > self.claim_batch_size:
+            raise ValueError(
+                "AGENT_DISCOVERY_EMBEDDING_WORKER_CONCURRENCY must not exceed "
+                "AGENT_DISCOVERY_EMBEDDING_CLAIM_BATCH_SIZE"
+            )
+        _validate_integer(
+            "AGENT_DISCOVERY_EMBEDDING_CLAIM_SECONDS",
+            self.claim_seconds,
+            10,
+            3600,
+        )
+        _validate_integer(
+            "AGENT_DISCOVERY_EMBEDDING_MAX_ATTEMPTS",
+            self.max_attempts,
+            1,
+            100,
+        )
+        _validate_number(
+            "AGENT_DISCOVERY_EMBEDDING_RETRY_BASE_SECONDS",
+            self.retry_base_seconds,
+            0.1,
+            3600.0,
+        )
+        _validate_number(
+            "AGENT_DISCOVERY_EMBEDDING_RETRY_MAX_SECONDS",
+            self.retry_max_seconds,
+            self.retry_base_seconds,
+            86_400.0,
+        )
+        _validate_number(
+            "AGENT_DISCOVERY_EMBEDDING_SOURCE_TIMEOUT_SECONDS",
+            self.source_timeout_seconds,
+            0.1,
+            30.0,
+        )
+        _validate_number(
+            "AGENT_DISCOVERY_EMBEDDING_CALLBACK_TIMEOUT_SECONDS",
+            self.callback_timeout_seconds,
+            0.1,
+            30.0,
+        )
+        if not (self.intake_enabled or self.worker_enabled or self.recovery_enabled):
+            return
+        if not mysql_password_configured:
+            raise ValueError(
+                "AGENT_MYSQL_PASSWORD is required when discovery embedding is enabled"
+            )
+        if self.recovery_enabled and not (self.intake_enabled or self.worker_enabled):
+            return
+        if not product_source_configured:
+            raise ValueError(
+                "AGENT_PRODUCT_SERVICE_URL and AGENT_PRODUCT_SERVICE_TOKEN are "
+                "required when discovery embedding is enabled"
+            )
+        if self.worker_enabled and not self.provider_enabled:
+            raise ValueError(
+                "AGENT_DISCOVERY_EMBEDDING_PROVIDER_ENABLED must be true when "
+                "the discovery embedding worker is enabled"
+            )
+        if self.worker_enabled and not provider_configured:
+            raise ValueError(
+                "OPENAI_API_KEY is required when the discovery embedding worker "
+                "is enabled"
+            )
+
+
+@dataclass(frozen=True)
 class Settings:
     """Holds validated runtime configuration without exposing secret values."""
 
@@ -654,8 +905,14 @@ class Settings:
     discovery_api: DiscoveryApiSettings = field(
         default_factory=DiscoveryApiSettings
     )
+    marketplace_agent_v2: MarketplaceAgentV2Settings = field(
+        default_factory=MarketplaceAgentV2Settings
+    )
     listing_proposal_api: ListingProposalApiSettings = field(
         default_factory=ListingProposalApiSettings
+    )
+    discovery_embedding: DiscoveryEmbeddingSettings = field(
+        default_factory=DiscoveryEmbeddingSettings
     )
 
     @classmethod
@@ -924,21 +1181,72 @@ class Settings:
                 "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED",
                 False,
             ),
+            hybrid_retrieval_enabled=_boolean(
+                "AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED",
+                False,
+            ),
+            query_embedding_enabled=_boolean(
+                "AGENT_DISCOVERY_QUERY_EMBEDDING_ENABLED",
+                False,
+            ),
             provider_enabled=_boolean(
                 "AGENT_DISCOVERY_PROVIDER_ENABLED",
                 False,
             ),
             auth_service_url=_optional_text("AUTH_SERVICE_URL"),
             product_service_url=_optional_text("AGENT_PRODUCT_SERVICE_URL"),
+            product_service_token=_optional_text("AGENT_PRODUCT_SERVICE_TOKEN"),
             dependency_timeout_seconds=_bounded_float(
                 "AGENT_DISCOVERY_DEPENDENCY_TIMEOUT_SECONDS",
                 2.0,
                 0.1,
                 2.0,
             ),
+            model_call_timeout_seconds=_bounded_float(
+                "AGENT_DISCOVERY_MODEL_CALL_TIMEOUT_SECONDS",
+                10.0,
+                0.1,
+                10.0,
+            ),
         )
         discovery_api.validate(
-            persistence_enabled=agent_persistence.enabled
+            persistence_enabled=agent_persistence.enabled,
+        )
+        marketplace_agent_v2 = MarketplaceAgentV2Settings(
+            enabled=_boolean("AGENT_MARKETPLACE_V2_API_ENABLED", False),
+            kill_switch_enabled=_boolean("AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED", False),
+            provider_enabled=_boolean("AGENT_MARKETPLACE_V2_PROVIDER_ENABLED", False),
+            product_tools_enabled=_boolean("AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED", False),
+            hybrid_retrieval_enabled=_boolean("AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED", False),
+            query_embedding_enabled=_boolean("AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED", False),
+            auth_service_url=_optional_text("AUTH_SERVICE_URL"),
+            product_service_url=_optional_text("AGENT_PRODUCT_SERVICE_URL"),
+            product_service_token=_optional_text("AGENT_PRODUCT_SERVICE_TOKEN"),
+            dependency_timeout_seconds=_bounded_float(
+                "AGENT_MARKETPLACE_V2_DEPENDENCY_TIMEOUT_SECONDS", 2.0, 0.1, 2.0
+            ),
+            model_call_timeout_seconds=_bounded_float(
+                "AGENT_MARKETPLACE_V2_MODEL_CALL_TIMEOUT_SECONDS", 10.0, 0.1, 10.0
+            ),
+            direct_result_max=_bounded_int(
+                "AGENT_MARKETPLACE_V2_DIRECT_RESULT_MAX", 5, 1, 10
+            ),
+            clarification_result_min=_bounded_int(
+                "AGENT_MARKETPLACE_V2_CLARIFICATION_RESULT_MIN", 10, 2, 80
+            ),
+            max_clarification_options=_bounded_int(
+                "AGENT_MARKETPLACE_V2_MAX_CLARIFICATION_OPTIONS", 4, 2, 4
+            ),
+            default_discovery_top_k=_bounded_int(
+                "AGENT_MARKETPLACE_V2_DEFAULT_DISCOVERY_TOP_K", 5, 1, 8
+            ),
+            max_discovery_top_k=_bounded_int(
+                "AGENT_MARKETPLACE_V2_MAX_DISCOVERY_TOP_K", 8, 1, 8
+            ),
+        )
+        marketplace_agent_v2.validate(
+            persistence_enabled=agent_persistence.enabled,
+            provider_configured=api_key is not None,
         )
         listing_proposal_api = ListingProposalApiSettings(
             enabled=_boolean("AGENT_LISTING_PROPOSAL_API_ENABLED", False),
@@ -974,6 +1282,92 @@ class Settings:
         )
         listing_proposal_api.validate(
             persistence_enabled=agent_persistence.enabled
+        )
+        discovery_embedding = DiscoveryEmbeddingSettings(
+            intake_enabled=_boolean(
+                "AGENT_DISCOVERY_EMBEDDING_INTAKE_ENABLED",
+                False,
+            ),
+            worker_enabled=_boolean(
+                "AGENT_DISCOVERY_EMBEDDING_WORKER_ENABLED",
+                False,
+            ),
+            provider_enabled=_boolean(
+                "AGENT_DISCOVERY_EMBEDDING_PROVIDER_ENABLED",
+                False,
+            ),
+            recovery_enabled=_boolean(
+                "AGENT_DISCOVERY_EMBEDDING_RECOVERY_ENABLED",
+                False,
+            ),
+            kill_switch_enabled=_boolean(
+                "AGENT_DISCOVERY_EMBEDDING_KILL_SWITCH_ENABLED",
+                False,
+            ),
+            kafka_topic=os.getenv(
+                "AGENT_DISCOVERY_EMBEDDING_KAFKA_TOPIC",
+                "listing-discovery-embedding-request-v1",
+            ).strip(),
+            kafka_group_id=os.getenv(
+                "AGENT_DISCOVERY_EMBEDDING_KAFKA_GROUP_ID",
+                "msb-agent-discovery-embedding-v1",
+            ).strip(),
+            claim_batch_size=_bounded_int(
+                "AGENT_DISCOVERY_EMBEDDING_CLAIM_BATCH_SIZE",
+                5,
+                1,
+                100,
+            ),
+            worker_concurrency=_bounded_int(
+                "AGENT_DISCOVERY_EMBEDDING_WORKER_CONCURRENCY",
+                2,
+                1,
+                16,
+            ),
+            claim_seconds=_bounded_int(
+                "AGENT_DISCOVERY_EMBEDDING_CLAIM_SECONDS",
+                120,
+                10,
+                3600,
+            ),
+            max_attempts=_bounded_int(
+                "AGENT_DISCOVERY_EMBEDDING_MAX_ATTEMPTS",
+                8,
+                1,
+                100,
+            ),
+            retry_base_seconds=_bounded_float(
+                "AGENT_DISCOVERY_EMBEDDING_RETRY_BASE_SECONDS",
+                5.0,
+                0.1,
+                3600.0,
+            ),
+            retry_max_seconds=_bounded_float(
+                "AGENT_DISCOVERY_EMBEDDING_RETRY_MAX_SECONDS",
+                900.0,
+                0.1,
+                86_400.0,
+            ),
+            source_timeout_seconds=_bounded_float(
+                "AGENT_DISCOVERY_EMBEDDING_SOURCE_TIMEOUT_SECONDS",
+                5.0,
+                0.1,
+                30.0,
+            ),
+            callback_timeout_seconds=_bounded_float(
+                "AGENT_DISCOVERY_EMBEDDING_CALLBACK_TIMEOUT_SECONDS",
+                5.0,
+                0.1,
+                30.0,
+            ),
+        )
+        discovery_embedding.validate(
+            mysql_password_configured=bool(knowledge_ingestion.mysql_password),
+            product_source_configured=bool(
+                knowledge_ingestion.product_service_url
+                and knowledge_ingestion.product_service_token
+            ),
+            provider_configured=api_key is not None,
         )
         if knowledge_ingestion.processor_enabled:
             if not knowledge_ingestion.enabled:
@@ -1011,7 +1405,9 @@ class Settings:
             agent_persistence=agent_persistence,
             agent_api=agent_api,
             discovery_api=discovery_api,
+            marketplace_agent_v2=marketplace_agent_v2,
             listing_proposal_api=listing_proposal_api,
+            discovery_embedding=discovery_embedding,
         )
 
     @property

@@ -3,14 +3,17 @@ export const environment = {
   apiGatewayUrl: '',
   authServiceUrl: '',
   features: {
-    cart: false,
+    cart: true,
     buyerAddresses: false,
     categoryGuidance: false,
     sellerInventory: false,
     businessOrders: false,
     buyerCheckout: false,
+    orderCancellation: false,
     aiAssistant: false,
     aiDiscovery: false,
     notifications: false,
+    returns: false,
+    adminSearchMaintenance: false,
   },
 };

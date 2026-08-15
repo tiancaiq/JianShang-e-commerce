@@ -16,10 +16,14 @@ describe('LoginComponent', () => {
       'register',
       'loginWithPopup',
       'registerWithPopup',
+      'nativeLogin',
+      'nativeRegister',
     ]);
     authService.ensureSession.and.returnValue(of({ authenticated: false, user: null }));
     authService.loginWithPopup.and.returnValue(of({ authenticated: false, user: null }));
     authService.registerWithPopup.and.returnValue(of({ authenticated: false, user: null }));
+    authService.nativeLogin.and.returnValue(of({ authenticated: false, user: null }));
+    authService.nativeRegister.and.returnValue(of({ authenticated: false, user: null }));
 
     TestBed.configureTestingModule({
       imports: [LoginComponent],
@@ -58,9 +62,9 @@ describe('LoginComponent', () => {
 
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
 
-    expect(text).toContain('Sign in or create your MSB account');
-    expect(text).toContain('Marketplace Account');
+    expect(text).toContain('Use your marketplace account to continue.');
     expect(text).toContain('Create account');
+    expect(text).not.toContain('Continue to sign in');
   });
 
   it('shows signed-out confirmation on login surfaces', () => {
@@ -75,16 +79,47 @@ describe('LoginComponent', () => {
     expect(text).toContain('Signed out successfully');
   });
 
-  it('uses the marketplace popup flow for marketplace sign-in', () => {
+  it('uses native marketplace sign-in without opening Keycloak', () => {
     const { fixture, authService } = createFixture({
       client: 'marketplace',
       returnUrl: '/account/profile',
     });
 
-    fixture.componentInstance.handleLogin();
+    fixture.componentInstance.authEmail = 'buyer@example.test';
+    fixture.componentInstance.authPassword = 'not-a-real-password';
+    fixture.componentInstance.submitNativeAuth();
 
-    expect(authService.loginWithPopup).toHaveBeenCalledOnceWith('marketplace', '/account/profile');
+    expect(authService.nativeLogin).toHaveBeenCalledOnceWith({
+      email: 'buyer@example.test',
+      password: 'not-a-real-password',
+    });
+    expect(authService.loginWithPopup).not.toHaveBeenCalled();
     expect(authService.login).not.toHaveBeenCalled();
+  });
+
+  it('uses native registration and returns to the protected destination', () => {
+    const { fixture, authService } = createFixture({
+      client: 'marketplace',
+      returnUrl: '/account/messages/agent',
+    });
+    const router = TestBed.inject(Router) as jasmine.SpyObj<Router>;
+    authService.nativeRegister.and.returnValue(of({
+      authenticated: true,
+      user: null,
+    }));
+
+    fixture.componentInstance.setAuthMode('register');
+    fixture.componentInstance.authDisplayName = 'New User';
+    fixture.componentInstance.authEmail = 'new@example.test';
+    fixture.componentInstance.authPassword = 'not-a-real-password';
+    fixture.componentInstance.submitNativeAuth();
+
+    expect(authService.nativeRegister).toHaveBeenCalledOnceWith({
+      email: 'new@example.test',
+      password: 'not-a-real-password',
+      displayName: 'New User',
+    });
+    expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/account/messages/agent');
   });
 
   it('uses regular Keycloak redirect for seller portal sign-in', () => {
@@ -114,6 +149,17 @@ describe('LoginComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent || '').toContain('Secure staff sign-in');
   });
 
+  it('returns admin portal sign-in to the dashboard when no return URL is supplied', () => {
+    const { fixture, authService } = createFixture({
+      client: 'admin-portal',
+      signedOut: '1',
+    });
+
+    fixture.componentInstance.handleLogin();
+
+    expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/admin/dashboard');
+  });
+
   it('drops unsafe return URLs before redirect login', () => {
     const { fixture, authService } = createFixture({
       client: 'admin-portal',
@@ -122,7 +168,7 @@ describe('LoginComponent', () => {
 
     fixture.componentInstance.handleLogin();
 
-    expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/');
+    expect(authService.login).toHaveBeenCalledOnceWith('admin-portal', '/admin/dashboard');
   });
 
   it('does not advertise self-registration for seller or admin sign-in', () => {

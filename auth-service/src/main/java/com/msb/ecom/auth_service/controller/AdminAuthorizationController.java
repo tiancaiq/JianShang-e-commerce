@@ -22,7 +22,7 @@ public class AdminAuthorizationController {
 
     @GetMapping("/me")
     public ApiDataResponse<PlatformAdminResponse> me() {
-        return new ApiDataResponse<>(adminAuthorizationService.requireCurrentPlatformAdmin());
+        return new ApiDataResponse<>(adminAuthorizationService.requireCurrentAdmin());
     }
 
     @GetMapping("/dashboard-summary")

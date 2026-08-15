@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "MARKETPLACE_AGENT_V2_EVALUATION_V1",
+  "suiteId": "AI-DISC-AGENT-V2-PLAN-01",
+  "maximumModelDecisions": 5,
+  "maximumToolCallsPerDecision": 1,
+  "registeredTools": [
+    "check_availability",
+    "search_listings",
+    "get_listing"
+  ],
+  "cases": [
+    {
+      "id": "natural-greeting",
+      "turn": "hi",
+      "context": "EMPTY_SESSION",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [],
+        "attachmentsAllowed": false
+      }
+    },
+    {
+      "id": "natural-capabilities",
+      "turn": "who are you",
+      "context": "EMPTY_SESSION",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [],
+        "attachmentsAllowed": false
+      }
+    },
+    {
+      "id": "short-product-noun",
+      "turn": "chair",
+      "context": "EMPTY_SESSION",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "search_listings"
+        ],
+        "attachmentsAllowed": true
+      }
+    },
+    {
+      "id": "terse-product-request",
+      "turn": "give me chair",
+      "context": "EMPTY_SESSION",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "search_listings"
+        ],
+        "attachmentsAllowed": true
+      }
+    },
+    {
+      "id": "contextual-category-refinement",
+      "turn": "office",
+      "context": "ACTIVE_CHAIR_GOAL",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "check_availability",
+          "search_listings"
+        ],
+        "attachmentsAllowed": true
+      }
+    },
+    {
+      "id": "contextual-budget-refinement",
+      "turn": "under 200",
+      "context": "ACTIVE_OFFICE_CHAIR_GOAL",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "search_listings"
+        ],
+        "attachmentsAllowed": true
+      }
+    },
+    {
+      "id": "recommendation-reference",
+      "turn": "what about the second one",
+      "context": "TWO_VALIDATED_RECOMMENDATIONS",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "get_listing"
+        ],
+        "attachmentsAllowed": true
+      }
+    },
+    {
+      "id": "cancel-active-goal",
+      "turn": "never mind",
+      "context": "ACTIVE_DISCOVERY_GOAL",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [],
+        "attachmentsAllowed": false
+      }
+    },
+    {
+      "id": "explicit-refresh",
+      "turn": "check again",
+      "context": "FRESH_ZERO_RESULT_OBSERVATION",
+      "expected": {
+        "terminalContentAllowed": true,
+        "allowedTools": [
+          "search_listings"
+        ],
+        "attachmentsAllowed": true
+      }
+    }
+  ]
+}

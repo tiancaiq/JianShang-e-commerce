@@ -24,7 +24,9 @@ from msb_agent_service.discovery_persistence import (
     DiscoveryExclusionPersistenceErrorCode,
     DiscoveryPersistenceRepository,
 )
+from msb_agent_service.discovery_api import MarketplaceDiscoveryService
 from msb_agent_service.marketplace_discovery import (
+    DiscoveryRun,
     DiscoveryPreferenceState,
     DiscoveryProvenance,
     DiscoveryRecommendation,
@@ -35,6 +37,24 @@ RUN_INTEGRATION = os.getenv("RUN_MYSQL_INTEGRATION") == "1"
 ACTOR_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 ACTOR_B = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 NOW = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+
+
+class CapturingDiscoveryOrchestrator:
+    def __init__(self) -> None:
+        self.history: tuple[tuple[str, str], ...] = ()
+        self.calls = 0
+
+    async def run(self, **kwargs):
+        self.calls += 1
+        self.history = tuple(kwargs["history"])
+        return DiscoveryRun(
+            response=DiscoveryTurnResponse(
+                outcome="NO_RESULTS",
+                message="No verified matches yet.",
+                preferenceState=kwargs["preference_state"],
+            ),
+            audits=(),
+        )
 
 
 @unittest.skipUnless(
@@ -504,6 +524,141 @@ class DiscoveryPersistenceIntegrationTest(unittest.IsolatedAsyncioTestCase):
             tuple(m.role.value for m in messages.messages),
         )
 
+    async def test_recent_messages_decodes_user_nullable_metadata_and_assistant_shape(
+        self,
+    ) -> None:
+        session = await self._session()
+        first = await self._begin(
+            session.session_id,
+            "01ARZ3NDEKTSV4RRFFQ69G5FR1",
+            "Find a desk chair",
+            now=NOW,
+        )
+        await self.discovery.complete_turn(
+            invocation_id=first.invocation.invocation_id,
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            expected_preference_version=0,
+            response=_recommendation_response("R"),
+            resolution_type=AgentResolutionType.RECOMMEND,
+            clarification_turn_increment=0,
+            clarification_question_increment=0,
+            latency_ms=40,
+            now=NOW + timedelta(seconds=1),
+        )
+        current = await self._begin(
+            session.session_id,
+            "01ARZ3NDEKTSV4RRFFQ69G5FR2",
+            "Compare those",
+            now=NOW + timedelta(seconds=2),
+        )
+
+        recent = await self.discovery.list_recent_messages(
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            exclude_message_id=current.user_message.message_id,
+        )
+
+        self.assertEqual(["USER", "ASSISTANT"], [item.role.value for item in recent])
+        self.assertEqual(first.user_message.message_id, recent[0].message_id)
+        self.assertIsNone(recent[0].resolution_type)
+        self.assertEqual((), recent[0].sources)
+        self.assertEqual((), recent[0].actions)
+        self.assertEqual(AgentResolutionType.RECOMMEND, recent[1].resolution_type)
+        self.assertEqual("DISCOVERY_RESULT", recent[1].actions[0]["type"])
+
+    async def test_recent_messages_fails_closed_on_malformed_assistant_metadata(
+        self,
+    ) -> None:
+        session = await self._session()
+        first = await self._begin(
+            session.session_id,
+            "01ARZ3NDEKTSV4RRFFQ69G5FS1",
+            "Find a desk chair",
+            now=NOW,
+        )
+        _, assistant = await self.discovery.complete_turn(
+            invocation_id=first.invocation.invocation_id,
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            expected_preference_version=0,
+            response=_recommendation_response("S"),
+            resolution_type=AgentResolutionType.RECOMMEND,
+            clarification_turn_increment=0,
+            clarification_question_increment=0,
+            latency_ms=40,
+            now=NOW + timedelta(seconds=1),
+        )
+        current = await self._begin(
+            session.session_id,
+            "01ARZ3NDEKTSV4RRFFQ69G5FS2",
+            "Compare those",
+            now=NOW + timedelta(seconds=2),
+        )
+        async with self.repository.pool.acquire() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    UPDATE agent_messages
+                    SET actions_json = JSON_ARRAY('not-object')
+                    WHERE message_id = %s
+                    """,
+                    (assistant.message_id,),
+                )
+            await connection.commit()
+
+        with self.assertRaises(AgentPersistenceError) as malformed:
+            await self.discovery.list_recent_messages(
+                session_id=session.session_id,
+                actor_user_id=ACTOR_A,
+                exclude_message_id=current.user_message.message_id,
+            )
+
+        self.assertEqual(
+            AgentPersistenceErrorCode.INVALID_ARGUMENT,
+            malformed.exception.code,
+        )
+
+    async def test_api_send_uses_real_recent_user_history_without_duplication(
+        self,
+    ) -> None:
+        session = await self._session()
+        prior = await self._begin(
+            session.session_id,
+            "01ARZ3NDEKTSV4RRFFQ69G5FT1",
+            "Find a desk chair",
+            now=NOW,
+        )
+        orchestrator = CapturingDiscoveryOrchestrator()
+        service = MarketplaceDiscoveryService(self.discovery, orchestrator)
+
+        response = await service.send_message(
+            actor_user_id=ACTOR_A,
+            session_id=session.session_id,
+            client_message_id="01ARZ3NDEKTSV4RRFFQ69G5FT2",
+            expected_preference_version=0,
+            body="Only chairs under $100",
+            correlation_id="discovery-mysql-api-history",
+        )
+
+        self.assertEqual("NO_RESULTS", response.result.outcome)
+        self.assertEqual(1, orchestrator.calls)
+        self.assertEqual((("USER", "Find a desk chair"),), orchestrator.history)
+        self.assertEqual(
+            3,
+            await self._scalar(
+                "SELECT COUNT(*) FROM agent_messages WHERE session_id = %s",
+                (session.session_id,),
+            ),
+        )
+        self.assertEqual(
+            "PENDING",
+            await self._scalar(
+                "SELECT result_status FROM agent_invocations WHERE invocation_id = %s",
+                (prior.invocation.invocation_id,),
+            ),
+        )
+
     async def test_concurrent_preference_version_allows_exactly_one_completion(
         self,
     ) -> None:
@@ -887,6 +1042,8 @@ def _recommendation(
         currency="USD",
         publicCity="Irvine",
         publicRegion="Orange County",
+        thumbnailUrl=None,
+        sellerType="INDIVIDUAL",
         matchReason="Matches the stated city and comfort preference.",
         constraintCoverage=("QUERY", "CITY"),
         provenance=DiscoveryProvenance(

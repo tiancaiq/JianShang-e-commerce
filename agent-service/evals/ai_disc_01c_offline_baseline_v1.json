@@ -29,7 +29,7 @@
       "expectedOutcome": "RECOMMEND",
       "turns": 1,
       "expectedRecommendationCount": 3,
-      "expectedModelCalls": 3,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
       "expectedDetailCalls": 3,
       "simulatedLatencyMs": 320
@@ -40,7 +40,7 @@
       "expectedOutcome": "RECOMMEND",
       "turns": 2,
       "expectedRecommendationCount": 3,
-      "expectedModelCalls": 3,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
       "expectedDetailCalls": 3,
       "simulatedLatencyMs": 280
@@ -50,19 +50,19 @@
       "scenario": "HARD_FILTERS",
       "expectedOutcome": "RECOMMEND",
       "turns": 2,
-      "expectedRecommendationCount": 4,
-      "expectedModelCalls": 3,
+      "expectedRecommendationCount": 3,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
-      "expectedDetailCalls": 4,
+      "expectedDetailCalls": 3,
       "simulatedLatencyMs": 410
     },
     {
       "id": "stale-removed-ineligible",
       "scenario": "STALE_REMOVED_INELIGIBLE",
-      "expectedOutcome": "NO_RESULTS",
+      "expectedOutcome": "COMPARE",
       "turns": 1,
-      "expectedRecommendationCount": 0,
-      "expectedModelCalls": 3,
+      "expectedRecommendationCount": 2,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
       "expectedDetailCalls": 3,
       "simulatedLatencyMs": 360
@@ -73,7 +73,7 @@
       "expectedOutcome": "RECOMMEND",
       "turns": 1,
       "expectedRecommendationCount": 3,
-      "expectedModelCalls": 3,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
       "expectedDetailCalls": 3,
       "simulatedLatencyMs": 330
@@ -84,9 +84,9 @@
       "expectedOutcome": "HANDOFF",
       "turns": 1,
       "expectedRecommendationCount": 0,
-      "expectedModelCalls": 3,
-      "expectedSearchCalls": 1,
-      "expectedDetailCalls": 3,
+      "expectedModelCalls": 0,
+      "expectedSearchCalls": 0,
+      "expectedDetailCalls": 0,
       "simulatedLatencyMs": 120
     },
     {
@@ -162,7 +162,7 @@
       "turns": 1,
       "expectedRecommendationCount": 0,
       "expectedModelCalls": 3,
-      "expectedSearchCalls": 2,
+      "expectedSearchCalls": 1,
       "expectedDetailCalls": 0,
       "simulatedLatencyMs": 520
     },
@@ -172,7 +172,7 @@
       "expectedOutcome": "REPLAYED",
       "turns": 2,
       "expectedRecommendationCount": 3,
-      "expectedModelCalls": 3,
+      "expectedModelCalls": 5,
       "expectedSearchCalls": 1,
       "expectedDetailCalls": 3,
       "simulatedLatencyMs": 310

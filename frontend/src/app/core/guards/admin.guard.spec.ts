@@ -81,6 +81,7 @@ describe('adminGuard', () => {
     };
     const adminService = {
       getCurrentAdmin: () => throwError(() => ({ status: 403 })),
+      clearCurrentAdmin: () => undefined,
     };
 
     TestBed.configureTestingModule({
@@ -108,6 +109,7 @@ describe('adminGuard', () => {
     };
     const adminService = {
       getCurrentAdmin: () => throwError(() => ({ status: 403 })),
+      clearCurrentAdmin: () => undefined,
     };
 
     TestBed.configureTestingModule({

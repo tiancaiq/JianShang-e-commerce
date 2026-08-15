@@ -14,14 +14,24 @@ export const AGENT_CUSTOMER_SERVICE_ENABLED = new InjectionToken<boolean>(
 );
 
 /**
- * Keeps query-first discovery independently hidden so listing customer
- * service or proposal activation cannot expose its routes or network calls.
+ * Keeps the Marketplace Assistant discovery-first whenever the Agent UI is
+ * exposed. Listing-bound help remains an explicit component-level flow.
  */
 export const AGENT_DISCOVERY_ENABLED = new InjectionToken<boolean>(
   'AGENT_DISCOVERY_ENABLED',
   {
     providedIn: 'root',
-    factory: () => environment.features.aiDiscovery === true,
+    factory: () => environment.features.aiDiscovery === true
+      || environment.features.aiAssistant === true,
+  },
+);
+
+/** Selects the parallel V2 orchestrator only in explicitly opted-in frontend builds. */
+export const AGENT_MARKETPLACE_V2_ENABLED = new InjectionToken<boolean>(
+  'AGENT_MARKETPLACE_V2_ENABLED',
+  {
+    providedIn: 'root',
+    factory: () => (environment.features as Record<string, boolean>)['marketplaceAgentV2'] === true,
   },
 );
 

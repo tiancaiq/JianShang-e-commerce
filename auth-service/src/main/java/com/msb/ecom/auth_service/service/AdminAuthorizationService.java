@@ -7,6 +7,7 @@ import com.msb.ecom.auth_service.dto.PlatformAdminResponse;
 import com.msb.ecom.auth_service.dto.PublicBusinessStoreSearchResponse;
 import com.msb.ecom.auth_service.dto.UserIdentityLabelResponse;
 import com.msb.ecom.auth_service.model.User;
+import com.msb.ecom.auth_service.security.AdminPermission;
 import com.msb.ecom.common.core.validation.FixedLengthIds;
 import com.msb.ecom.common.core.validation.TextInputs;
 import lombok.RequiredArgsConstructor;
@@ -27,23 +28,59 @@ import java.util.Set;
 public class AdminAuthorizationService {
 
     private static final String PLATFORM_ADMIN_ROLE = "PLATFORM_ADMIN";
+    private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
     private static final int MAX_LABEL_IDS_PER_TYPE = 50;
 
     private final AuthService authService;
     private final JdbcTemplate jdbcTemplate;
 
     @Transactional
-    public PlatformAdminResponse requireCurrentPlatformAdmin() {
+    public PlatformAdminResponse requireCurrentAdmin() {
         User user = authService.ensureUserEntity();
-        requirePlatformAdmin(user.getId());
-        return new PlatformAdminResponse(user.getId(), PLATFORM_ADMIN_ROLE);
+        AdminAccess access = resolveAccess(user);
+        if (access.roles().isEmpty()) {
+            deny(user.getId(), "missing_admin_role", null);
+        }
+        return new PlatformAdminResponse(
+                user.getId(),
+                PLATFORM_ADMIN_ROLE,
+                access.roles(),
+                access.permissions(),
+                user.getStatus());
+    }
+
+    @Transactional
+    public String requireCurrentAdminPermission(AdminPermission permission) {
+        User user = authService.ensureUserEntity();
+        return requirePermission(user, permission);
+    }
+
+    public String requirePermission(User user, AdminPermission permission) {
+        AdminAccess access = resolveAccess(user);
+        if (!access.permissions().contains(permission.id())) {
+            deny(user.getId(), "missing_permission", permission.id());
+        }
+        return user.getId();
+    }
+
+    public AdminAccessSnapshot accessFor(User user) {
+        AdminAccess access = resolveAccess(user);
+        return new AdminAccessSnapshot(access.roles(), access.permissions());
+    }
+
+    public boolean isPlatformAdmin(User user) {
+        return !resolveAccess(user).roles().isEmpty();
+    }
+
+    public boolean isSuperAdmin(User user) {
+        return resolveAccess(user).roles().contains(SUPER_ADMIN_ROLE);
     }
 
     @Transactional(readOnly = true)
     // Provides ADM-00 dashboard counts owned by the identity/business schema.
     public AdminDashboardSummaryResponse dashboardSummary() {
         User user = authService.ensureUserEntity();
-        requirePlatformAdmin(user.getId());
+        requirePermission(user, AdminPermission.DASHBOARD_READ);
         Long pendingBusinessApplications = jdbcTemplate.queryForObject("""
                 select count(*)
                 from business_applications
@@ -57,7 +94,7 @@ public class AdminAuthorizationService {
     // Returns admin-safe display labels so moderation UIs do not expose raw IDs as primary text.
     public AdminIdentityLabelsResponse identityLabels(Set<String> userIds, Set<String> businessIds) {
         User user = authService.ensureUserEntity();
-        requirePlatformAdmin(user.getId());
+        requirePermission(user, AdminPermission.AUDIT_READ);
         return labelResponse(userIds, businessIds, false);
     }
 
@@ -176,14 +213,49 @@ public class AdminAuthorizationService {
         return new AdminIdentityLabelsResponse(users, businesses);
     }
 
-    private void requirePlatformAdmin(String userId) {
-        Integer count = jdbcTemplate.queryForObject("""
-                select count(*) from user_roles
-                where user_id = ? and role_id = ?
-                """, Integer.class, userId, PLATFORM_ADMIN_ROLE);
-        if (count == null || count == 0) {
-            log.warn("Denied platform admin authorization userId={} reason=missing_role", userId);
-            throw new BusinessApplicationForbiddenException();
+    private AdminAccess resolveAccess(User user) {
+        if (!"ACTIVE".equals(user.getStatus())) {
+            deny(user.getId(), "inactive_account", null);
+        }
+        List<String> assignedRoles = jdbcTemplate.queryForList("""
+                select distinct ur.role_id
+                from user_roles ur
+                where ur.user_id = ?
+                  and ur.role_id in (
+                    'PLATFORM_ADMIN', 'SUPER_ADMIN', 'TRUST_AND_SAFETY_ADMIN',
+                    'BUSINESS_REVIEWER', 'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR',
+                    'BUSINESS_RESTRICTOR',
+                    'AUDITOR', 'AI_ADMIN_AGENT'
+                  )
+                order by ur.role_id
+                """, String.class, user.getId());
+        LinkedHashSet<String> effectiveRoles = new LinkedHashSet<>(assignedRoles);
+        if (effectiveRoles.remove(PLATFORM_ADMIN_ROLE)) {
+            effectiveRoles.add(SUPER_ADMIN_ROLE);
+        }
+        List<String> permissions = assignedRoles.isEmpty()
+                ? List.of()
+                : jdbcTemplate.queryForList("""
+                        select distinct arp.permission_id
+                        from user_roles ur
+                        join admin_role_permissions arp on arp.role_id = ur.role_id
+                        where ur.user_id = ?
+                        order by arp.permission_id
+                        """, String.class, user.getId());
+        return new AdminAccess(List.copyOf(effectiveRoles), permissions);
+    }
+
+    private void deny(String userId, String reason, String permission) {
+        log.warn("Denied admin authorization userId={} reason={} permission={}", userId, reason, permission);
+        throw new BusinessApplicationForbiddenException();
+    }
+
+    private record AdminAccess(List<String> roles, List<String> permissions) {
+    }
+
+    public record AdminAccessSnapshot(List<String> roles, List<String> permissions) {
+        public boolean has(AdminPermission permission) {
+            return permissions.contains(permission.id());
         }
     }
 

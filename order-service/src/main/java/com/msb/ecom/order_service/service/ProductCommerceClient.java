@@ -1,12 +1,20 @@
 package com.msb.ecom.order_service.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.math.BigDecimal;
 import java.util.Optional;
+import java.util.Set;
 
 public interface ProductCommerceClient {
 
     Optional<ProductContext> find(String listingId);
 
+    default void requirePurchasable(Set<String> listingIds) {
+        // Test and alternate adapters may opt in; the production REST adapter enforces this boundary.
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record ProductContext(
             String listingId,
             String businessId,

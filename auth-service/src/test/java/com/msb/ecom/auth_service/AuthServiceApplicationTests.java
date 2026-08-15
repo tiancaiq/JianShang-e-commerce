@@ -20,17 +20,21 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import com.msb.ecom.auth_service.service.ProductBusinessListingSummaryClient;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.stream.IntStream;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -67,6 +71,9 @@ class AuthServiceApplicationTests {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
+    @MockitoBean
+    private ProductBusinessListingSummaryClient productBusinessListingSummaryClient;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -79,7 +86,7 @@ class AuthServiceApplicationTests {
     @Test
     void cleanMysqlDatabaseMigratesSuccessfully() {
         assertThat(flyway.info().current().getScript())
-                .isEqualTo("V202607192000__add_public_handles_and_trade_demo_users.sql");
+                .isEqualTo("V202608150300__activate_listing_enforcement_permissions.sql");
         Integer tableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'users'",
                 Integer.class);
@@ -104,10 +111,43 @@ class AuthServiceApplicationTests {
                 "select count(*) from roles where id = 'PLATFORM_ADMIN'",
                 Integer.class);
         assertThat(platformAdminRoleCount).isEqualTo(1);
+        Integer adminPermissionCount = jdbcTemplate.queryForObject(
+                "select count(*) from admin_permissions",
+                Integer.class);
+        assertThat(adminPermissionCount).isEqualTo(27);
+        Integer adminRoleCount = jdbcTemplate.queryForObject("""
+                select count(*) from roles
+                where id in ('SUPER_ADMIN', 'TRUST_AND_SAFETY_ADMIN', 'BUSINESS_REVIEWER',
+                             'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR',
+                             'BUSINESS_RESTRICTOR', 'AUDITOR', 'AI_ADMIN_AGENT')
+                """, Integer.class);
+        assertThat(adminRoleCount).isEqualTo(9);
         Integer storeTableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'stores'",
                 Integer.class);
         assertThat(storeTableCount).isEqualTo(1);
+        Integer businessSearchIndexCount = jdbcTemplate.queryForObject("""
+                select count(distinct index_name)
+                from information_schema.statistics
+                where table_schema = database()
+                  and table_name = 'businesses'
+                  and index_name in ('idx_businesses_created_id', 'idx_businesses_updated_id')
+                """, Integer.class);
+        assertThat(businessSearchIndexCount).isEqualTo(2);
+        Integer activeBusinessAdminPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from admin_permissions
+                where id in ('admin.business.read', 'admin.business.restrict',
+                             'admin.business.suspend', 'admin.business.ban',
+                             'admin.business.reinstate')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeBusinessAdminPermissionCount).isEqualTo(5);
+        Integer activeListingEnforcementPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.listing.suspend', 'admin.listing.reinstate') and reserved = false
+                """, Integer.class);
+        assertThat(activeListingEnforcementPermissionCount).isEqualTo(2);
         Integer activeBusinessAccountIndexCount = jdbcTemplate.queryForObject("""
                 select count(*)
                 from information_schema.statistics
@@ -138,6 +178,12 @@ class AuthServiceApplicationTests {
                   and is_nullable = 'NO'
                 """, Integer.class);
         assertThat(publicHandleColumnCount).isEqualTo(1);
+        Integer accountTypeColumnCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.columns
+                where table_schema = database() and table_name = 'users'
+                  and column_name = 'account_type' and column_default = 'HUMAN'
+                """, Integer.class);
+        assertThat(accountTypeColumnCount).isEqualTo(1);
         Integer tradeDemoUserCount = jdbcTemplate.queryForObject("""
                 select count(*)
                 from users
@@ -1678,6 +1724,147 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void platformAdminCanReadChronologicalBusinessApplicationAuditTimeline() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-timeline-owner",
+                "Timeline Review LLC");
+        String adminSubject = "keycloak-sub-business-timeline-admin";
+        grantPlatformAdmin(adminSubject);
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token
+                                .subject(adminSubject)
+                                .claim("name", "Timeline Admin")))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .header("X-Correlation-Id", "business-audit-correlation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Business information verified"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}/timeline", applicationId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].eventType").value("BUSINESS_APPLICATION_SUBMITTED"))
+                .andExpect(jsonPath("$.data[0].previousState").value("DRAFT"))
+                .andExpect(jsonPath("$.data[0].newState").value("PENDING_VERIFICATION"))
+                .andExpect(jsonPath("$.data[1].eventType").value("BUSINESS_APPLICATION_DECISION"))
+                .andExpect(jsonPath("$.data[1].actorType").value("PLATFORM_ADMIN"))
+                .andExpect(jsonPath("$.data[1].actorId").isNotEmpty())
+                .andExpect(jsonPath("$.data[1].source").value("HUMAN_ADMIN"))
+                .andExpect(jsonPath("$.data[1].previousState").value("PENDING_VERIFICATION"))
+                .andExpect(jsonPath("$.data[1].newState").value("APPROVED"))
+                .andExpect(jsonPath("$.data[1].reason").value("Business information verified"))
+                .andExpect(jsonPath("$.data[1].correlationId").value("business-audit-correlation"));
+    }
+
+    @Test
+    void nonAdminCannotReadBusinessApplicationAuditTimeline() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-timeline-private-owner",
+                "Private Timeline LLC");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}/timeline", applicationId)
+                        .with(jwt().jwt(token -> token.subject("keycloak-sub-business-timeline-not-admin"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void legacyPlatformAdminReceivesStableEffectiveSuperAdminSession() throws Exception {
+        String subject = "keycloak-sub-admin-session-contract";
+        grantPlatformAdmin(subject);
+
+        mockMvc.perform(get("/api/v1/admin/me")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").isNotEmpty())
+                .andExpect(jsonPath("$.data.role").value("PLATFORM_ADMIN"))
+                .andExpect(jsonPath("$.data.roles", hasItem("SUPER_ADMIN")))
+                .andExpect(jsonPath("$.data.permissions", hasItem("admin.business.application.decide")))
+                .andExpect(jsonPath("$.data.permissions", hasItem("admin.listing.moderation.resolve")))
+                .andExpect(jsonPath("$.data.accountState").value("ACTIVE"));
+    }
+
+    @Test
+    void businessReviewerCanReadAndDecideBusinessApplications() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-business-reviewer-owner",
+                "Reviewer Permission LLC");
+        String subject = "keycloak-sub-business-reviewer";
+        grantAdminRole(subject, "BUSINESS_REVIEWER");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}", applicationId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(applicationId));
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision":"REJECT","reason":"Reviewer permission verified"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REJECTED"));
+    }
+
+    @Test
+    void listingModeratorCannotDecideBusinessApplicationOrCreateAuditEvent() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-listing-moderator-owner",
+                "Moderator Denied LLC");
+        String subject = "keycloak-sub-listing-moderator-business-denied";
+        grantAdminRole(subject, "LISTING_MODERATOR");
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision":"APPROVE","reason":"Must be rejected before mutation"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from business_applications where id = ?", String.class, applicationId))
+                .isEqualTo("PENDING_VERIFICATION");
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from business_verification_events
+                where application_id = ? and event_type = 'BUSINESS_APPLICATION_DECISION'
+                """, Integer.class, applicationId)).isZero();
+    }
+
+    @Test
+    void auditorCanReadBusinessAuditButCannotMutate() throws Exception {
+        String applicationId = createAndSubmitBusinessApplication(
+                "keycloak-sub-auditor-owner",
+                "Auditor Read LLC");
+        String subject = "keycloak-sub-admin-auditor";
+        grantAdminRole(subject, "AUDITOR");
+
+        mockMvc.perform(get("/api/v1/admin/business-applications/{id}/timeline", applicationId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].eventType").value("BUSINESS_APPLICATION_SUBMITTED"));
+
+        mockMvc.perform(post("/api/v1/admin/business-applications/{id}/decision", applicationId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header(HttpHeaders.IF_MATCH, 1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision":"REJECT","reason":"Auditors cannot decide"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void nonAdminCannotReadAdminDashboardSummary() throws Exception {
         mockMvc.perform(get("/api/v1/admin/dashboard-summary")
                         .with(jwt().jwt(token -> token.subject("keycloak-sub-dashboard-not-admin"))))
@@ -1846,6 +2033,109 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void platformAdminCanSearchInspectRestrictAndReinstateAnActiveBusiness() throws Exception {
+        String adminSubject = "keycloak-sub-active-business-admin";
+        String businessId = approveBusinessApplication(
+                "keycloak-sub-active-business-owner",
+                "Active Harbor Workshop LLC",
+                adminSubject);
+        long businessVersion = jdbcTemplate.queryForObject(
+                "select version from businesses where id = ?", Long.class, businessId);
+        when(productBusinessListingSummaryClient.summaries(anySet())).thenAnswer(invocation -> Map.of(
+                businessId,
+                new ProductBusinessListingSummaryClient.Summary(
+                        businessId, 4, 1, 1, 2, 0, 0)));
+
+        mockMvc.perform(get("/api/v1/admin/businesses")
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .queryParam("q", "Active Harbor")
+                        .queryParam("sort", "name,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].businessId").value(businessId))
+                .andExpect(jsonPath("$.data.items[0].activeListingCount").value(2))
+                .andExpect(jsonPath("$.data.items[0].strongestActiveAction").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/admin/businesses/{businessId}", businessId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businessState").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.verificationState").value("APPROVED"))
+                .andExpect(jsonPath("$.data.ownerSummary.userId").exists())
+                .andExpect(jsonPath("$.data.listingSummary.totalCount").value(4))
+                .andExpect(jsonPath("$.data.orderSummary.available").value(false))
+                .andExpect(jsonPath("$.data.availableAdminCapabilities.operationalScopes.length()").value(3));
+
+        String create = """
+                {
+                  "actionType": "RESTRICT",
+                  "scopes": ["BUSINESS_LISTING_CREATION", "BUSINESS_LISTING_PUBLICATION"],
+                  "reasonCode": "POLICY_VIOLATION",
+                  "reason": "Business administration integration verification.",
+                  "effectiveAt": null,
+                  "expiresAt": null,
+                  "expectedBusinessVersion": %d,
+                  "idempotencyKey": %s,
+                  "safeMetadata": {"origin": "integration-test"}
+                }
+                """;
+        mockMvc.perform(post("/api/v1/admin/businesses/{businessId}/enforcements/dry-run", businessId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(create.formatted(businessVersion, "null")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.proposedAction.dryRun").value(true))
+                .andExpect(jsonPath("$.data.targetVersionCurrent").value(true))
+                .andExpect(jsonPath("$.data.impactSummary.length()").value(3));
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_actions where target_type='BUSINESS' and target_id=?",
+                Integer.class, businessId)).isZero();
+
+        mockMvc.perform(post("/api/v1/admin/businesses/{businessId}/enforcements", businessId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(create.formatted(businessVersion, "\"active-business-create\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.actionType").value("RESTRICT"))
+                .andExpect(jsonPath("$.data.dryRun").value(false));
+
+        String enforcementId = jdbcTemplate.queryForObject(
+                "select id from enforcement_actions where target_type='BUSINESS' and target_id=?",
+                String.class, businessId);
+        mockMvc.perform(get("/api/v1/admin/businesses/{businessId}/timeline", businessId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.eventType == 'CREATED')].enforcementActionId")
+                        .value(enforcementId));
+
+        mockMvc.perform(post(
+                        "/api/v1/admin/businesses/{businessId}/enforcements/{enforcementId}/revoke",
+                        businessId, enforcementId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "expectedEnforcementVersion": 0,
+                                  "reasonCode": "ADMIN_REINSTATEMENT",
+                                  "reason": "Integration verification complete.",
+                                  "idempotencyKey": "active-business-revoke",
+                                  "safeMetadata": {"origin": "integration-test"}
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.lifecycleState").value("REVOKED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_actions where target_type='BUSINESS' and target_id=? and revoked_at is null",
+                Integer.class, businessId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from businesses where id=?", String.class, businessId)).isEqualTo("ACTIVE");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from business_memberships where business_id=?", Integer.class, businessId))
+                .isEqualTo(1);
+    }
+
+    @Test
     void publicSellerIdentityLabelsHideUnavailableUsers() throws Exception {
         mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
                         .subject("keycloak-sub-public-label-suspended")
@@ -2002,6 +2292,225 @@ class AuthServiceApplicationTests {
         assertThat(spoofedCount).isZero();
     }
 
+    @Test
+    void supportAdminSearchMasksEmailAndCannotSearchByEmail() throws Exception {
+        String targetSubject = "keycloak-sub-user-admin-private-target";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject(targetSubject)
+                        .claim("email", "target.private@example.test")
+                        .claim("name", "Privacy Target"))))
+                .andExpect(status().isOk());
+        String supportSubject = "keycloak-sub-user-admin-support";
+        grantAdminRole(supportSubject, "SUPPORT_ADMIN");
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("q", "Privacy Target")
+                        .with(jwt().jwt(token -> token.subject(supportSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].safeDisplayName").value("Privacy Target"))
+                .andExpect(jsonPath("$.data.items[0].safeEmail").value("t***@***.test"))
+                .andExpect(jsonPath("$.data.items[0].emailMasked").value(true));
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("q", "target.private@example.test")
+                        .with(jwt().jwt(token -> token.subject(supportSubject))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("USER_ENFORCEMENT_INVALID"));
+    }
+
+    @Test
+    void userRestrictorCanPreviewRestrictButCannotSuspendOrBan() throws Exception {
+        String targetSubject = "keycloak-sub-user-restrictor-target";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject(targetSubject)
+                        .claim("email", "restrictor.target@example.test")
+                        .claim("name", "Restrictor Target"))))
+                .andExpect(status().isOk());
+        String targetId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, targetSubject);
+        String restrictorSubject = "keycloak-sub-user-restrictor-admin";
+        grantAdminRole(restrictorSubject, "USER_RESTRICTOR");
+
+        String command = """
+                {
+                  "actionType":"%s",
+                  "scopes":["USER_BUYING"],
+                  "reasonCode":"POLICY_VIOLATION",
+                  "reason":"Least privilege authorization verification",
+                  "expectedUserVersion":0,
+                  "idempotencyKey":null
+                }
+                """;
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/dry-run", targetId)
+                        .with(jwt().jwt(token -> token.subject(restrictorSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("RESTRICT")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/dry-run", targetId)
+                        .with(jwt().jwt(token -> token.subject(restrictorSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("SUSPEND")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/dry-run", targetId)
+                        .with(jwt().jwt(token -> token.subject(restrictorSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("BAN")))
+                .andExpect(status().isForbidden());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_actions where target_id = ?", Integer.class, targetId)).isZero();
+    }
+
+    @Test
+    void superAdminDryRunCreateRuntimeDecisionAndRevocationAreAtomic() throws Exception {
+        String targetSubject = "keycloak-sub-user-enforcement-target";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject(targetSubject)
+                        .claim("email", "enforcement.target@example.test")
+                        .claim("name", "Enforcement Target"))))
+                .andExpect(status().isOk());
+        String targetId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, targetSubject);
+        String adminSubject = "keycloak-sub-user-enforcement-admin";
+        grantPlatformAdmin(adminSubject);
+        String createBody = """
+                {
+                  "actionType":"RESTRICT",
+                  "scopes":["USER_BUYING"],
+                  "reasonCode":"POLICY_VIOLATION",
+                  "reason":"Focused integration enforcement",
+                  "expectedUserVersion":0,
+                  "idempotencyKey":%s,
+                  "safeMetadata":{"origin":"integration-test"}
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/dry-run", targetId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody.formatted("null")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.proposedAction.dryRun").value(true))
+                .andExpect(jsonPath("$.data.effectiveRestrictionsAfter[0].scope").value("USER_BUYING"));
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_actions where target_id = ?", Integer.class, targetId)).isZero();
+
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements", targetId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody.formatted("\"user-enforcement-create-1\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dryRun").value(false));
+        String actionId = jdbcTemplate.queryForObject(
+                "select id from enforcement_actions where target_type = 'USER' and target_id = ?",
+                String.class, targetId);
+
+        mockMvc.perform(post("/api/v1/internal/users/capabilities/evaluate")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":"%s","scopes":["USER_BUYING","USER_SELLING"]}
+                                """.formatted(targetId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisions[0].scope").value("USER_BUYING"))
+                .andExpect(jsonPath("$.decisions[0].allowed").value(false))
+                .andExpect(jsonPath("$.decisions[1].allowed").value(true));
+
+        String revokeBody = """
+                {
+                  "expectedEnforcementVersion":0,
+                  "reasonCode":"ADMIN_REINSTATEMENT",
+                  "reason":"Restriction is no longer required",
+                  "idempotencyKey":%s,
+                  "safeMetadata":{"origin":"integration-test"}
+                }
+                """;
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/{actionId}/revoke/dry-run", targetId, actionId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(revokeBody.formatted("null")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.effectiveRestrictionsAfter").isEmpty());
+        assertThat(jdbcTemplate.queryForObject(
+                "select revoked_at is null from enforcement_actions where id = ?", Boolean.class, actionId)).isTrue();
+
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements/{actionId}/revoke", targetId, actionId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(revokeBody.formatted("\"user-enforcement-revoke-1\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.lifecycleState").value("REVOKED"));
+
+        mockMvc.perform(get("/api/v1/admin/users/{userId}/timeline", targetId)
+                        .with(jwt().jwt(token -> token.subject(adminSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].eventType").value("CREATED"))
+                .andExpect(jsonPath("$.data[1].eventType").value("REVOKED"));
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_events where enforcement_action_id = ?", Integer.class, actionId))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void userEnforcementProtectsSelfServiceAccountsAndOtherPlatformAdmins() throws Exception {
+        String trustSubject = "keycloak-sub-user-enforcement-trust";
+        grantAdminRole(trustSubject, "TRUST_AND_SAFETY_ADMIN");
+        String trustId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, trustSubject);
+        String command = """
+                {
+                  "actionType":"RESTRICT",
+                  "scopes":["USER_SELLING"],
+                  "reasonCode":"POLICY_VIOLATION",
+                  "reason":"Protected target verification",
+                  "expectedUserVersion":0,
+                  "idempotencyKey":"%s"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements", trustId)
+                        .with(jwt().jwt(token -> token.subject(trustSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("protect-self-1")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("USER_ENFORCEMENT_INVALID"));
+
+        String serviceSubject = "keycloak-sub-user-enforcement-service";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token.subject(serviceSubject))))
+                .andExpect(status().isOk());
+        String serviceId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, serviceSubject);
+        jdbcTemplate.update("update users set account_type = 'SERVICE' where id = ?", serviceId);
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements", serviceId)
+                        .with(jwt().jwt(token -> token.subject(trustSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("protect-service-1")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("USER_ENFORCEMENT_INVALID"));
+
+        String supportSubject = "keycloak-sub-user-enforcement-protected-admin";
+        grantAdminRole(supportSubject, "SUPPORT_ADMIN");
+        String supportId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, supportSubject);
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements", supportId)
+                        .with(jwt().jwt(token -> token.subject(trustSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("protect-admin-1")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("USER_ENFORCEMENT_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin/users/{userId}/enforcements", serviceId)
+                        .with(jwt().jwt(token -> token.subject(supportSubject)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(command.formatted("reader-cannot-mutate-1")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from enforcement_actions where target_id in (?, ?, ?)",
+                Integer.class, trustId, serviceId, supportId)).isZero();
+    }
+
     private String createBusinessApplication(String subject, String legalName) throws Exception {
         mockMvc.perform(post("/api/v1/business-applications")
                         .with(jwt().jwt(token -> token.subject(subject)))
@@ -2069,6 +2578,10 @@ class AuthServiceApplicationTests {
     }
 
     private void grantPlatformAdmin(String subject) throws Exception {
+        grantAdminRole(subject, "PLATFORM_ADMIN");
+    }
+
+    private void grantAdminRole(String subject, String role) throws Exception {
         mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token.subject(subject))))
                 .andExpect(status().isOk());
         String userId = jdbcTemplate.queryForObject(
@@ -2077,9 +2590,9 @@ class AuthServiceApplicationTests {
                 subject);
         jdbcTemplate.update("""
                 insert into user_roles (user_id, role_id, granted_by, granted_at)
-                values (?, 'PLATFORM_ADMIN', null, ?)
+                values (?, ?, null, ?)
                 on duplicate key update granted_at = granted_at
-                """, userId, Timestamp.from(Instant.now()));
+                """, userId, role, Timestamp.from(Instant.now()));
     }
 
     private String hmacSha256(String body) throws Exception {

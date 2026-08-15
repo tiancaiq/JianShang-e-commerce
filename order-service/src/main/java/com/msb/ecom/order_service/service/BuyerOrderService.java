@@ -101,6 +101,7 @@ public class BuyerOrderService {
                         .map(group -> new BuyerOrderPageResponse.GroupSummary(
                                 group.businessOrderId(),
                                 group.businessId(),
+                                group.storeName(),
                                 group.status(),
                                 group.totalAmount(),
                                 order.currency()))
@@ -109,6 +110,12 @@ public class BuyerOrderService {
 
     private BuyerOrderDetailResponse detail(BuyerOrderView order) {
         BuyerOrderView.Address address = order.shippingAddress();
+        var cancellation = repository.cancellation(order.orderId());
+        if (cancellation == null) {
+            cancellation = new BuyerOrderRepository.CancellationView(
+                    false, "POLICY_NOT_ALLOWED", null, null,
+                    null, null, null, null, null, null, null, null, null);
+        }
         return new BuyerOrderDetailResponse(
                 order.orderId(),
                 order.status(),
@@ -122,6 +129,7 @@ public class BuyerOrderService {
                         group.businessOrderId(),
                         group.businessId(),
                         group.storeId(),
+                        group.storeName(),
                         group.status(),
                         group.totalAmount(),
                         order.currency(),
@@ -135,7 +143,20 @@ public class BuyerOrderService {
                                 item.quantity(),
                                 item.lineTotal(),
                                 item.policyVersion()))
-                                .toList()))
+                                .toList(),
+                        group.version(),
+                        group.timeline().stream()
+                                .map(entry -> new BuyerOrderDetailResponse.TimelineEntry(
+                                        entry.status(), entry.occurredAt()))
+                                .toList(),
+                        group.shipment() == null ? null : new BuyerOrderDetailResponse.Shipment(
+                                group.shipment().shipmentId(), group.shipment().source(),
+                                group.shipment().carrierDisplayName(),
+                                group.shipment().serviceDisplayName(),
+                                group.shipment().trackingNumber(), group.shipment().status(),
+                                group.shipment().version(), group.shipment().shippedAt(),
+                                group.shipment().deliveredAt(), group.shipment().createdAt(),
+                                group.shipment().updatedAt())))
                         .toList(),
                 new BuyerOrderDetailResponse.ShippingAddress(
                         address.label(),
@@ -146,7 +167,20 @@ public class BuyerOrderService {
                         address.city(),
                         address.region(),
                         address.postalCode(),
-                        address.countryCode()));
+                        address.countryCode()),
+                new BuyerOrderDetailResponse.Cancellation(
+                        cancellation.eligible(), cancellation.ineligibilityCode(),
+                        cancellation.requestId(), cancellation.requestStatus(),
+                        cancellation.requestId() == null ? null : "BUYER_CANCELLATION_REQUESTED",
+                        cancellation.requestedAt(), cancellation.decidedAt(),
+                        cancellation.completedAt(),
+                        cancellation.inventoryStatus(),
+                        cancellation.refundStatus() == null ? null
+                                : new BuyerOrderDetailResponse.Refund(
+                                        cancellation.refundStatus(), cancellation.refundId(),
+                                        cancellation.refundAmount(),
+                                        cancellation.refundCurrency(), "Local demo refund",
+                                        "No real money is moved.")));
     }
 
     private String resolveBuyer() {

@@ -94,7 +94,7 @@ gateway BFF flow.
 | Client | Purpose | Redirect URI |
 | --- | --- | --- |
 | `msb-marketplace` | User marketplace site | `http://localhost:9000/api/v1/auth/callback/marketplace` |
-| `msb-seller-portal` | Business seller portal | `http://localhost:9000/api/v1/auth/callback/seller-portal` |
+| `msb-seller-portal` | Business seller portal | `http://localhost:9000/api/v1/auth/callback/seller-portal`, `http://localhost:4200/api/v1/auth/callback/seller-portal` |
 | `msb-admin-portal` | Admin portal | `http://localhost:9000/api/v1/auth/callback/admin-portal` |
 
 Each client:

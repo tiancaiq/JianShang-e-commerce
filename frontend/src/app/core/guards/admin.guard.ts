@@ -17,11 +17,14 @@ export const adminGuard: CanActivateFn = (_route, routeState) => {
 
       return adminService.getCurrentAdmin().pipe(
         map(() => true),
-        catchError(() => of(router.createUrlTree(['/admin-access-denied'], {
-          queryParams: {
-            returnUrl: routeState.url || '/admin/dashboard',
-          },
-        })))
+        catchError(() => {
+          adminService.clearCurrentAdmin();
+          return of(router.createUrlTree(['/admin-access-denied'], {
+            queryParams: {
+              returnUrl: routeState.url || '/admin/dashboard',
+            },
+          }));
+        })
       );
     })
   );

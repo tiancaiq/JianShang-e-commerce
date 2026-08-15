@@ -1,0 +1,20 @@
+export const environment = {
+  production: true,
+  apiGatewayUrl: '',
+  authServiceUrl: '',
+  features: {
+    cart: false,
+    buyerAddresses: false,
+    categoryGuidance: false,
+    sellerInventory: false,
+    businessOrders: false,
+    buyerCheckout: false,
+    orderCancellation: false,
+    aiAssistant: true,
+    aiDiscovery: true,
+    marketplaceAgentV2: true,
+    notifications: false,
+    returns: false,
+    adminSearchMaintenance: false,
+  },
+};

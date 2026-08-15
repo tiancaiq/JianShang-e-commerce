@@ -2,12 +2,16 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { forkJoin } from 'rxjs';
 import {
   AdminListingModerationCase,
   ListingModerationCaseFilter,
 } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AdminService } from '../../core/services/admin.service';
+import { listingModerationCapabilities } from './listing-moderation-capability';
+import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
 
 @Component({
   selector: 'app-admin-listing-moderation',
@@ -29,6 +33,7 @@ import { ToastService } from '../../core/services/toast.service';
             type="button"
             class="filter-btn"
             [class.active]="selectedFilter() === filter.value"
+            [attr.aria-pressed]="selectedFilter() === filter.value"
             (click)="setFilter(filter.value)"
             [disabled]="loading()"
           >
@@ -69,11 +74,11 @@ import { ToastService } from '../../core/services/toast.service';
       </form>
 
       @if (errorMsg()) {
-        <div class="error-message">{{ errorMsg() }}</div>
+        <div class="error-message" role="alert">{{ errorMsg() }}</div>
       }
 
       @if (loading()) {
-        <div class="empty-state">Loading listing moderation cases...</div>
+        <div class="empty-state" role="status">Loading listing moderation cases...</div>
       } @else if (cases().length === 0) {
         <div class="empty-state">{{ emptyStateMessage() }}</div>
       } @else {
@@ -142,7 +147,7 @@ import { ToastService } from '../../core/services/toast.service';
               </dl>
 
               <div class="action-bar">
-                @if (moderationCase.caseStatus === 'OPEN') {
+                @if (capabilitiesFor(moderationCase).canClaim) {
                   <button
                     type="button"
                     class="primary-btn"
@@ -152,7 +157,7 @@ import { ToastService } from '../../core/services/toast.service';
                     Claim
                   </button>
                 }
-                @if (moderationCase.caseStatus === 'CLAIMED') {
+                @if (capabilitiesFor(moderationCase).canRelease) {
                   <button
                     type="button"
                     class="primary-btn"
@@ -169,7 +174,7 @@ import { ToastService } from '../../core/services/toast.service';
                     Release
                   </button>
                 }
-                @if (moderationCase.caseStatus === 'RESOLVED') {
+                @if (capabilitiesFor(moderationCase).isReadOnly) {
                   <button
                     type="button"
                     class="secondary-btn"
@@ -382,14 +387,41 @@ import { ToastService } from '../../core/services/toast.service';
     @media (max-width: 900px) {
       .page-header,
       .case-main,
-      .action-bar,
       .search-bar,
       .case-badges {
         flex-direction: column;
       }
 
       .meta-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 520px) {
+      .moderation-page {
+        gap: 0.75rem;
+      }
+
+      .case-stack {
+        gap: 0.65rem;
+      }
+
+      .case-panel {
+        gap: 0.7rem;
+        padding: 0.8rem;
+      }
+
+      .meta-grid {
+        gap: 0.55rem;
+      }
+
+      .action-bar {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .action-bar button {
+        flex: 1 1 120px;
       }
     }
   `],
@@ -398,6 +430,7 @@ export class AdminListingModerationComponent implements OnInit {
   private readonly listingService = inject(ListingService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly adminService = inject(AdminService);
 
   readonly filters: { value: ListingModerationCaseFilter; label: string }[] = [
     { value: 'open', label: 'Open' },
@@ -413,18 +446,25 @@ export class AdminListingModerationComponent implements OnInit {
   actionId = signal('');
   errorMsg = signal('');
   searchQuery = '';
+  currentAdminUserId = signal('');
 
   ngOnInit(): void {
     this.loadQueue();
   }
 
-  loadQueue(): void {
+  loadQueue(preserveMessage = false): void {
     this.loading.set(true);
-    this.errorMsg.set('');
+    if (!preserveMessage) {
+      this.errorMsg.set('');
+    }
 
-    this.listingService.getListingModerationCases(this.selectedFilter(), this.submittedSearch()).subscribe({
-      next: cases => {
-        this.cases.set(cases);
+    forkJoin({
+      cases: this.listingService.getListingModerationCases(this.selectedFilter(), this.submittedSearch()),
+      admin: this.adminService.getCurrentAdmin(),
+    }).subscribe({
+      next: response => {
+        this.cases.set(response.cases);
+        this.currentAdminUserId.set(response.admin.data.userId);
         this.loading.set(false);
       },
       error: error => {
@@ -499,6 +539,13 @@ export class AdminListingModerationComponent implements OnInit {
     this.router.navigate(['/admin/listings/moderation', moderationCase.id]);
   }
 
+  capabilitiesFor(moderationCase: AdminListingModerationCase) {
+    return listingModerationCapabilities(moderationCase, this.currentAdminUserId(), {
+      canClaim: this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_MODERATION_CLAIM),
+      canResolve: this.adminService.hasPermission(ADMIN_PERMISSIONS.LISTING_MODERATION_RESOLVE),
+    });
+  }
+
   locationFor(moderationCase: AdminListingModerationCase): string {
     if (!moderationCase.publicCity && !moderationCase.publicRegion) {
       return 'Location not set';
@@ -537,6 +584,7 @@ export class AdminListingModerationComponent implements OnInit {
     }
     if (error.status === 409) {
       this.errorMsg.set('Case changed while you were working. Refresh the queue and try again.');
+      this.loadQueue(true);
       return;
     }
     this.errorMsg.set(fallback);

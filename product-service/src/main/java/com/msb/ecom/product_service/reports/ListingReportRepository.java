@@ -23,30 +23,31 @@ class ListingReportRepository {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
 
-    // Reserves one durable actor/key slot; a concurrent duplicate waits on the same database identity.
+    // Reserves one durable actor/key slot without a delete/insert gap-lock cycle under concurrent intake.
     boolean reserveIdempotency(
             String reporterUserId,
             String idempotencyKey,
             String requestHash,
             Instant expiresAt,
             Instant now) {
-        jdbcTemplate.update("""
-                delete from listing_report_idempotency
-                where reporter_user_id = ? and idempotency_key = ? and expires_at <= ?
-                """, reporterUserId, idempotencyKey, timestamp(now));
         return jdbcTemplate.update("""
                 insert into listing_report_idempotency (
                     reporter_user_id, idempotency_key, request_hash, report_id,
                     expires_at, created_at, updated_at
                 ) values (?, ?, ?, null, ?, ?, ?)
-                on duplicate key update reporter_user_id = values(reporter_user_id)
+                on duplicate key update
+                    request_hash = if(expires_at <= values(created_at), values(request_hash), request_hash),
+                    report_id = if(expires_at <= values(created_at), null, report_id),
+                    created_at = if(expires_at <= values(created_at), values(created_at), created_at),
+                    updated_at = if(expires_at <= values(created_at), values(updated_at), updated_at),
+                    expires_at = if(expires_at <= values(created_at), values(expires_at), expires_at)
                 """,
                 reporterUserId,
                 idempotencyKey,
                 requestHash,
                 timestamp(expiresAt),
                 timestamp(now),
-                timestamp(now)) == 1;
+                timestamp(now)) > 0;
     }
 
     Optional<IdempotencyReservation> lockIdempotency(String reporterUserId, String idempotencyKey) {
@@ -75,30 +76,30 @@ class ListingReportRepository {
         }
     }
 
-    // Reserves the exact 24-hour semantic duplicate identity without process-local locking.
+    // Reserves the semantic duplicate identity without a delete/insert gap-lock cycle under concurrent intake.
     boolean reserveDuplicateWindow(
             String reporterUserId,
             String listingId,
             String reasonCode,
             Instant expiresAt,
             Instant now) {
-        jdbcTemplate.update("""
-                delete from listing_report_duplicate_windows
-                where reporter_user_id = ? and listing_id = ? and reason_code = ? and expires_at <= ?
-                """, reporterUserId, listingId, reasonCode, timestamp(now));
         return jdbcTemplate.update("""
                 insert into listing_report_duplicate_windows (
                     reporter_user_id, listing_id, reason_code, report_id,
                     expires_at, created_at, updated_at
                 ) values (?, ?, ?, null, ?, ?, ?)
-                on duplicate key update reporter_user_id = values(reporter_user_id)
+                on duplicate key update
+                    report_id = if(expires_at <= values(created_at), null, report_id),
+                    created_at = if(expires_at <= values(created_at), values(created_at), created_at),
+                    updated_at = if(expires_at <= values(created_at), values(updated_at), updated_at),
+                    expires_at = if(expires_at <= values(created_at), values(expires_at), expires_at)
                 """,
                 reporterUserId,
                 listingId,
                 reasonCode,
                 timestamp(expiresAt),
                 timestamp(now),
-                timestamp(now)) == 1;
+                timestamp(now)) > 0;
     }
 
     Optional<DuplicateWindow> lockDuplicateWindow(String reporterUserId, String listingId, String reasonCode) {

@@ -27,7 +27,11 @@ describe('AdminService', () => {
 
   it('loads current platform admin through the gateway', () => {
     service.getCurrentAdmin().subscribe(response => {
-      expect(response.data).toEqual({ userId: '01ADMIN', role: 'PLATFORM_ADMIN' });
+      expect(response.data.userId).toBe('01ADMIN');
+      expect(response.data.role).toBe('PLATFORM_ADMIN');
+      expect(response.data.roles).toEqual(['SUPER_ADMIN']);
+      expect(response.data.permissions).toContain('admin.listing.moderation.resolve');
+      expect(response.data.accountState).toBe('ACTIVE');
     });
 
     const request = httpMock.expectOne('/api/v1/admin/me');

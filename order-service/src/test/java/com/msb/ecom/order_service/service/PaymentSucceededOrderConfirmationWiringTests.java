@@ -29,6 +29,10 @@ class PaymentSucceededOrderConfirmationWiringTests {
     @MockitoBean
     InventoryReservationClient inventory;
     @MockitoBean
+    BuyerIdentityClient buyerIdentityClient;
+    @MockitoBean
+    ProductCommerceClient productCommerceClient;
+    @MockitoBean
     CheckoutUlidGenerator ids;
     @MockitoBean
     ObjectMapper objectMapper;

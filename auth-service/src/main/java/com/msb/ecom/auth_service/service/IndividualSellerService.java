@@ -24,6 +24,7 @@ public class IndividualSellerService {
     private static final String CURRENT_TERMS_VERSION = "2026-01";
 
     private final AuthService authService;
+    private final UserCapabilityService userCapabilityService;
     private final IndividualSellerProfileRepository individualSellerProfileRepository;
     private final UlidGenerator ulidGenerator;
     private final JdbcTemplate jdbcTemplate;
@@ -31,6 +32,7 @@ public class IndividualSellerService {
     @Transactional
     public IndividualSellerProfileResponse activate(ActivateIndividualSellerRequest request) {
         User user = authService.ensureUserEntity();
+        userCapabilityService.requireSellingAllowed(user.getId());
 
         if (individualSellerProfileRepository.existsByUserId(user.getId())) {
             throw new IndividualSellerAlreadyActiveException();

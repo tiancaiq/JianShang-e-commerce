@@ -78,7 +78,7 @@ import { CheckoutService } from '../../core/services/checkout.service';
             >
               {{ creating() ? 'Starting checkout...' : 'Start checkout' }}
             </button>
-            <small>No payment is collected in this slice.</small>
+            <small>Next: local demo payment. No real money will be charged.</small>
           </aside>
         </div>
       }

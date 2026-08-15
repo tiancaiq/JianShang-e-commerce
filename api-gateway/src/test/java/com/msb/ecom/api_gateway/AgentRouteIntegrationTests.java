@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,7 +31,10 @@ import static org.mockito.Mockito.when;
 @ActiveProfiles("test")
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "msb.gateway.features.agent=true")
+        properties = {
+                "msb.gateway.features.agent=true",
+                "resilience4j.timelimiter.instances.agentServiceCircuitBreaker.timeout-duration=100ms"
+        })
 class AgentRouteIntegrationTests {
 
     private static final AtomicReference<String> AUTHORIZATION = new AtomicReference<>();
@@ -39,6 +44,7 @@ class AgentRouteIntegrationTests {
     private static final AtomicReference<String> ROLES = new AtomicReference<>();
     private static final AtomicReference<String> CORRELATION_ID = new AtomicReference<>();
     private static final AtomicInteger REQUESTS = new AtomicInteger();
+    private static final ExecutorService AGENT_EXECUTOR = Executors.newCachedThreadPool();
     private static final HttpServer AGENT_UPSTREAM = startAgentUpstream();
 
     @LocalServerPort
@@ -77,6 +83,7 @@ class AgentRouteIntegrationTests {
     @AfterAll
     static void stopAgentUpstream() {
         AGENT_UPSTREAM.stop(0);
+        AGENT_EXECUTOR.shutdownNow();
     }
 
     @Test
@@ -117,6 +124,19 @@ class AgentRouteIntegrationTests {
     }
 
     @Test
+    void listingProposalRouteRemainsOnListingAgentFlag() {
+        RestAssured.given()
+                .header("Authorization", "Bearer relayed-access-token")
+                .when()
+                .get("/api/v1/agent/listing-proposals/01P00000000000000000000001")
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("OPEN"));
+
+        org.assertj.core.api.Assertions.assertThat(REQUESTS.get()).isEqualTo(1);
+    }
+
+    @Test
     void listingAgentFlagDoesNotExposeDiscoveryRoute() {
         RestAssured.given()
                 .header("Authorization", "Bearer relayed-access-token")
@@ -128,10 +148,24 @@ class AgentRouteIntegrationTests {
         org.assertj.core.api.Assertions.assertThat(REQUESTS.get()).isZero();
     }
 
+    @Test
+    void listingAgentRouteStillUsesListingAgentTransportWindow() {
+        RestAssured.given()
+                .header("Authorization", "Bearer relayed-access-token")
+                .when()
+                .get("/api/v1/agent/sessions/slow")
+                .then()
+                .statusCode(503)
+                .body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+
+        org.assertj.core.api.Assertions.assertThat(REQUESTS.get()).isEqualTo(1);
+    }
+
     private static HttpServer startAgentUpstream() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/api/v1/agent/", AgentRouteIntegrationTests::respond);
+            server.setExecutor(AGENT_EXECUTOR);
             server.start();
             return server;
         } catch (IOException error) {
@@ -141,6 +175,9 @@ class AgentRouteIntegrationTests {
 
     private static void respond(HttpExchange exchange) throws IOException {
         REQUESTS.incrementAndGet();
+        if (exchange.getRequestURI().getPath().endsWith("/slow")) {
+            sleepForRouteTest(250);
+        }
         AUTHORIZATION.set(exchange.getRequestHeaders().getFirst("Authorization"));
         USER_ID.set(exchange.getRequestHeaders().getFirst("X-User-Id"));
         ACTOR_USER_ID.set(exchange.getRequestHeaders().getFirst("X-Actor-User-Id"));
@@ -152,5 +189,14 @@ class AgentRouteIntegrationTests {
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    private static void sleepForRouteTest(long milliseconds) throws IOException {
+        try {
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Route test upstream sleep interrupted.", error);
+        }
     }
 }

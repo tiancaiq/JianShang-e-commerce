@@ -433,10 +433,31 @@ conversation-gated listing close covered by CHAT-05 and CHAT-06.
 
 ### 5.7 Basic Admin Moderation
 
-Status: ADM-00 admin shell, ADM-BUS-01 business application queue, and
-ADM-BUS-02 business application detail are complete; ADM-BUS-03 decision UX,
-business application admin decision, and basic listing moderation decision are
-also complete.
+Status: `ADM-MVP-RC-01`, `ADM-SEC-01`, `ADM-ENF-00`, `ADM-USER-01/02`,
+`ADM-BUS-04/05`, and `ADM-LIST-06` are complete. ADM-00,
+ADM-BUS-01 through ADM-BUS-03, ADM-LIST-00 through ADM-LIST-05, ADM-AUD-01,
+and the fine-grained admin authorization foundation are complete.
+Business and listing detail pages expose normalized chronological audit
+timelines, and listing case controls are capability-gated by current admin
+ownership and resolved state. The Docker-backed two-admin browser workflow
+passed on 2026-08-12.
+
+ADM-SEC-01 keeps admin identity and authorization in Auth Service application
+persistence: Keycloak authenticates, while stored roles map to stable effective
+permissions returned by `/api/v1/admin/me`. Existing `PLATFORM_ADMIN` users are
+bootstrapped as effective `SUPER_ADMIN`. Backend permission checks are
+authoritative; Angular route, navigation, and command capability checks are
+presentation safeguards. The reserved `AI_ADMIN_AGENT` role is unassigned and
+has no permissions or execution path. Role-management UI/API, reports, finance
+administration, and AI automation remain deferred. ADM-ENF-00 supplies
+service-owned persistence, contracts, evaluation, authorization, idempotency,
+concurrency, dry-run validation, and timeline mapping. ADM-USER-01/02 enforces
+`USER_BUYING` and `USER_SELLING`; login and messaging remain reserved.
+ADM-BUS-04/05 enforces business listing creation, publication, and new sales;
+payouts remain reserved. ADM-LIST-06 enforces listing public visibility and
+purchasability while remaining separate from `REMOVED_BY_ADMIN`. The focused
+`USER_RESTRICTOR` and `BUSINESS_RESTRICTOR` roles cannot use stronger action
+permissions. See the target documents under `docs/mvp/adm/`.
 
 Reference: `docs/mvp/adm/admin-mvp-plan.md`
 
@@ -453,11 +474,25 @@ Recommended slices:
 9. ADM-LIST-04 active listing admin edit and removal.
 10. ADM-LIST-05 listing review search.
 11. ADM-AUD-01 minimal admin audit visibility for MVP workflows.
+12. ADM-SEC-01 fine-grained admin authorization foundation.
+13. ADM-ENF-00 shared enforcement foundation (no runtime effects or UI).
+14. ADM-USER-01/02 user search, detail, marketplace enforcement, and
+    reinstatement.
+15. ADM-BUS-04/05 active-business administration and reversible enforcement.
+16. ADM-LIST-06 reversible listing suspension and reinstatement.
 
-Reports, starting with ADM-REP-01 user-reported listing queue,
-suspensions/restores, support cases, chat evidence review, payment/order/finance
-operations, advanced trust/disputes, and AI moderation assistance are admin
-roadmap scope but deferred until after the MVP admin foundation is stable.
+Recommended next after the cleanup gate: `ADM-REP-00/01/02`. This roadmap
+identifies the next milestone without implementing report submission,
+persistence, queues, or investigation behavior in the enforcement release.
+
+Search Maintenance is ongoing and feature-gated; it is not part of
+`ADM-MVP-RC-01`. Category Guidance remains disabled by default. Neither is an
+MVP admin release blocker.
+
+Reports, starting with `ADM-REP-00/01/02`, investigation/support cases, appeals,
+chat evidence review, payment/order/finance operations, payout enforcement,
+advanced trust/disputes, and AI moderation assistance are admin roadmap scope
+but remain deferred until after this release train is fully delivered.
 
 ### 5.8 V3 AI And Automated Operations Planning
 
@@ -1090,6 +1125,91 @@ P2 cleanup slices:
       `docs/mvp/search/search-04-opensearch-projection.md`
     - Add a derived OpenSearch projection after the database-backed paged
       search contract is stable.
+    - `AI-DISC-SEARCH-P0-04A` adds the default-off Product-owned canonical
+      embedding source, durable request/reference-only outbox contract, and
+      exact request-ID internal source boundary. P0-04B/C complete the
+      default-off Agent worker and Product receipt/rebuild-store boundary.
+    - `AI-DISC-SEARCH-P0-05A` adds the immutable Product-owned V2 vector
+      mapping and an inactive-only authoritative backfill. Its Product MySQL
+      and disposable OpenSearch gates are green, while status remains only
+      `INACTIVE_VALIDATED`; aliases are not promoted.
+    - `AI-DISC-SEARCH-P0-05B` adds a durable Product-owned rebuild run,
+      transactional mutation/promotion fence, candidate dual-write and
+      catch-up, receipt watermark validation, and atomic read/write alias
+      promotion with bounded rollback. All gates remain false by default;
+      no shared/runtime promotion is authorized.
+    - `AI-DISC-SEARCH-P0-05C` adds atomic receipt/vector-work persistence,
+      bounded exact-current receipt catch-up, leased compatible-V2 writes at
+      checked external version `2V+2`, and stale-resurrection protection. All
+      gates remain false by default and no runtime target is enabled.
+    - `AI-DISC-SEARCH-P0-06` adds the Product-only, false-default internal
+      BM25/vector retrieval, deterministic unweighted RRF, and authoritative
+      MySQL revalidation boundary.
+    - `AI-DISC-SEARCH-P0-07` adds the default-off Agent query embedding and
+      typed Product hybrid-search tool client. Runtime acceptance remains
+      blocked/default-off.
+    - `AI-DISC-SEARCH-STAB-P1-14` composes the existing Agent 04B
+      discovery-document Kafka intake and embedding worker in the FastAPI
+      lifespan behind their false-default flags. Readiness now reports
+      `discoveryDocumentEmbedding`; no runtime event drain, provider call, V2
+      promotion, or browser acceptance is authorized.
+    - `AI-DISC-SEARCH-STAB-P1-15` corrects the production embedding worker
+      compatibility path: the runtime metrics object now satisfies the shared
+      OpenAI embedding provider protocol, and Agent 04B validators accept
+      Product's nonnegative listing versions including `0`. Preserved
+      dead-letter jobs and broker events still require a separate approved
+      recovery/requeue task; no runtime retry is authorized here.
+    - `AI-DISC-SEARCH-STAB-P1-16` adds the false-default Agent local recovery
+      command and V10 recovery audit/idempotency table for exact
+      `DEAD_LETTER/MAX_ATTEMPTS_EXHAUSTED` discovery embedding jobs. It also
+      aligns the Agent job table with Product version `0` listings and records
+      that Kafka offsets are committed only after durable enqueue; the preserved
+      137 no-job events should replay on restart only if their offsets were not
+      independently advanced. No recovery command, broker replay, or runtime
+      retry is executed by this source slice.
+    - `AI-DISC-SEARCH-STAB-P1-17` reconciles Product's embedding-result
+      callback and derived receipt/vector-work schema with the authoritative
+      nonnegative listing-version contract. Version `0` callbacks can now be
+      accepted only when they match the exact current 04A request and public
+      listing identity; negative versions remain invalid. It does not recover
+      preserved Agent `CALLBACK_INVALID_RESPONSE` jobs or mutate runtime data.
+    - `AI-DISC-SEARCH-STAB-P1-18` extends the false-default Agent local
+      recovery command with explicit mode
+      `PRODUCT_VERSION_ZERO_CALLBACK_CONTRACT_REPAIRED_V1`. It can requeue
+      only `DEAD_LETTER/CALLBACK_INVALID_RESPONSE` jobs at listing version `0`
+      with the approved embedding identity and no active lease, using an exact
+      expected count and mode-bound idempotency key. It adds only V11 recovery
+      audit CHECK compatibility and does not execute runtime recovery.
+    - `AI-DISC-SEARCH-P0-08` adds a distinct false-default Product V2 operator
+      boundary for P0-05B prepare/status/catch-up/promote/recover with existing
+      platform-admin authorization and immutable bounded audit rows. The
+      legacy BM25 rebuild is unchanged and no runtime promotion is authorized.
+    - `AI-DISC-SEARCH-STAB-P1-19` aligns P0-08 bodyless operator POSTs with
+      the P0-09 transport rule: empty fixed-length and empty chunked requests
+      are valid, while any decoded payload byte is rejected before service
+      invocation. No runtime command execution or alias mutation is included.
+    - `AI-DISC-SEARCH-STAB-P1-10` corrects the shared Product OpenSearch
+      ordering for authoritative zero-based listing versions: lexical/delete
+      `2V+1`, exact vector `2V+2`. The untouched version-0 demo seed now maps to
+      positive external versions 1/2; runtime activation remains a separate
+      explicitly authorized task.
+    - `AI-DISC-SEARCH-P0-09` adds a false-default Product platform-admin
+      embedding-request backfill for existing eligible public individual
+      listings. A durable finite ID watermark, leased one-page commands, and
+      per-listing transactions reuse the canonical 04A request/reference-only
+      outbox path. Source/integration verification does not activate Agent,
+      provider, vector, index, hybrid, or browser runtime.
+    - `AI-DISC-SEARCH-P0-10A` adds an independently false-default Angular
+      platform-admin control surface for the unchanged legacy V1 rebuild and
+      P0-09 start/status/one-page-resume APIs. It uses existing BFF/CSRF/admin
+      boundaries, requires explicit confirmation for every POST, and leaves
+      runtime activation and browser acceptance deferred.
+    - `AI-DISC-SEARCH-P0-10B` extends that same false-default admin surface
+      with the P0-08 V2 prepare/status/catch-up/promote/recover controls.
+      Angular consumes only strict
+      `MARKETPLACE_LISTING_VECTOR_REBUILD_STATUS_V2` responses and enables
+      commands only from Product-owned `canCatchUp`, `canPromote`, and
+      `canRecover`; it does not derive readiness from counts or local state.
 
 ## 7. Deferred Release Summaries
 
@@ -1169,6 +1289,12 @@ Approved slice order:
      inventory commit, multi-business immutable order snapshots, checkout
      `PAYMENT_PROCESSING -> COMPLETED`, history, and transactional
      `order.confirmed` outbox.
+   - `V2-ORD-01B` post-purchase reconciliation: implemented on 2026-08-03.
+     Checkout creation now records exact cart-line mutation identities; a
+     durable retry worker atomically removes only unchanged purchased lines
+     after confirmation and preserves newer buyer edits. Checkout/order store
+     names are immutable snapshots, and seller queue copy uses a redacted
+     marketplace-buyer label plus order number.
    - Cleanup: `V2-PAY-ORD-CLEAN-P0-01` verified the payment producer/order
      consumer boundary, disabled transport gates, strict non-coercing envelope,
      bounded money and response metadata, provider-event causation identity,
@@ -1218,9 +1344,19 @@ Approved slice order:
      Forward-only Order V5 owns optimistic group versioning, durable P7D
      command idempotency, append-only group history, and transactional
      `business_order.accepted` outbox persistence. Source verification is
-     pending; the business lane remains `0/3` until green.
+     complete; its MySQL concurrency failures were resolved on 2026-08-03 by
+     moving expiry purge outside the mutation transaction and retrying only
+     fresh-transaction concurrency victims.
+   - `V2-SHP-01B/C` bounded local-demo fulfillment is implemented and
+     source/MySQL/UI verified on 2026-08-03. Order V8 owns
+     `ACCEPTED -> PROCESSING -> SHIPPED -> DELIVERED`, exactly one manual
+     shipment per business group, append-only group/shipment histories,
+     durable idempotency, optimistic locking, and transactional outbox rows.
+     `DELIVERED` is explicitly a local simulation. Browser verification is
+     pending.
    - Reference:
      `docs/v2/commerce/v2-shp-01a-accept-paid-business-fulfillment-group.md`.
+     `docs/v2/commerce/v2-shp-01b-c-bounded-manual-fulfillment.md`.
 12. V2-NOT-01 notifications.
    - `V2-NOT-01A` reconstructs Notification Service for default-off,
      Notification-owned MySQL persistence and a direct/fake
@@ -1236,14 +1372,28 @@ Approved slice order:
      center over the NOT-01B API. It remains local/source-only; NOT-01A/B
      disposable MySQL verification is still mandatory before the business lane
      can advance.
-   - Kafka, email, preferences, purge, polling, badge counts, and runtime
-     activation remain deferred.
+   - `V2-NOT-01D` maps the authoritative confirmation, acceptance,
+     processing, shipment, demo-delivery, and completed-cancellation outbox
+     events into durable buyer/business in-app notifications. It adds
+     retryable local HTTP delivery, server-authoritative badge counts, seller
+     and expanded buyer centers, and bounded commerce-runtime activation
+     without changing a commerce state machine.
+   - Kafka, WebSockets, email, SMS, push, preferences, purge, marketing, and
+     provider delivery remain deferred.
    - Reference:
      `docs/v2/commerce/v2-not-01a-order-confirmed-in-app-notification.md`.
    - Reference:
      `docs/v2/commerce/v2-not-01b-authenticated-notification-read-api.md`.
    - Reference:
      `docs/v2/commerce/v2-not-01c-notification-center-ui-gateway.md`.
+   - Reference:
+     `docs/v2/commerce/v2-not-01d-event-driven-commerce-notifications.md`.
+13. V2-RET-01 post-delivery business-group returns.
+   - Dedicated default-off return aggregate, deterministic 30-day local-demo
+     policy, demo shipment, explicit disposition, group-merchandise fake refund,
+     event-driven notifications, and isolated buyer/seller UI.
+   - Reference:
+     `docs/v2/commerce/v2-ret-01-post-delivery-business-group-returns.md`.
 
 ### V3
 
@@ -1269,7 +1419,7 @@ paths remain default-off.
 | Lane | Counter | Completed checkpoint | Next approved slice |
 |---|---:|---|---|
 | Business | `0/3` | `V2-ORD-CLEAN-P0-01` buyer/business order read-surface cleanup | Await PM dispatch before `V2-SHP-01A` |
-| AI | `0/3` | `AI-CS-CLEAN-P0-03` local LangChain/chat/demo/stabilization cleanup | Await separate dispatch for approved local-only `AI-DISC-01A` |
+| AI | `0/3` | `AI-DISC-UX-P1-03` streaming application activity and persisted guarded answers | Await PM dispatch; runtime/browser rollout remains separate |
 
 Payment/provider activation, real money movement, live Kafka transport,
 LangGraph behavior, live AI rollout, and autonomous AI actions remain outside
@@ -1300,8 +1450,10 @@ this sequence.
 9. `V2-NOT-01A`: buyer `ORDER_CONFIRMED` persistence and fake consumer.
 10. `V2-NOT-01B`: authenticated buyer read API.
 11. `V2-NOT-01C`: default-off notification center UI and gateway boundary.
-12. Later `V2-NOT-01` slices: transport, badge/count behavior, preferences,
-    email, then other approved buyer/business event classes.
+12. `V2-NOT-01D`: bounded transport, buyer/business event projections,
+    server-authoritative badge/count behavior, runtime and browser acceptance.
+13. Later `V2-NOT-01` slices: preferences, email, and other channels only
+    after separate product/provider approval.
 
 No real payment provider is activated until reconciliation, recovery,
 production legal/provider decisions, and explicit rollout approval are green.
@@ -1317,15 +1469,258 @@ production legal/provider decisions, and explicit rollout approval are green.
    evidence remain unknown or unapproved.
 4. Source changes are verified locally and deployed/browser-tested only in
    explicit batches owned by a separate task.
-5. The next approved local direction is `AI-DISC-01A`: official LangChain v1
-   `create_agent`, strict `ToolStrategy(DiscoveryTurnResult)`, typed allowlisted
-   Product tools, server-owned/MySQL-authoritative state, ephemeral per-request
-   ReAct, fixed model/tool/time budgets, deterministic final guardrails, and
-   three-to-five detail-revalidated recommendations. It has no implementation
-   or completion status yet and requires a separate assignment; the full
-   pinned `langchain` dependency belongs only to that future offline-fake
-   slice.
-6. Keep all automated report/listing operations disabled until shadow-mode
+5. `AI-DISC-UX-P1-03` is source/test complete: the existing default-off
+   Discovery flow has an additive strict SSE route for application-owned
+   milestones and persisted guarded answer deltas, a nonbuffered narrow proxy
+   path, and a strict Angular fetch/parser/search-trail UI. The synchronous JSON
+   route remains compatible, recommendation cards wait for authoritative
+   completion, and uncertain sends retain exact-ID history reconciliation with
+   no automatic fallback or resend.
+6. `AI-DISC-UX-P1-03A` stabilizes that stream with history-first readiness,
+   one deadline-bounded query-embedding timeout retry, a persisted safe terminal
+   assistant response, and an explicit response-only retry that reuses the
+   committed USER invocation. Product-and-budget searches no longer require a
+   location clarification, and demo Agent startup waits for healthy Kafka after
+   Kafka waits for healthy ZooKeeper. Forward migration V13 changes only the
+   failed-invocation assistant-link constraint. Runtime/browser acceptance is
+   recorded only after the separately authorized local deployment gate.
+7. `AI-DISC-UX-P1-03B` replaces the generic successful structure fallback with
+   evidence-bound recovery: proven zero candidates produce strict `NO_RESULTS`,
+   freshly revalidated Product facts produce deterministic guarded selections,
+   and ambiguous structure failures persist a stable retryable code. Forward
+   migrations V14-V15 reclassify only the former fixed generic fallback rows
+   and clear their obsolete output rows before explicit retry.
+8. `AI-DISC-UX-P1-03D` corrects P1-03C to genuine end-to-end streaming: private
+   planning/tools finish first, then one tool-free final-answer Responses stream
+   sends live `text_delta` events. Angular appends network deltas immediately
+   without timers or paint-frame replay; validated cards/metadata follow exact
+   persistence, and Stop generation preserves a retryable partial response.
+   Its completion/history stabilization aligns multiline guarded text across
+   live and stored DTO validation, accepts the intentional `PARTIAL`/`HANDOFF`
+   pair, applies per-frame ASGI backpressure so real early activity is delivered
+   before private orchestration advances, persists
+   post-delta finalization failures for response-only retry, and collapses only
+   successful reached stages into a concise activity summary.
+   The D3 transport stabilization removes ineffective opening padding and uses
+   exact parameter-free `text/event-stream`, selecting Gateway MVC's per-read
+   flushing path, with an actual HTTP/socket regression before blocked private
+   work. It adds an authoritative response-stop command keyed by the existing
+   client-message identity and defines pre- versus post-commit Stop persistence,
+   immediate accepted USER presentation, literal multiline answer rendering,
+   two-decimal USD display, and title-bound follow-up/compare context without a
+   new migration or activation flag.
+   The D4 live transport follow-up sets Gateway MVC's streaming-media read
+   buffer to 128 bytes after proving its 16 KiB default held an entire bounded
+   Discovery response until the 35-second timeout; Agent retains a three-second
+   finalization margin under that unchanged gateway ceiling.
+   The D5 deployed-chain follow-up routes only the two authenticated Discovery
+   SSE POSTs through a dedicated byte-preserving servlet stream with explicit
+   flushes and the same 35-second total deadline. Timeout after commitment
+   closes SSE without a JSON suffix; a real-nginx/embedded-Gateway/paused-
+   upstream regression proves the first strict activity frame is client-readable
+   before completion and the full V2 stream remains parser-valid.
+   The D5A completion fix keeps that dedicated route synchronous and bounded
+   after deployed evidence showed an async completion redispatch truncating the
+   SSE response; coverage also asserts zero async redispatches for the stream.
+   D5C removes a stale deployed padded opening comment and makes the strict
+   browser parser ignore only standards-valid comment blocks while preserving
+   exact validation for all application events.
+   D5D closes the explicit-Stop graph-cancellation race by atomically attaching
+   the existing guarded retryable PARTIAL assistant only to the allowlisted
+   graph-cancel failure, and immediately reconciles the pending USER bubble by
+   exact client-message identity. Reload and response retry reuse the one
+   committed USER row; `NOT_COMMITTED` still retains the unsaved draft.
+   `AI-DISC-CS-P1-04` refactors the same surface into a strict intent-routed
+   Marketplace customer-service assistant. Direct conversation/support and
+   focused clarification complete with zero Product/query-embedding work;
+   hybrid search is one allowlisted discovery tool, listing references bind
+   only current-detail verification, activity is emitted at real tool
+   boundaries, and legacy discovery outcomes remain readable without a
+   migration. Genuine SSE, Stop, response-only retry, exact history, auth, and
+   default-off behavior remain mandatory regressions.
+   `AI-DISC-CS-P1-05` adds inventory-aware discovery policy. An explicit vague
+   category request first uses a Product-owned broad active-inventory probe;
+   unavailable categories stop clarification, while available categories may
+   ask one useful question. Detailed requests retain full hybrid search, and a
+   zero filtered result is classified only after an authoritative broad count.
+   Additive state/reason DTOs preserve legacy history without a migration;
+   probe activity and recommendation cards remain strictly tool-truthful.
+   `AI-DISC-CS-P1-06` now uses a model-first controlled ReAct loop. Each of at
+   most five model decisions returns either natural assistant content or one
+   call to the live registry (`CHECK_AVAILABILITY`, `SEARCH_INDIVIDUAL`, or
+   `GET_LISTING`). Backend policy validates proposals and returns bounded
+   rejection observations instead of substituting another action. Regex intent
+   is a compatibility/evaluation label, not the action selector; cached
+   inventory is freshness-aware context rather than a terminal routing gate.
+   Natural content streams from that same provider response and is not rewritten
+   by a second provider call. Existing result/history envelopes remain backward
+   compatible while ordinary answers render as ordinary messages.
+   Committed turns now atomically persist guarded terminal assistant copy for
+   every generation failure. Legacy FAILED invocations missing an assistant are
+   recovered in history with a bounded response-only retry that reuses the one
+   USER row; no migration or automatic resend is introduced.
+   It keeps all P1-03 Stop/retry/history/SSE guarantees. No migration or new
+   Product semantic is required.
+   `AI-DISC-AGENT-V2-PLAN-01` adds a parallel, independently default-off
+   Marketplace Agent V2 at `/api/v1/agent/marketplace-v2/**`; it does not edit
+   or redirect the legacy discovery orchestrator. V2 accepts natural terminal
+   model content or one `search_listings`/`get_listing` proposal per decision,
+   enforces one global five-decision ceiling, validates every proposal in the
+   backend, and returns timestamped structured observations. Its generic
+   assistant message has optional validated listing attachments. V17 isolates
+   V2 sessions while reusing Agent invocation/message/tool infrastructure.
+   `AI-DISC-AGENT-V2-CUTOVER-READINESS-01` applies V17 locally, adds an
+   authenticated development-only V2 evaluation route, authoritative Stop and
+   response-only Retry, orphaned-USER history recovery, and explicit empty
+   search outcomes. It remains default-off and does not replace the legacy
+   production route; a real-provider/Product browser evaluation is the cutover
+   evidence gate. V18 forward-adds V2's Product-owned `check_availability`
+   audit name. Readiness policy restores bounded observations and blocks an
+   identical normalized call within one invocation; changed contextual queries
+   and filters remain model-selected and backend-validated.
+   `AI-DISC-AGENT-V2-INVENTORY-FACETS-02` lets a broad identifiable product
+   request use full search immediately and grounds any narrowing question in
+   Product-owned revalidated result facets. Product's opt-in V2 hybrid response
+   reports a bounded relevant total, explicit reason, and bounded normalized
+   facets without changing V1 callers. Agent presents small or homogeneous
+   result sets, asks at most one question for genuinely diverse inventory, and
+   rejects unsupported subtype options before SSE exposure. Existing action
+   JSON stores the bounded observation, so no migration or public message DTO
+   change is required.
+   `AI-DISC-AGENT-V2-RESULTS-FIRST-03` supersedes clarification-first
+   presentation for identifiable product requests. Product V3 now separates
+   bounded current candidates from relevant matches and supplies an
+   evidence-derived HIGH/MEDIUM/LOW confidence label. Agent retains the
+   revalidated top five by default (configurable up to eight), shows them
+   before one optional Product-facet refinement, including useful revalidated
+   low-confidence matches. The nullable refinement is persisted in existing action JSON;
+   no migration or legacy-route cutover is introduced.
+   `AI-DISC-AGENT-V2-RESULT-PRESENTATION-04` makes customer presentation
+   exact-first and non-duplicative. Product V3 adds bounded exact/related counts
+   and prioritizes full multi-term matches before partial alternatives. Agent
+   withholds card facts, IDs, confidence, and taxonomy facets from terminal
+   model context, redacts prohibited terms before SSE/persistence, and emits
+   customer-oriented match/price/condition/location refinements with at most
+   one post-card question. Existing action JSON and legacy refinement history
+   remain compatible; no migration or route cutover is introduced.
+   `AI-DISC-AGENT-V2-MULTICONCEPT-RERANK-05` moves multi-concept compatibility
+   and constrained reranking wholly into Product V4. Strict synonym-aware
+   lexical candidates and semantic recall feed authoritative MySQL
+   revalidation; missing-core/incompatible candidates are rejected, strong
+   matches precede bounded related alternatives, and numeric scores remain
+   private. Agent validates the structured exact/related result, performs the
+   existing listing-detail recheck, and explains it. Angular groups cards
+   without exposing internal ranking data. A ten-query offline fixture records
+   P@3/P@5/Recall@10/MRR/nDCG@5 and missing-core display rate. V1-V3, legacy
+   history, and the production route remain compatible; no migration or index
+   rebuild is required.
+   `AI-DISC-AGENT-V2-CONTEXTUAL-RESPONSE-01` makes the latest result-bearing
+   assistant message the ordered active recommendation set. Comparison and
+   ordinal follow-ups use that set before any new search; backend validation
+   rejects out-of-range ordinals, unsupported winners/counts, duplicate
+   follow-up prose, and result claims without evidence. The model exclusively
+   owns customer prose while Product-derived refinements become prose-free
+   suggested actions. A bounded `request_confirmation` control proposal may
+   create one persisted, atomically consumed pending interaction for a
+   materially changed refined search; ordinary listing display and comparison
+   never require confirmation. Existing session JSON stores this additive
+   state, so no migration or legacy-route cutover is introduced.
+   `AI-DISC-AGENT-V2-ACTION-EVIDENCE-02` closes the follow-up confirmation
+   boundary: only a persisted `WAITING` refined-search interaction may ask for
+   yes/no, rejected tools cannot be described as successful, and terminal or
+   streamed prose cannot claim unavailable gallery, purchase, or private seller
+   instruction actions. Listing-detail requests use the existing card/page or
+   an authorized `get_listing` recheck without another confirmation. Existing
+   retryable terminal-failure and history contracts remain unchanged.
+   `AI-DISC-AGENT-V2-LISTING-THUMBNAILS-03` renders Product's first ordered
+   approved public image in each V2 listing card through the existing Gateway
+   media route, with lazy loading and a stable missing-media fallback. The
+   strict browser contract accepts only the public listing-media path and keeps
+   existing attachment/history JSON compatible. No Product semantic, Agent
+   orchestration, migration, or legacy-route change is required.
+   `AI-DISC-AGENT-V2-TERMINAL-COVERAGE-04` guarantees that guarded V2 model
+   failures restore one persisted retryable assistant after the terminal SSE
+   error and that five-step exhaustion with validated search attachments ends
+   with a grounded same-turn summary instead of a paid/user continuation turn.
+   It is additive to V17/V18 persistence and introduces no migration.
+   `AI-DISC-AGENT-V2-GUARDED-RECOVERY-05` makes explicit privacy/internal-prompt
+   and medical-cure boundaries normal no-tool refusals, grounds unsupported
+   contextual comparisons from active validated recommendations without a new
+   search, and normalizes obvious keyboard-noise failures to one clarification.
+   Validation failures no longer masquerade as marketplace-service outages.
+   The slice adds no migration or V2 wire field.
+   `AI-DISC-AGENT-V2-ORDINAL-PRESENTATION-06` binds comparison ordinals to the
+   active card order, converts condition enums to customer labels, removes
+   internal relevance fields, and suppresses redundant permission to view
+   results already attached. It adds no migration or wire field.
+   `AI-DISC-AGENT-V2-RESULT-PRESENTATION-04A` makes result-bearing model prose
+   declarative, suppresses pre-card refinement questions, and leaves the single
+   Product-grounded structured action area after validated cards. It adds no
+   provider call, migration, attachment field, or SSE event.
+   `AI-DISC-AGENT-V2-RESULTS-FIRST-CONTINUITY-03A` preserves the latest
+   Product-owned subtype—or the revalidated public attachment category when
+   subtype facets are absent—as structured model context for terse replies such
+   as `General`. The model must propose the exact refined search before terminal
+   prose; backend policy rejects dropped or mismatched refinements and withholds
+   invalid provisional text from SSE. Product attachment categories remain
+   strict tool filters over the unchanged active product query, so a broad
+   taxonomy value is not misused as a free-text search term. Existing observation
+   JSON is reused, so no migration or public wire change is required.
+   `AI-DISC-AGENT-V2-RESULTS-FIRST-CONTINUITY-03B` closes the remaining
+   recommendation-selection and refinement-loop gaps. A successful Product
+   search is the only search in its turn and the following model decision is
+   terminal-only, so altered duplicate proposals cannot spend another Product
+   call. Grounded ordinal and cheaper-option follow-ups reuse the active ordered
+   recommendations and attach the selected validated card to that response;
+   unsupported provider wording falls back to bounded public listing facts.
+   Customer prose says `listing page` or contact the seller through the listing,
+   never a platform purchase page. No migration, Product semantic change, or
+   public SSE/DTO field is added.
+   `AI-DISC-AGENT-V2-MESSAGES-CUTOVER-07` switches the unified Marketplace
+   assistant pane on `/account/messages` to V2 only in explicitly opted-in
+   frontend builds. Human marketplace chat remains unchanged, legacy assistant
+   rendering remains the flag-off fallback, and no migration or API field is
+   added.
+   `AI-DISC-AGENT-V2-FLOATING-CUTOVER-08` applies that same reversible V2
+   ownership to the authenticated floating Marketplace assistant, with a
+   compact scrollable presentation. Buyer/seller chat remains on Chat Service;
+   the slice adds no migration, API field, or backend runtime change.
+   `AI-DISC-AGENT-V2-SCOPE-GATE-01` adds a context-aware broad marketplace
+   boundary before the V2 planner. Clear unrelated requests receive one
+   persisted boundary answer with zero marketplace tool work; conversational
+   turns remain natural but tool-blocked. Ambiguous and valid marketplace turns
+   continue through the existing model-first five-decision loop. Out-of-scope
+   pairs cannot contaminate later tool context or clear active recommendations
+   or pending state. No migration or public wire field is added.
+   `AI-DISC-AGENT-V2-SCOPE-GROUNDING-02` adds a strict private grounding
+   requirement to that gate and validates terminal factual prose before SSE and
+   persistence. Listing facts require Product or validated recommendation
+   evidence; policy and private-status questions require their matching real
+   runtime capability and otherwise abstain. Internal evidence actions are
+   persisted without changing public DTOs. General policy RAG and actor-private
+   tools remain deferred because the current approved index supports only
+   listing and category-guidance documents. No migration is added.
+   `AI-DISC-AGENT-V2-SELLER-CONTEXT-03` adds explicit `CREATE_LISTING`
+   workflow and single-use `ANSWER_FIELD` state in the existing V2 session JSON.
+   Pending seller replies resolve before scope classification, survive refresh
+   and response Retry, and cannot be reinterpreted as discovery. Product tools
+   are blocked during field collection unless the customer explicitly requests
+   comparable listings or market pricing. The Agent may prepare listing copy,
+   but no draft/publication integration is registered or claimed. The generic
+   message/SSE contract remains intact and no migration is required.
+   `AI-DISC-AGENT-V2-PENDING-FIELD-04` replaces ambiguous seller-field strings
+   with legacy-readable explicit `MISSING|PROVIDED|REJECTED|DEFERRED|NEEDS_HELP` state.
+   A bounded semantic resolver prevents unknown, help, defer, cancellation, or
+   unrelated replies from becoming literal listing data; unresolved fields and
+   exact response Retry survive reload. `AI-DISC-AGENT-V2-WORKFLOW-CONTINUITY-05`
+   extracts an explicitly named initiating seller item after model tool selection,
+   rejects only an unsupported item field, and retains the `CREATE_LISTING` goal
+   with a single-use replacement interaction. Contextual replacements resolve
+   before general ReAct planning and never invoke Product, embedding, or RAG.
+   Legacy terminal unsupported JSON recovers on its next locked reply. The
+   replacement marker remains private; no public wire addition or migration is
+   introduced.
+9. Keep all automated report/listing operations disabled until shadow-mode
    quality, appeal, restoration, and explicit approval gates pass.
 
 ### 8.5 Release-oriented acceptance
@@ -1340,3 +1735,51 @@ The next checkpoint is not measured only by test totals. It requires:
 - each state-changing command has an actor, precondition, idempotency key,
   immutable history/outbox effect, and explicit compensation boundary; and
 - shared frontend, browser, gateway, and runtime ownership remains serialized.
+
+### 8.6 V2 commerce release-candidate stabilization
+
+- `V2-COM-RC-01`: one non-feature stabilization gate for the completed bounded
+  V2 commerce lifecycle. It standardizes the local composition and compiled
+  frontend profile, clean MySQL 8.4 migrations, deterministic reusable
+  fixtures, real-service fulfillment/return and cancellation journeys,
+  restart/replay and concurrency gates, authorization/accounting invariants,
+  safe diagnostics, browser acceptance, CI, and the authoritative runtime
+  runbook. Real providers, carriers, payouts, and later-release features remain
+  deferred. See `docs/v2/commerce/v2-com-rc-01-commerce-release-candidate-gate.md`.
+
+## Admin milestone update (2026-08-15)
+
+`ADM-BUS-04` active business administration, `ADM-BUS-05` business marketplace
+enforcement, and the `ADM-LIST-06` reversible listing
+suspension/reinstatement implementation are complete. Listing enforcement
+remains distinct from `REMOVED_BY_ADMIN`, and its release-candidate browser and
+complete-reactor gates are green. The unrelated whitespace failure recorded in
+the ADM-LIST-06 verification report has been corrected without changing test
+behavior. The complete post-cleanup verification matrix passed.
+
+| Enforcement milestone | Status |
+| --- | --- |
+| USER enforcement (`ADM-USER-01/02`) | Complete |
+| BUSINESS enforcement (`ADM-BUS-04/05`) | Complete |
+| LISTING enforcement (`ADM-LIST-06`) | Complete |
+
+### ADM-LIST-06 implementation status
+
+Implementation complete: Product-owned reversible listing
+restriction/suspension and reinstatement contracts, immediate public-read
+enforcement, authenticated batch purchasability decisions, Order boundary
+checks, active Auth permissions, admin dry-run/confirmation workbench, and
+enforcement audit history. Product schema is reused without a new Product
+migration; Auth uses one forward permission-activation migration. Focused
+Product MySQL, Order boundary, Angular, existing admin Playwright, all five
+listing-enforcement cross-stack workflows, and the complete 13-module reactor
+are green. The verified workflows cover full suspension/reinstatement, auditor
+read-only denial, purchasability-only checkout, business new-sales composition,
+and administrative-removal precedence after revocation. The prior unrelated
+whitespace blocker in
+`api-gateway/src/test/java/com/msb/ecom/api_gateway/AgentDiscoveryRouteIntegrationTests.java`
+has been corrected without changing test behavior, and repository-wide
+`git diff --check` passes. The final matrix passed the 13-module Maven reactor
+and package gate, all 633 Angular tests, the production Angular build, all 13
+Chromium Playwright scenarios, and the final 2-scenario admin release-candidate
+rerun.

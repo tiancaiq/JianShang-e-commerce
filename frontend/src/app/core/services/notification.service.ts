@@ -1,9 +1,9 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Injectable } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { Observable, map, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ApiDataResponse } from '../models/auth.model';
-import { NotificationItem, NotificationPage } from '../models/notification.model';
+import { NotificationCount, NotificationItem, NotificationMessageKey, NotificationPage, NotificationType } from '../models/notification.model';
 import { unwrapData } from './api-response';
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -18,6 +18,8 @@ export class NotificationContractError extends Error {
 @Injectable({ providedIn: 'root' })
 export class NotificationService {
   private readonly baseUrl = `${environment.apiGatewayUrl}/api/v1/notifications`;
+  private readonly unread = signal(0);
+  readonly unreadCount = this.unread.asReadonly();
 
   constructor(private readonly http: HttpClient) {}
 
@@ -34,6 +36,28 @@ export class NotificationService {
       map(unwrapData),
       map(parseNotificationPage),
     );
+  }
+
+  count(): Observable<NotificationCount> {
+    return this.http.get<ApiDataResponse<unknown>>(`${this.baseUrl}/unread-count`, {
+      withCredentials: true,
+    }).pipe(map(unwrapData), map(parseCount), tap(value => this.unread.set(value.unreadCount)));
+  }
+
+  businessList(businessId: string, cursor: string | null = null, limit = 20): Observable<NotificationPage> {
+    let params = new HttpParams().set('limit', String(limit));
+    if (cursor) params = params.set('cursor', cursor);
+    return this.http.get<ApiDataResponse<unknown>>(
+      `${environment.apiGatewayUrl}/api/v1/businesses/${encodeURIComponent(businessId)}/notifications`,
+      { params, withCredentials: true },
+    ).pipe(map(unwrapData), map(parseNotificationPage));
+  }
+
+  businessCount(businessId: string): Observable<NotificationCount> {
+    return this.http.get<ApiDataResponse<unknown>>(
+      `${environment.apiGatewayUrl}/api/v1/businesses/${encodeURIComponent(businessId)}/notifications/unread-count`,
+      { withCredentials: true },
+    ).pipe(map(unwrapData), map(parseCount));
   }
 
   // Marks a single owned notification as read with an empty POST body and no automatic retry.
@@ -53,7 +77,27 @@ export class NotificationService {
       { withCredentials: true },
     );
   }
+
+  businessMarkRead(businessId: string, notificationId: string): Observable<void> {
+    return this.http.post<void>(
+      `${environment.apiGatewayUrl}/api/v1/businesses/${encodeURIComponent(businessId)}/notifications/${encodeURIComponent(notificationId)}/read`,
+      null, { withCredentials: true });
+  }
+
+  businessMarkAllRead(businessId: string): Observable<void> {
+    return this.http.post<void>(
+      `${environment.apiGatewayUrl}/api/v1/businesses/${encodeURIComponent(businessId)}/notifications/read-all`,
+      null, { withCredentials: true });
+  }
 }
+
+const NOTIFICATION_TYPES = new Set<NotificationType>([
+  'BUYER_ORDER_CONFIRMED', 'BUYER_ORDER_CANCELLED', 'BUYER_REFUND_COMPLETED',
+  'BUYER_ORDER_ACCEPTED', 'BUYER_ORDER_PROCESSING', 'BUYER_ORDER_SHIPPED',
+  'BUYER_ORDER_DELIVERED', 'SELLER_NEW_ORDER', 'SELLER_ORDER_CANCELLED', 'ORDER_CONFIRMED',
+  'BUYER_RETURN_AUTHORIZED', 'BUYER_RETURN_RECEIVED', 'BUYER_RETURN_REFUND_COMPLETED',
+  'SELLER_RETURN_REQUESTED',
+]);
 
 export function parseNotificationPage(value: unknown): NotificationPage {
   const record = strictRecord(value, ['items', 'page']);
@@ -78,19 +122,63 @@ function parseNotificationItem(value: unknown): NotificationItem {
     'readAt',
     'createdAt',
   ]);
-  const args = strictRecord(record['presentationArgs'], ['orderId']);
+  const args = flexibleArgs(record['presentationArgs']);
+  const type = notificationType(record['type']);
+  const key = `${type}_V1` as NotificationMessageKey;
+  if (record['messageKey'] !== key) throw new NotificationContractError();
+  const route = safeRoute(record['safeRoute']);
   return {
     id: ulid(record['id']),
-    type: exact(record['type'], 'ORDER_CONFIRMED'),
-    messageKey: exact(record['messageKey'], 'ORDER_CONFIRMED_V1'),
+    type,
+    messageKey: key,
     presentationArgs: {
       orderId: ulid(args['orderId']),
+      ...(args['businessOrderId'] === undefined ? {} : { businessOrderId: ulid(args['businessOrderId']) }),
+      ...(args['storeDisplayName'] === undefined ? {} : { storeDisplayName: boundedText(args['storeDisplayName']) }),
     },
-    safeRoute: exact(record['safeRoute'], '/account'),
+    safeRoute: route,
     read: boolean(record['read']),
     readAt: nullable(record['readAt'], dateTime),
     createdAt: dateTime(record['createdAt']),
   };
+}
+
+function flexibleArgs(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new NotificationContractError();
+  const record = value as Record<string, unknown>;
+  const allowed = ['orderId', 'businessOrderId', 'storeDisplayName'];
+  if (!('orderId' in record) || Object.keys(record).some(key => !allowed.includes(key))) {
+    throw new NotificationContractError();
+  }
+  return record;
+}
+
+function notificationType(value: unknown): NotificationType {
+  if (typeof value !== 'string' || !NOTIFICATION_TYPES.has(value as NotificationType)) {
+    throw new NotificationContractError();
+  }
+  return value as NotificationType;
+}
+
+function safeRoute(value: unknown): string {
+  if (value === '/account') return value;
+  if (typeof value === 'string' && (/^\/account\/orders\/[0-9A-HJKMNP-TV-Z]{26}$/.test(value)
+      || /^\/seller\/orders\/[0-9A-HJKMNP-TV-Z]{26}$/.test(value))) return value;
+  throw new NotificationContractError();
+}
+
+function boundedText(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length < 1 || value.length > 120) {
+    throw new NotificationContractError();
+  }
+  return value;
+}
+
+function parseCount(value: unknown): NotificationCount {
+  const record = strictRecord(value, ['unreadCount']);
+  const count = record['unreadCount'];
+  if (!Number.isInteger(count) || (count as number) < 0) throw new NotificationContractError();
+  return { unreadCount: count as number };
 }
 
 function strictRecord(value: unknown, required: readonly string[]): Record<string, unknown> {

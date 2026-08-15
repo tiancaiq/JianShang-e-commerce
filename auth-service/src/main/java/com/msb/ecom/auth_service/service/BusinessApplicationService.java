@@ -1,12 +1,16 @@
 package com.msb.ecom.auth_service.service;
 
 import com.msb.ecom.auth_service.dto.BusinessApplicationDraftRequest;
+import com.msb.ecom.auth_service.dto.AdminTimelineEntryResponse;
 import com.msb.ecom.auth_service.dto.BusinessApplicationDecisionRequest;
 import com.msb.ecom.auth_service.dto.BusinessApplicationResponse;
 import com.msb.ecom.auth_service.dto.BusinessVerificationWebhookRequest;
 import com.msb.ecom.auth_service.model.BusinessApplication;
 import com.msb.ecom.auth_service.model.User;
 import com.msb.ecom.auth_service.repository.BusinessApplicationRepository;
+import com.msb.ecom.auth_service.repository.BusinessApplicationTimelineRepository;
+import com.msb.ecom.auth_service.security.AdminPermission;
+import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.core.validation.TextInputs;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +19,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.MDC;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -39,13 +44,14 @@ public class BusinessApplicationService {
     private static final String UNDER_REVIEW = "UNDER_REVIEW";
     private static final String VERIFICATION_FAILED = "VERIFICATION_FAILED";
     private static final String REJECTED = "REJECTED";
-    private static final String PLATFORM_ADMIN_ROLE = "PLATFORM_ADMIN";
     private static final String APPROVE = "APPROVE";
     private static final String REJECT = "REJECT";
     private static final String REQUEST_INFORMATION = "REQUEST_INFORMATION";
 
     private final AuthService authService;
+    private final AdminAuthorizationService adminAuthorizationService;
     private final BusinessApplicationRepository businessApplicationRepository;
+    private final BusinessApplicationTimelineRepository businessApplicationTimelineRepository;
     private final UlidGenerator ulidGenerator;
     private final JdbcTemplate jdbcTemplate;
 
@@ -139,8 +145,23 @@ public class BusinessApplicationService {
         requireCurrentVersion(application, expectedVersion);
 
         requireCompleteForSubmit(application);
-        application.submit(Instant.now());
+        String previousState = application.getStatus();
+        Instant now = Instant.now();
+        application.submit(now);
         BusinessApplication submitted = businessApplicationRepository.saveAndFlush(application);
+
+        insertTimelineEvent(
+                null,
+                submitted.getId(),
+                "APPLICANT",
+                "BUSINESS_APPLICATION_SUBMITTED",
+                submitted.getStatus(),
+                previousState,
+                submitted.getStatus(),
+                null,
+                null,
+                user.getId(),
+                now);
 
         log.info("Submitted business application id={} applicantUserId={}", submitted.getId(), user.getId());
         return BusinessApplicationResponse.from(submitted);
@@ -157,22 +178,28 @@ public class BusinessApplicationService {
         BusinessApplication application = businessApplicationRepository.findById(request.applicationId())
                 .orElseThrow(BusinessApplicationNotFoundException::new);
 
+        String previousState = application.getStatus();
+        String newState = PENDING_VERIFICATION.equals(previousState) ? outcome : previousState;
+        Instant now = Instant.now();
         try {
-            insertVerificationEvent(
+            insertTimelineEvent(
                     request.eventId(),
                     application.getId(),
                     "PROVIDER",
                     "BUSINESS_VERIFICATION_CALLBACK",
                     outcome,
+                    previousState,
+                    newState,
                     optionalText("Reason", request.reason(), 1000),
                     sha256Hex(rawBody),
-                    null);
+                    null,
+                    now);
         } catch (DuplicateKeyException exception) {
             log.info("Ignored duplicate business verification callback eventId={}", request.eventId());
             return BusinessApplicationResponse.from(application);
         }
 
-        if (PENDING_VERIFICATION.equals(application.getStatus())) {
+        if (PENDING_VERIFICATION.equals(previousState)) {
             application.applyProviderOutcome(outcome);
         }
 
@@ -187,13 +214,15 @@ public class BusinessApplicationService {
             Long expectedVersion,
             BusinessApplicationDecisionRequest request) {
         User reviewer = authService.ensureUserEntity();
-        String reviewerUserId = requirePlatformAdminUserId(reviewer);
+        String reviewerUserId = adminAuthorizationService.requirePermission(
+                reviewer, AdminPermission.BUSINESS_APPLICATION_DECIDE);
 
         BusinessApplication application = businessApplicationRepository.findById(id)
                 .orElseThrow(BusinessApplicationNotFoundException::new);
         requireCurrentVersion(application, expectedVersion);
         requireReviewableForAdminDecision(application);
 
+        String previousState = application.getStatus();
         String decision = normalizedDecision(request.decision());
         String reason = requiredText("Reason", request.reason(), 1000);
         Instant now = Instant.now();
@@ -210,15 +239,18 @@ public class BusinessApplicationService {
             application.requestInformation(reviewerUserId, reason, now);
         }
 
-        insertVerificationEvent(
+        insertTimelineEvent(
                 null,
                 application.getId(),
                 "ADMIN",
                 "BUSINESS_APPLICATION_DECISION",
                 decision,
+                previousState,
+                application.getStatus(),
                 reason,
                 null,
-                reviewerUserId);
+                reviewerUserId,
+                now);
 
         BusinessApplication saved = businessApplicationRepository.saveAndFlush(application);
         log.info("Admin business application decision id={} reviewerUserId={} decision={}",
@@ -229,7 +261,8 @@ public class BusinessApplicationService {
     @Transactional(readOnly = true)
     // Lists only business applications that are active admin work for ADM-BUS-01.
     public List<BusinessApplicationResponse> listAdminReviewQueue(String status) {
-        requirePlatformAdminUserId(authService.ensureUserEntity());
+        adminAuthorizationService.requirePermission(
+                authService.ensureUserEntity(), AdminPermission.BUSINESS_APPLICATION_READ);
 
         List<String> statuses = status == null || status.isBlank()
                 ? List.of(PENDING_VERIFICATION, UNDER_REVIEW)
@@ -242,10 +275,47 @@ public class BusinessApplicationService {
     @Transactional(readOnly = true)
     // Provides the admin review detail record without requiring applicant ownership.
     public BusinessApplicationResponse getAdminApplication(String id) {
-        requirePlatformAdminUserId(authService.ensureUserEntity());
+        adminAuthorizationService.requirePermission(
+                authService.ensureUserEntity(), AdminPermission.BUSINESS_APPLICATION_READ);
         return businessApplicationRepository.findById(id)
                 .map(BusinessApplicationResponse::from)
                 .orElseThrow(BusinessApplicationNotFoundException::new);
+    }
+
+    @Transactional(readOnly = true)
+    // Returns the service-owned business review history in the normalized ADM-AUD-01 contract.
+    public List<AdminTimelineEntryResponse> getAdminTimeline(String id) {
+        User admin = authService.ensureUserEntity();
+        adminAuthorizationService.requirePermission(admin, AdminPermission.BUSINESS_APPLICATION_READ);
+        adminAuthorizationService.requirePermission(admin, AdminPermission.AUDIT_READ);
+        BusinessApplication application = businessApplicationRepository.findById(id)
+                .orElseThrow(BusinessApplicationNotFoundException::new);
+        List<AdminTimelineEntryResponse> timeline = businessApplicationTimelineRepository.findByApplicationId(id);
+        boolean submissionPresent = timeline.stream()
+                .anyMatch(entry -> "BUSINESS_APPLICATION_SUBMITTED".equals(entry.eventType()));
+        if (submissionPresent || application.getSubmittedAt() == null) {
+            return timeline;
+        }
+        AdminTimelineEntryResponse legacySubmission = new AdminTimelineEntryResponse(
+                null,
+                application.getSubmittedAt(),
+                "BUSINESS_APPLICATION_SUBMITTED",
+                "MARKETPLACE_USER",
+                application.getApplicantUserId(),
+                application.getApplicantUserId(),
+                "SYSTEM",
+                "BUSINESS_APPLICATION",
+                application.getId(),
+                null,
+                "DRAFT",
+                "PENDING_VERIFICATION",
+                null,
+                null,
+                java.util.Map.of("legacyDerived", "true"));
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(legacySubmission), timeline.stream())
+                .sorted(java.util.Comparator.comparing(AdminTimelineEntryResponse::occurredAt)
+                        .thenComparing(entry -> entry.eventId() == null ? "" : entry.eventId()))
+                .toList();
     }
 
     private void requireCompleteForSubmit(BusinessApplication application) {
@@ -299,22 +369,6 @@ public class BusinessApplicationService {
             throw new IllegalArgumentException("Status must be PENDING_VERIFICATION or UNDER_REVIEW");
         }
         return normalized;
-    }
-
-    private void requirePlatformAdmin(String userId) {
-        Integer count = jdbcTemplate.queryForObject("""
-                select count(*) from user_roles
-                where user_id = ? and role_id = ?
-                """, Integer.class, userId, PLATFORM_ADMIN_ROLE);
-        if (count == null || count == 0) {
-            log.warn("Denied business application admin action userId={} reason=missing_platform_admin_role", userId);
-            throw new BusinessApplicationForbiddenException();
-        }
-    }
-
-    private String requirePlatformAdminUserId(User user) {
-        requirePlatformAdmin(user.getId());
-        return user.getId();
     }
 
     private void requireCurrentVersion(BusinessApplication application, Long expectedVersion) {
@@ -386,32 +440,32 @@ public class BusinessApplicationService {
                 Timestamp.from(now));
     }
 
-    private void insertVerificationEvent(
+    private void insertTimelineEvent(
             String providerEventId,
             String applicationId,
             String source,
             String eventType,
             String outcome,
+            String previousState,
+            String newState,
             String reason,
             String payloadHash,
-            String actorUserId) {
-        jdbcTemplate.update("""
-                insert into business_verification_events (
-                    id, provider_event_id, application_id, source, event_type, outcome,
-                    reason, payload_hash, actor_user_id, created_at
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+            String actorUserId,
+            Instant occurredAt) {
+        businessApplicationTimelineRepository.insert(
                 ulidGenerator.next(),
                 providerEventId,
                 applicationId,
                 source,
                 eventType,
                 outcome,
+                previousState,
+                newState,
                 reason,
                 payloadHash,
                 actorUserId,
-                Timestamp.from(Instant.now()));
+                MDC.get(CorrelationIdFilter.MDC_KEY),
+                occurredAt);
     }
 
     private String hmacSha256Hex(String rawBody) {

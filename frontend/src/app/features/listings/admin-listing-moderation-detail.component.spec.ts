@@ -5,6 +5,7 @@ import { of, throwError } from 'rxjs';
 import { AdminListingModerationCaseDetail } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AdminService } from '../../core/services/admin.service';
 import { AdminListingModerationDetailComponent } from './admin-listing-moderation-detail.component';
 
 describe('AdminListingModerationDetailComponent', () => {
@@ -12,6 +13,7 @@ describe('AdminListingModerationDetailComponent', () => {
   let component: AdminListingModerationDetailComponent;
   let listingService: jasmine.SpyObj<ListingService>;
   let toastService: jasmine.SpyObj<ToastService>;
+  let adminService: jasmine.SpyObj<AdminService>;
 
   const detail: AdminListingModerationCaseDetail = {
     moderationCase: {
@@ -90,13 +92,71 @@ describe('AdminListingModerationDetailComponent', () => {
   beforeEach(async () => {
     listingService = jasmine.createSpyObj<ListingService>('ListingService', [
       'getListingModerationCaseDetail',
+      'getListingModerationTimeline',
       'resolveListingModerationCase',
       'updateActiveListingByAdmin',
       'removeActiveListingByAdmin',
       'mediaUrl',
+      'getAdminListingEnforcement',
+      'getAdminListingEnforcementTimeline',
     ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
+    adminService = jasmine.createSpyObj<AdminService>('AdminService', ['getCurrentAdmin', 'hasPermission']);
+    adminService.hasPermission.and.returnValue(true);
+    adminService.getCurrentAdmin.and.returnValue(of({
+      data: {
+        userId: '01A00000000000000000000001',
+        role: 'PLATFORM_ADMIN',
+        roles: ['SUPER_ADMIN'],
+        permissions: [
+          'admin.listing.moderation.read',
+          'admin.listing.moderation.claim',
+          'admin.listing.moderation.resolve',
+          'admin.listing.edit',
+          'admin.listing.remove',
+        ],
+        accountState: 'ACTIVE',
+      },
+    }));
     listingService.getListingModerationCaseDetail.and.returnValue(of(detail));
+    listingService.getAdminListingEnforcement.and.returnValue(of({
+      listingId: detail.listing.id,
+      listingStatus: detail.listing.status,
+      moderationStatus: detail.listing.moderationStatus,
+      listingVersion: detail.listing.version,
+      publicVisibilityAllowed: true,
+      purchasabilityAllowed: true,
+      strongestActiveAction: null,
+      effectiveRestrictions: [],
+      activeEnforcementActions: [],
+      historicalEnforcementActions: [],
+      availableAdminCapabilities: {
+        canRead: true,
+        canSuspend: false,
+        canReinstate: false,
+        removedByAdmin: false,
+        readOnlyReason: 'Only active listings can receive temporary enforcement.',
+        operationalScopes: ['LISTING_PUBLIC_VISIBILITY', 'LISTING_PURCHASABILITY'],
+      },
+    }));
+    listingService.getAdminListingEnforcementTimeline.and.returnValue(of({ entries: [] }));
+    listingService.getListingModerationTimeline.and.returnValue(of([{
+      eventId: '01EV0000000000000000000001',
+      occurredAt: '2026-06-17T12:10:00Z',
+      eventType: 'CASE_CLAIMED',
+      actorType: 'PLATFORM_ADMIN',
+      actorId: '01A00000000000000000000001',
+      actorDisplay: 'Morgan Admin',
+      source: 'HUMAN_ADMIN',
+      targetType: 'LISTING',
+      targetId: detail.listing.id,
+      moderationCaseId: detail.moderationCase.id,
+      previousState: 'OPEN',
+      newState: 'CLAIMED',
+      reason: null,
+      correlationId: 'listing-claim-correlation',
+      metadata: {},
+    }]));
     listingService.resolveListingModerationCase.and.returnValue(of({
       ...detail,
       moderationCase: {
@@ -146,6 +206,7 @@ describe('AdminListingModerationDetailComponent', () => {
         },
         { provide: ListingService, useValue: listingService },
         { provide: ToastService, useValue: toastService },
+        { provide: AdminService, useValue: adminService },
       ],
     }).compileComponents();
 
@@ -165,6 +226,32 @@ describe('AdminListingModerationDetailComponent', () => {
     expect(text).toContain('Blue bike');
     expect(component.decision).toBe('');
     expect(text).toContain('Select decision');
+    expect(text).toContain('Case claimed');
+    expect(text).toContain('listing-claim-correlation');
+  });
+
+  it('shows a case assigned to another admin as read-only before an action', () => {
+    adminService.getCurrentAdmin.and.returnValue(of({
+      data: {
+        userId: '01A00000000000000000000002',
+        role: 'PLATFORM_ADMIN',
+        roles: ['SUPER_ADMIN'],
+        permissions: [
+          'admin.listing.moderation.read',
+          'admin.listing.moderation.claim',
+          'admin.listing.moderation.resolve',
+          'admin.listing.edit',
+          'admin.listing.remove',
+        ],
+        accountState: 'ACTIVE',
+      },
+    }));
+
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('assigned to another admin');
+    expect(text).not.toContain('Resolve case');
   });
 
   it('requires admins to select a decision before resolving', () => {
@@ -202,6 +289,8 @@ describe('AdminListingModerationDetailComponent', () => {
     expect(component.decisionErrorMsg()).toBe('Decision reason is required.');
     const reason = fixture.nativeElement.querySelector('[data-testid="listing-decision-reason"]') as HTMLTextAreaElement;
     expect(reason.getAttribute('aria-invalid')).toBe('true');
+    expect(reason.getAttribute('aria-describedby')).toBe('listing-decision-error');
+    expect(fixture.nativeElement.querySelector('#listing-decision-error')?.getAttribute('role')).toBe('alert');
   });
 
   it('resolves a claimed case with the loaded case version', () => {
@@ -299,9 +388,44 @@ describe('AdminListingModerationDetailComponent', () => {
 
     component.activeEditReason = ' ';
     component.saveActiveListing();
+    fixture.detectChanges();
 
     expect(listingService.updateActiveListingByAdmin).not.toHaveBeenCalled();
-    expect(component.activeActionErrorMsg()).toBe('Edit reason is required.');
+    expect(component.activeEditErrorMsg()).toBe('Edit reason is required.');
+    expect(component.activeRemoveErrorMsg()).toBe('');
+    const editReason = fixture.nativeElement.querySelector('[data-testid="active-edit-reason"]') as HTMLTextAreaElement;
+    const removeReason = fixture.nativeElement.querySelector('[data-testid="active-remove-reason"]') as HTMLTextAreaElement;
+    expect(editReason.getAttribute('aria-invalid')).toBe('true');
+    expect(editReason.getAttribute('aria-describedby')).toBe('active-listing-edit-error');
+    expect(removeReason.getAttribute('aria-invalid')).toBe('false');
+    expect(removeReason.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('associates an empty remove reason error only with the remove action', () => {
+    listingService.getListingModerationCaseDetail.and.returnValue(of({
+      ...detail,
+      listing: {
+        ...detail.listing,
+        status: 'ACTIVE',
+        moderationStatus: 'APPROVED',
+      },
+    }));
+    fixture.detectChanges();
+
+    component.activeEditErrorMsg.set('Old edit error');
+    component.activeRemoveReason = ' ';
+    component.removeActiveListing();
+    fixture.detectChanges();
+
+    expect(listingService.removeActiveListingByAdmin).not.toHaveBeenCalled();
+    expect(component.activeEditErrorMsg()).toBe('');
+    expect(component.activeRemoveErrorMsg()).toBe('Remove reason is required.');
+    const editReason = fixture.nativeElement.querySelector('[data-testid="active-edit-reason"]') as HTMLTextAreaElement;
+    const removeReason = fixture.nativeElement.querySelector('[data-testid="active-remove-reason"]') as HTMLTextAreaElement;
+    expect(editReason.getAttribute('aria-invalid')).toBe('false');
+    expect(editReason.getAttribute('aria-describedby')).toBeNull();
+    expect(removeReason.getAttribute('aria-invalid')).toBe('true');
+    expect(removeReason.getAttribute('aria-describedby')).toBe('active-listing-remove-error');
   });
 
   it('removes active listings from the marketplace with the loaded listing version', () => {

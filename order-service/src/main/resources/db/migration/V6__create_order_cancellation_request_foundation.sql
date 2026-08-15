@@ -20,7 +20,7 @@ INSERT INTO platform_policy_versions (
     'Local demo checkout does not include a carrier or delivery-date promise.',
     'A paid order may request cancellation before fulfillment begins.',
     'Automated returns are unavailable in this local demo and require a later approved workflow.',
-    '2099-01-01 00:00:00.000000',
+    '2037-01-01 00:00:00.000000',
     NULL,
     '2026-07-20 00:00:00.000000',
     'BEFORE_FULFILLMENT'

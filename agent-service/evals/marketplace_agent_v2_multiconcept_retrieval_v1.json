@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "AI_DISC_AGENT_V2_MULTICONCEPT_FIXTURE_V1",
+  "fixtureVersion": "marketplace-agent-v2-multiconcept-2026-07-30",
+  "cases": [
+    {"caseId":"key-bag","query":"key bag","rankedCandidates":[
+      {"candidateId":"key-pouch","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-case","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-organizer","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"canvas-tote","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"crossbody-bag","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"key-organizer","query":"key organizer","rankedCandidates":[
+      {"candidateId":"wall-key-organizer","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-holder","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-case-alt","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"desk-organizer","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"drawer-organizer","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"key-pouch","query":"key pouch","rankedCandidates":[
+      {"candidateId":"zip-key-pouch","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"leather-key-case","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-wallet","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"coin-pouch","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"makeup-pouch","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"office-chair","query":"office chair","rankedCandidates":[
+      {"candidateId":"ergonomic-office-chair","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"task-office-chair","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"office-seating","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"dining-chair","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"chair-wheels","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"chair","query":"chair","rankedCandidates":[
+      {"candidateId":"dining-chair","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"folding-chair","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"task-seating","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"chair-cover","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"chair-casters","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"laptop-bag","query":"laptop bag","rankedCandidates":[
+      {"candidateId":"laptop-messenger-bag","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"notebook-sleeve","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"laptop-case","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"canvas-tote-laptop","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"camera-bag","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"laptop","query":"laptop","rankedCandidates":[
+      {"candidateId":"business-laptop","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"student-notebook","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"chromebook","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"laptop-stand","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"laptop-charger","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"phone-case","query":"phone case","rankedCandidates":[
+      {"candidateId":"iphone-case","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"pixel-cover","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"galaxy-case","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"tablet-case","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"phone-holder","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"key-case","query":"key case","rankedCandidates":[
+      {"candidateId":"hard-key-case","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"leather-key-wallet","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-pouch-alt","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"phone-case-alt","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"pencil-case","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]},
+    {"caseId":"desk-organizer","query":"desk organizer","rankedCandidates":[
+      {"candidateId":"desktop-organizer","label":"HIGHLY_RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"desk-drawer-organizer","label":"RELEVANT","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"office-desk-caddy","label":"RELATED","missingCoreConcept":false,"displayed":true},
+      {"candidateId":"key-organizer-alt","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false},
+      {"candidateId":"closet-organizer","label":"IRRELEVANT","missingCoreConcept":true,"displayed":false}]}
+  ]
+}

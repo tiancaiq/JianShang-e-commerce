@@ -1,0 +1,233 @@
+services:
+  mysql:
+    image: mysql:8.4
+
+  cart-redis:
+    image: redis:7.4-alpine
+    container_name: msb-cart-runtime-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - cart_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  inventory-service:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: msb-cart-runtime-inventory
+    command: ["java", "-jar", "/app/app.jar"]
+    ports:
+      - "127.0.0.1:8082:8082"
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      INVENTORY_DB_HOST: mysql
+      INVENTORY_DB_PORT: 3306
+      INVENTORY_DB_NAME: inventory_service
+      INVENTORY_DB_USERNAME: root
+      INVENTORY_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs
+      AUTH_SERVICE_URL: http://auth-service:8085
+      PRODUCT_SERVICE_URL: http://product-service:8091
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
+      INVENTORY_RESERVATION_EXPIRY_ENABLED: "true"
+      INVENTORY_CANCELLATION_RESTOCK_ENABLED: "true"
+      INVENTORY_RETURN_RESTOCK_ENABLED: "true"
+    volumes:
+      - ./inventory-service/target/inventory-service-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    depends_on:
+      mysql:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8082/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+
+  order-service:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: msb-cart-runtime-order
+    command: ["java", "-jar", "/app/app.jar"]
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      ORDER_DB_HOST: mysql
+      ORDER_DB_PORT: 3306
+      ORDER_DB_NAME: order_service_checkout_runtime
+      ORDER_DB_USERNAME: root
+      ORDER_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}
+      REDIS_HOST: cart-redis
+      REDIS_PORT: 6379
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs
+      PRODUCT_SERVICE_URL: http://product-service:8091
+      INVENTORY_SERVICE_URL: http://inventory-service:8082
+      AUTH_SERVICE_URL: http://auth-service:8085
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      PAYMENT_INTERNAL_SERVICE_TOKEN: ${PAYMENT_INTERNAL_SERVICE_TOKEN:-local-payment-service-token}
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
+      CHECKOUT_ENABLED: "true"
+      CHECKOUT_CALCULATION_MODE: LOCAL_DEMO
+      CHECKOUT_TAX_ADAPTER: ZERO_LOCAL_DEMO_V1
+      CHECKOUT_SHIPPING_ADAPTER: FREE_LOCAL_DEMO_V1
+      CHECKOUT_POLICY_VERSION: LOCAL_DEMO_CANCELLATION_V1
+      CHECKOUT_SESSION_LIFETIME: PT15M
+      CHECKOUT_PAYMENT_INTEGRATION_ENABLED: "true"
+      ORDER_CONFIRMATION_ENABLED: "true"
+      ORDER_BUYER_VIEWS_ENABLED: "true"
+      ORDER_BUSINESS_VIEWS_ENABLED: "true"
+      BUSINESS_ORDERS_ACCEPTANCE_ENABLED: "true"
+      BUSINESS_ORDERS_PROCESSING_ENABLED: "true"
+      BUSINESS_ORDERS_MANUAL_SHIPMENT_ENABLED: "true"
+      BUSINESS_ORDERS_DEMO_DELIVERY_ENABLED: "true"
+      ORDER_CANCELLATION_REQUESTS_ENABLED: "true"
+      ORDER_CANCELLATION_PROCESSING_ENABLED: "true"
+      ORDER_NOTIFICATION_OUTBOX_ENABLED: "true"
+      ORDER_NOTIFICATION_OUTBOX_WORKER_ENABLED: "true"
+      BUSINESS_ORDERS_RETURNS_ENABLED: "true"
+      BUSINESS_ORDERS_RETURN_PROCESSING_ENABLED: "true"
+      BUSINESS_ORDERS_RETURN_WINDOW: P30D
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
+    volumes:
+      - ./order-service/target/order-service-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    depends_on:
+      mysql:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      product-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      cart-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+
+  notification-service:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: msb-cart-runtime-notification
+    command: ["java", "-jar", "/app/app.jar"]
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      NOTIFICATION_DB_HOST: mysql
+      NOTIFICATION_DB_PORT: 3306
+      NOTIFICATION_DB_NAME: notification_service_checkout_runtime
+      NOTIFICATION_DB_USERNAME: root
+      NOTIFICATION_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}
+      NOTIFICATION_FLYWAY_ENABLED: "true"
+      NOTIFICATION_ORDER_CONFIRMED_ENABLED: "false"
+      NOTIFICATION_COMMERCE_EVENTS_ENABLED: "true"
+      NOTIFICATION_READ_API_ENABLED: "true"
+      SERVICE_AUTH_URL: http://auth-service:8085
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
+    volumes:
+      - ./notification-service/target/notification-service-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    depends_on:
+      mysql:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8083/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+
+  payment-service:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: msb-cart-runtime-payment
+    command: ["java", "-jar", "/app/app.jar"]
+    ports:
+      - "127.0.0.1:8084:8084"
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      PAYMENT_DB_HOST: mysql
+      PAYMENT_DB_PORT: 3306
+      PAYMENT_DB_NAME: payment_service_checkout_runtime
+      PAYMENT_DB_USERNAME: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-change-me-mysql}
+      PAYMENT_INTENTS_ENABLED: "true"
+      PAYMENT_INTERNAL_SERVICE_TOKEN: ${PAYMENT_INTERNAL_SERVICE_TOKEN:-local-payment-service-token}
+      PAYMENT_WEBHOOKS_ENABLED: "true"
+      PAYMENT_FAKE_WEBHOOK_SECRET: ${PAYMENT_FAKE_WEBHOOK_SECRET:-local-demo-webhook-secret}
+      PAYMENT_DEMO_COMPLETION_ENABLED: "true"
+      PAYMENT_REFUNDS_ENABLED: "true"
+      PAYMENT_OUTBOX_TRANSPORT: HTTP_LOCAL_DEMO
+      PAYMENT_OUTBOX_DISPATCH_ENABLED: "true"
+      PAYMENT_OUTBOX_WORKER_ENABLED: "true"
+      ORDER_SERVICE_URL: http://order-service:8081
+      COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
+    volumes:
+      - ./payment-service/target/payment-service-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    depends_on:
+      mysql:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8084/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+
+  api-gateway:
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      ORDER_SERVICE_URL: http://order-service:8081
+      INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      GATEWAY_FEATURE_CART: "true"
+      GATEWAY_FEATURE_CHECKOUT: "true"
+      GATEWAY_FEATURE_INVENTORY: "false"
+      GATEWAY_FEATURE_BUYER_ADDRESSES: "true"
+      GATEWAY_FEATURE_PAYMENT: "false"
+      GATEWAY_FEATURE_BUSINESS_ORDERS: "true"
+      GATEWAY_FEATURE_BUSINESS_ORDER_FULFILLMENT: "true"
+      GATEWAY_FEATURE_ORDER_CANCELLATION: "true"
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
+      GATEWAY_FEATURE_NOTIFICATIONS: "true"
+      GATEWAY_FEATURE_RETURNS: "true"
+    depends_on:
+      order-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+
+  auth-service:
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+      CART_DEMO_SECOND_BUSINESS_FIXTURE_ENABLED: "true"
+
+  product-service:
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+
+  frontend:
+    environment:
+      COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
+    build:
+      args:
+        FRONTEND_BUILD_CONFIGURATION: demo-checkout
+
+volumes:
+  cart_redis_data:

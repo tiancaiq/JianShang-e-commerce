@@ -82,6 +82,14 @@ must remain exact, zero-provider, zero-token, zero-cost, and release
 
 ## Goal
 
+When conversational Discovery is enabled, the primary Marketplace agent no
+longer exposes this historical listing-picker flow as a separate user mode.
+Discovery owns the continuous need-to-results conversation and can detail-
+revalidate one selected recommendation in place. The listing-bound customer-
+service implementation remains a disabled compatibility foundation until a
+later approved contract reuses its broader knowledge-answering capability
+behind the unified Discovery session without creating a second conversation.
+
 Define the first listing-bound AI customer-service experience by activating
 the existing `Marketplace agent` entry in the marketplace chat UI.
 

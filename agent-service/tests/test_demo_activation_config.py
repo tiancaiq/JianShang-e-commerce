@@ -43,6 +43,11 @@ class DemoActivationConfigTests(unittest.TestCase):
             "AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED",
             "AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED",
             "AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED",
+            "AGENT_DISCOVERY_API_ENABLED",
+            "AGENT_DISCOVERY_KILL_SWITCH_ENABLED",
+            "AGENT_DISCOVERY_ORCHESTRATION_ENABLED",
+            "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED",
+            "AGENT_DISCOVERY_PROVIDER_ENABLED",
         ):
             self.assertIn(f"{variable}: ${{{variable}:-false}}", agent)
 
@@ -52,6 +57,18 @@ class DemoActivationConfigTests(unittest.TestCase):
                 "GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}",
                 gateway,
             )
+            self.assertIn(
+                "GATEWAY_FEATURE_AGENT_DISCOVERY: "
+                "${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}",
+                gateway,
+            )
+
+        product = _service_block(self.demo, "product-service")
+        self.assertIn(
+            "LISTING_SEARCH_HYBRID_ENABLED: "
+            "${LISTING_SEARCH_HYBRID_ENABLED:-false}",
+            product,
+        )
 
     def test_ai_profile_uses_isolated_approved_kafka_topology(self) -> None:
         zookeeper = _service_block(self.demo, "agent-zookeeper")
@@ -62,6 +79,14 @@ class DemoActivationConfigTests(unittest.TestCase):
         self.assertIn("profiles:\n      - ai", zookeeper)
         self.assertIn("profiles:\n      - ai", broker)
         self.assertIn('KAFKA_ZOOKEEPER_CONNECT: "agent-zookeeper:2181"', broker)
+        self.assertIn("cub zk-ready localhost 2181 30", zookeeper)
+        self.assertIn("restart: unless-stopped", zookeeper)
+        self.assertIn(
+            "agent-zookeeper:\n        condition: service_healthy",
+            broker,
+        )
+        self.assertIn("cub kafka-ready -b localhost:29092 1 30", broker)
+        self.assertIn("restart: unless-stopped", broker)
 
     def test_bootstrap_is_explicit_and_agent_startup_waits_for_safe_dependencies(
         self,
@@ -83,6 +108,10 @@ class DemoActivationConfigTests(unittest.TestCase):
             "agent-opensearch:\n        condition: service_healthy",
             agent,
         )
+        self.assertIn(
+            "broker:\n        condition: service_healthy",
+            agent,
+        )
 
     def test_frontend_container_build_defaults_to_production(self) -> None:
         for compose in (self.demo, self.production):
@@ -92,11 +121,30 @@ class DemoActivationConfigTests(unittest.TestCase):
                 "${FRONTEND_BUILD_CONFIGURATION:-production}",
                 frontend,
             )
+            self.assertIn(
+                "GATEWAY_FEATURE_AGENT_DISCOVERY: "
+                "${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}",
+                frontend,
+            )
+
+    def test_discovery_frontend_container_build_is_gateway_gated(self) -> None:
+        dockerfile = (
+            REPOSITORY_ROOT / "frontend" / "Dockerfile"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("ARG GATEWAY_FEATURE_AGENT_DISCOVERY=false", dockerfile)
+        self.assertIn("demo-ai-discovery|demo-cart-ai-discovery", dockerfile)
+        self.assertIn(
+            "Discovery frontend builds require "
+            "GATEWAY_FEATURE_AGENT_DISCOVERY=true.",
+            dockerfile,
+        )
 
     def test_no_provider_credential_is_embedded(self) -> None:
         agent = _service_block(self.demo, "agent-service")
 
         self.assertIn("OPENAI_API_KEY: ${OPENAI_API_KEY:-}", agent)
+        self.assertIn("OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}", agent)
         self.assertNotIn("sk-", agent.lower())
 
 

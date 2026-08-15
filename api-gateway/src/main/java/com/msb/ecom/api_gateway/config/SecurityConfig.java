@@ -317,10 +317,10 @@ public class SecurityConfig {
         return switch (client) {
             case "seller-portal" -> LoginReturnUrl.joinWithBaseUri(
                     loginSuccessBaseUri,
-                    "/login?client=seller-portal&signedOut=1");
+                    "/login?client=seller-portal&returnUrl=%2Fseller%2Fdashboard&signedOut=1");
             case "admin-portal" -> LoginReturnUrl.joinWithBaseUri(
                     loginSuccessBaseUri,
-                    "/login?client=admin-portal&signedOut=1");
+                    "/login?client=admin-portal&returnUrl=%2Fadmin%2Fdashboard&signedOut=1");
             default -> marketplaceLogoutRedirectUri();
         };
     }

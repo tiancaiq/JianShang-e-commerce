@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -32,12 +33,17 @@ class FakeResponses:
         parsed_results: list[Any] | None = None,
         *,
         create_output: list[Any] | None = None,
+        output_text: str = "",
     ) -> None:
         self.parsed_results = parsed_results or []
         self.create_output = create_output
+        self.output_text = output_text
         self.parse_calls: list[dict[str, Any]] = []
         self.create_calls: list[dict[str, Any]] = []
         self.status: str | None = None
+        self.stream_calls: list[dict[str, Any]] = []
+        self.stream_events: list[Any] = []
+        self.stream_closed = False
 
     async def parse(self, **kwargs: Any) -> Any:
         self.parse_calls.append(kwargs)
@@ -52,10 +58,40 @@ class FakeResponses:
         self.create_calls.append(kwargs)
         return SimpleNamespace(
             output=self.create_output or [FakeFunctionCall()],
-            output_text="",
+            output_text=self.output_text,
             usage=None,
             status="completed",
         )
+
+    def stream(self, **kwargs: Any) -> Any:
+        self.stream_calls.append(kwargs)
+        owner = self
+
+        class Stream:
+            def __aiter__(self) -> Any:
+                return self
+
+            async def __anext__(self) -> Any:
+                if not owner.stream_events:
+                    raise StopAsyncIteration
+                return owner.stream_events.pop(0)
+
+            async def get_final_response(self) -> Any:
+                return SimpleNamespace(
+                    status="completed",
+                    usage=None,
+                    output=owner.create_output or [],
+                    output_text=owner.output_text,
+                )
+
+        class Manager:
+            async def __aenter__(self) -> Any:
+                return Stream()
+
+            async def __aexit__(self, *_: Any) -> None:
+                owner.stream_closed = True
+
+        return Manager()
 
 
 class FakeClient:
@@ -63,7 +99,65 @@ class FakeClient:
         self.responses = responses
 
 
+async def _append_delta(target: list[str], delta: str) -> None:
+    target.append(delta)
+
+
 class OpenAIProviderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_final_answer_stream_forwards_only_output_text(self) -> None:
+        responses = FakeResponses()
+        responses.stream_events = [
+            SimpleNamespace(type="response.reasoning_text.delta", delta="private"),
+            SimpleNamespace(type="response.output_text.delta", delta="Verified "),
+            SimpleNamespace(type="response.output_text.delta", delta="matches."),
+            SimpleNamespace(type="response.output_text.done", text="Verified matches."),
+            SimpleNamespace(type="response.completed"),
+        ]
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+        deltas: list[str] = []
+
+        result = await provider.discovery_answer_stream(
+            instructions="Write only from validated public facts.",
+            facts={"outcome": "NO_RESULTS", "recommendations": []},
+            maximum_output_tokens=800,
+            correlation_id="disc-final-stream-1",
+            on_text_delta=lambda delta: _append_delta(deltas, delta),
+            timeout_seconds=4.0,
+        )
+
+        self.assertEqual("Verified matches.", result.text)
+        self.assertEqual(["Verified ", "matches."], deltas)
+        self.assertNotIn("private", "".join(deltas))
+        self.assertTrue(responses.stream_closed)
+        self.assertFalse(responses.stream_calls[0]["store"])
+        self.assertNotIn("tools", responses.stream_calls[0])
+
+    async def test_discovery_final_answer_stream_closes_on_cancellation(self) -> None:
+        responses = FakeResponses()
+        responses.stream_events = [
+            SimpleNamespace(type="response.output_text.delta", delta="Partial"),
+        ]
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+
+        async def cancel(_: str) -> None:
+            raise asyncio.CancelledError
+
+        with self.assertRaises(asyncio.CancelledError):
+            await provider.discovery_answer_stream(
+                instructions="Write only from validated public facts.",
+                facts={"outcome": "NO_RESULTS", "recommendations": []},
+                maximum_output_tokens=800,
+                correlation_id="disc-final-stream-cancel",
+                on_text_delta=cancel,
+            )
+        self.assertTrue(responses.stream_closed)
+
     async def test_discovery_chat_uses_strict_stored_disabled_tool_boundary(
         self,
     ) -> None:
@@ -99,15 +193,175 @@ class OpenAIProviderTest(unittest.IsolatedAsyncioTestCase):
             maximum_output_tokens=800,
             maximum_tool_calls=6,
             correlation_id="disc-provider-1",
+            timeout_seconds=4.5,
         )
 
         self.assertEqual("SEARCH_INDIVIDUAL", result.tool_calls[0].name)
         call = responses.create_calls[0]
         self.assertFalse(call["store"])
         self.assertEqual("disabled", call["truncation"])
-        self.assertEqual("required", call["tool_choice"])
+        self.assertEqual("auto", call["tool_choice"])
+        self.assertEqual({"effort": "minimal"}, call["reasoning"])
         self.assertEqual(800, call["max_output_tokens"])
         self.assertEqual(6, call["max_tool_calls"])
+        self.assertEqual(4.5, call["timeout"])
+
+    async def test_discovery_chat_rejects_invalid_request_timeout(self) -> None:
+        responses = FakeResponses(
+            create_output=[
+                SimpleNamespace(
+                    type="function_call",
+                    name="SEARCH_INDIVIDUAL",
+                    arguments='{"q":"chair","limit":20}',
+                    call_id="discovery-call-timeout-1",
+                )
+            ]
+        )
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+
+        with self.assertRaises(LlmProviderError) as raised:
+            await provider.discovery_chat(
+                instructions="Use only the supplied public marketplace tools.",
+                input_items=[{"role": "user", "content": "Find a chair"}],
+                tools=[
+                    {
+                        "type": "function",
+                        "name": "SEARCH_INDIVIDUAL",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"q": {"type": "string"}},
+                            "required": ["q"],
+                            "additionalProperties": False,
+                        },
+                        "strict": True,
+                    }
+                ],
+                maximum_output_tokens=800,
+                maximum_tool_calls=6,
+                correlation_id="disc-provider-timeout-invalid",
+                timeout_seconds=0,
+            )
+
+        self.assertEqual(ProviderErrorCode.INVALID_RESPONSE, raised.exception.code)
+        self.assertEqual([], responses.create_calls)
+
+    async def test_discovery_omits_reasoning_for_non_reasoning_model(self) -> None:
+        responses = FakeResponses(
+            create_output=[
+                SimpleNamespace(
+                    type="function_call",
+                    name="SEARCH_INDIVIDUAL",
+                    arguments='{"q":"chair","limit":20}',
+                    call_id="discovery-call-fast-1",
+                )
+            ]
+        )
+        provider = OpenAIProvider(
+            Settings(
+                openai_api_key="offline-test-placeholder",
+                openai_model="gpt-4.1-mini",
+            ),
+            FakeClient(responses),
+        )
+
+        await provider.discovery_chat(
+            instructions="Use only the supplied public marketplace tools.",
+            input_items=[{"role": "user", "content": "Find a chair"}],
+            tools=[
+                {
+                    "type": "function",
+                    "name": "SEARCH_INDIVIDUAL",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            ],
+            maximum_output_tokens=800,
+            maximum_tool_calls=6,
+            correlation_id="disc-provider-fast-1",
+        )
+
+        self.assertNotIn("reasoning", responses.create_calls[0])
+
+    async def test_discovery_accepts_message_only_for_application_fallback(self) -> None:
+        responses = FakeResponses(
+            create_output=[SimpleNamespace(type="message")],
+            output_text="Untrusted provider prose",
+        )
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+
+        result = await provider.discovery_chat(
+            instructions="Use only the supplied public marketplace tools.",
+            input_items=[{"role": "user", "content": "Find a chair"}],
+            tools=[
+                {
+                    "type": "function",
+                    "name": "SEARCH_INDIVIDUAL",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            ],
+            maximum_output_tokens=800,
+            maximum_tool_calls=6,
+            correlation_id="disc-provider-message-1",
+        )
+
+        self.assertEqual((), result.tool_calls)
+        self.assertEqual("Untrusted provider prose", result.content)
+
+    async def test_discovery_chat_streams_natural_content_without_reasoning(self) -> None:
+        responses = FakeResponses(output_text="Hello from the marketplace assistant.")
+        responses.stream_events = [
+            SimpleNamespace(type="response.reasoning_text.delta", delta="private"),
+            SimpleNamespace(type="response.output_text.delta", delta="Hello from "),
+            SimpleNamespace(type="response.output_text.delta", delta="the marketplace assistant."),
+            SimpleNamespace(type="response.completed"),
+        ]
+        provider = OpenAIProvider(
+            Settings(openai_api_key="offline-test-placeholder"),
+            FakeClient(responses),
+        )
+        deltas: list[str] = []
+
+        result = await provider.discovery_chat(
+            instructions="Answer naturally or call exactly one registered tool.",
+            input_items=[{"role": "user", "content": "hi"}],
+            tools=[{
+                "type": "function",
+                "name": "CHECK_AVAILABILITY",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"category": {"type": "string"}},
+                    "required": ["category"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }],
+            maximum_output_tokens=800,
+            maximum_tool_calls=1,
+            correlation_id="disc-provider-natural-stream",
+            on_text_delta=lambda delta: _append_delta(deltas, delta),
+        )
+
+        self.assertEqual("Hello from the marketplace assistant.", result.content)
+        self.assertEqual(["Hello from ", "the marketplace assistant."], deltas)
+        self.assertNotIn("private", "".join(deltas))
+        self.assertEqual("auto", responses.stream_calls[0]["tool_choice"])
 
     async def test_customer_service_answer_is_typed_bounded_and_not_stored(
         self,

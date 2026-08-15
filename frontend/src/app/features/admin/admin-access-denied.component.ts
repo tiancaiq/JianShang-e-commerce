@@ -10,9 +10,9 @@ import { AuthService } from '../../core/services/auth.service';
     <section class="access-denied">
       <div class="panel">
         <p class="eyebrow">Admin access</p>
-        <h1>You need platform admin access.</h1>
+        <h1>Admin access denied.</h1>
         <p class="body">
-          You are signed in, but this account is not authorized for the admin portal.
+          You are signed in, but this account does not have permission to open this admin section.
         </p>
         <div class="actions">
           <a routerLink="/" class="secondary">Marketplace</a>

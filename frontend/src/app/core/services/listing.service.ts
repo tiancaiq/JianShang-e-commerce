@@ -2,11 +2,18 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, of } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { AdminTimelineEntry } from '../models/admin-timeline.model';
 import {
   AdminActiveListingUpdateRequest,
   AdminListingModerationCase,
   AdminListingModerationCaseDetail,
   AdminListingRemoveRequest,
+  AdminListingEnforcementDetail,
+  ListingEnforcementCreateRequest,
+  ListingEnforcementPreview,
+  ListingEnforcementResult,
+  ListingEnforcementRevokeRequest,
+  ListingEnforcementTimelineEntry,
   BusinessStoreListingSearchPage,
   BusinessStoreListingSearchParams,
   BusinessStoreItemSearchPage,
@@ -328,6 +335,67 @@ export class ListingService {
     return this.http.post<ListingMedia>(`${this.baseUrl}/listings/${listingId}/media/upload-request`, request, {
       withCredentials: true,
     });
+  }
+
+  getAdminListingEnforcement(listingId: string): Observable<AdminListingEnforcementDetail> {
+    return this.http.get<AdminListingEnforcementDetail>(`${this.baseUrl}/admin/listings/${listingId}/enforcements`, {
+      withCredentials: true,
+    });
+  }
+
+  previewAdminListingEnforcement(
+    listingId: string,
+    request: ListingEnforcementCreateRequest,
+  ): Observable<ListingEnforcementPreview> {
+    return this.http.post<ListingEnforcementPreview>(
+      `${this.baseUrl}/admin/listings/${listingId}/enforcements/dry-run`, request, { withCredentials: true },
+    );
+  }
+
+  createAdminListingEnforcement(
+    listingId: string,
+    request: ListingEnforcementCreateRequest,
+  ): Observable<ListingEnforcementResult> {
+    return this.http.post<ListingEnforcementResult>(
+      `${this.baseUrl}/admin/listings/${listingId}/enforcements`, request, { withCredentials: true },
+    );
+  }
+
+  previewAdminListingReinstatement(
+    listingId: string,
+    enforcementId: string,
+    request: ListingEnforcementRevokeRequest,
+  ): Observable<ListingEnforcementPreview> {
+    return this.http.post<ListingEnforcementPreview>(
+      `${this.baseUrl}/admin/listings/${listingId}/enforcements/${enforcementId}/revoke/dry-run`,
+      request,
+      { withCredentials: true },
+    );
+  }
+
+  reinstateAdminListing(
+    listingId: string,
+    enforcementId: string,
+    request: ListingEnforcementRevokeRequest,
+  ): Observable<ListingEnforcementResult> {
+    return this.http.post<ListingEnforcementResult>(
+      `${this.baseUrl}/admin/listings/${listingId}/enforcements/${enforcementId}/revoke`,
+      request,
+      { withCredentials: true },
+    );
+  }
+
+  getAdminListingEnforcementTimeline(listingId: string): Observable<{ entries: ListingEnforcementTimelineEntry[] }> {
+    return this.http.get<{ entries: ListingEnforcementTimelineEntry[] }>(
+      `${this.baseUrl}/admin/listings/${listingId}/enforcements/timeline`, { withCredentials: true },
+    );
+  }
+
+  getListingModerationTimeline(caseId: string): Observable<AdminTimelineEntry[]> {
+    return this.http.get<AdminTimelineEntry[]>(
+      `${this.baseUrl}/admin/moderation/listing-cases/${caseId}/timeline`,
+      { withCredentials: true }
+    );
   }
 
   requestBusinessStoreItemMediaUpload(

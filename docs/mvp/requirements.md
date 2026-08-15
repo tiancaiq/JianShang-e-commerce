@@ -743,6 +743,8 @@ Acceptance criteria:
 - Multi-business cart creates separate seller fulfillment groups while
   retaining a buyer checkout reference.
 - Inventory reservations are committed.
+- Purchased cart lines are removed after durable confirmation; cart lines the
+  buyer changed after checkout began are preserved.
 - Outbox events are created in the same transaction as state changes.
 
 Depends on: `PAY-02`, `INV-04`.
@@ -760,6 +762,8 @@ Acceptance criteria:
 Acceptance criteria:
 
 - Buyer sees only their orders.
+- Checkout and order groups display the immutable store name captured at
+  purchase instead of requiring buyers to interpret an internal store ID.
 - Order displays immutable address, price, policy, payment, and shipment
   snapshots.
 
@@ -793,16 +797,18 @@ Depends on: `ORD-03`.
 
 Acceptance criteria:
 
-- Staff provides carrier, tracking number, and shipped items.
+- The bounded local demo allows an authorized owner to provide manual carrier,
+  service, tracking number, and shipped time for one whole business group.
 - Tracking number format is validated where supported.
-- Order can support more than one shipment.
+- Exactly one shipment per business group is enforced in this slice; partial
+  item allocation and multiple shipments remain deferred.
 
 #### SHP-03 Mark shipment shipped
 
 Acceptance criteria:
 
 - Shipment moves to `SHIPPED`.
-- Buyer receives notification.
+- Buyer reads the resulting group and shipment status; notification is deferred.
 - Repeated request is idempotent.
 
 #### SHP-04 Process carrier event
@@ -812,6 +818,13 @@ Acceptance criteria:
 - Provider event is authenticated and deduplicated.
 - Shipment timeline is append-only.
 - Delivery updates order status when all shipments are delivered.
+
+### 4.9A Post-delivery returns (V2)
+
+`V2-RET-01` allows one buyer-owned whole business-group return within the
+snapshotted 30-day local-demo window after delivery. It remains separate from
+cancellation, requires explicit inventory disposition, refunds only immutable
+group merchandise subtotal, and leaves sibling business groups unchanged.
 
 ### 4.10 Reviews and reputation (V3)
 
@@ -1168,3 +1181,8 @@ MVP is complete only when:
 - Admins can approve/reject businesses and listings.
 - Security and tenant-isolation tests pass.
 - No V2 or V3 user-facing feature is required for MVP completion.
+## ADM-LIST-06 reversible listing enforcement
+
+Platform administrators with explicit listing-enforcement permissions can temporarily restrict an active listing's public visibility, purchasability, or both. `SUSPEND` always expands to both scopes. Reinstatement revokes the selected action and recalculates the effective policy from any remaining actions. This workflow never rewrites listing lifecycle or moderation state, never substitutes for `REMOVED_BY_ADMIN`, and never cancels or mutates an existing order.
+
+Public reads must omit listings with an effective `LISTING_PUBLIC_VISIBILITY` restriction. New business checkout work must fail before reservation, payment-intent creation, and order confirmation when `LISTING_PURCHASABILITY` is restricted. A known restriction returns `403`; an unavailable authoritative policy decision fails closed with `503`.

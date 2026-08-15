@@ -1,6 +1,7 @@
 package com.msb.ecom.auth_service.controller;
 
 import com.msb.ecom.auth_service.dto.ApiDataResponse;
+import com.msb.ecom.auth_service.dto.AdminTimelineEntryResponse;
 import com.msb.ecom.auth_service.dto.BusinessApplicationDecisionRequest;
 import com.msb.ecom.auth_service.dto.BusinessApplicationResponse;
 import com.msb.ecom.auth_service.service.BusinessApplicationService;
@@ -33,6 +34,11 @@ public class AdminBusinessApplicationController {
     @GetMapping("/{id}")
     public ApiDataResponse<BusinessApplicationResponse> get(@PathVariable String id) {
         return new ApiDataResponse<>(businessApplicationService.getAdminApplication(id));
+    }
+
+    @GetMapping("/{id}/timeline")
+    public ApiDataResponse<List<AdminTimelineEntryResponse>> timeline(@PathVariable String id) {
+        return new ApiDataResponse<>(businessApplicationService.getAdminTimeline(id));
     }
 
     @PostMapping("/{id}/decision")

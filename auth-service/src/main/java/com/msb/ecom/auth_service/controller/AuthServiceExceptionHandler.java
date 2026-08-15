@@ -5,6 +5,7 @@ import com.msb.ecom.auth_service.service.BusinessApplicationForbiddenException;
 import com.msb.ecom.auth_service.service.BusinessApplicationNotFoundException;
 import com.msb.ecom.auth_service.service.BusinessApplicationVersionConflictException;
 import com.msb.ecom.auth_service.service.BusinessMembershipNotFoundException;
+import com.msb.ecom.auth_service.service.BusinessListingSummaryUnavailableException;
 import com.msb.ecom.auth_service.service.BusinessStoreForbiddenException;
 import com.msb.ecom.auth_service.service.BusinessStoreNotFoundException;
 import com.msb.ecom.auth_service.service.BusinessStoreSlugConflictException;
@@ -20,6 +21,8 @@ import com.msb.ecom.auth_service.service.AddressNotFoundException;
 import com.msb.ecom.auth_service.service.AddressValidationException;
 import com.msb.ecom.auth_service.service.AddressVersionConflictException;
 import com.msb.ecom.auth_service.service.BuyerAddressNotFoundException;
+import com.msb.ecom.auth_service.enforcement.EnforcementExceptions;
+import com.msb.ecom.auth_service.service.UserCapabilityRestrictedException;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.error.ApiError;
 import com.msb.ecom.common.web.error.ApiErrorEnvelope;
@@ -36,6 +39,71 @@ import java.util.List;
 @RestControllerAdvice
 @Slf4j
 public class AuthServiceExceptionHandler {
+
+    @ExceptionHandler(BusinessListingSummaryUnavailableException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessListingSummaryUnavailable(
+            BusinessListingSummaryUnavailableException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ApiErrorEnvelope(new ApiError(
+                "BUSINESS_LISTING_SUMMARY_UNAVAILABLE",
+                exception.getMessage(),
+                List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(EnforcementExceptions.Validation.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementValidation(
+            EnforcementExceptions.Validation exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiErrorEnvelope(new ApiError(
+                "USER_ENFORCEMENT_INVALID",
+                exception.getMessage(),
+                List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(EnforcementExceptions.NotFound.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementNotFound(
+            EnforcementExceptions.NotFound exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorEnvelope(new ApiError(
+                "USER_ENFORCEMENT_NOT_FOUND",
+                exception.getMessage(),
+                List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(EnforcementExceptions.Conflict.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementConflict(
+            EnforcementExceptions.Conflict exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorEnvelope(new ApiError(
+                "USER_ENFORCEMENT_CONFLICT",
+                exception.getMessage(),
+                List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(UserCapabilityRestrictedException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleUserCapabilityRestricted(
+            UserCapabilityRestrictedException exception,
+            HttpServletRequest request) {
+        var decision = exception.decision();
+        List<FieldError> details = new java.util.ArrayList<>();
+        details.add(new FieldError("scope", decision.scope().name()));
+        details.add(new FieldError("effectiveAction", decision.effectiveAction().name()));
+        if (decision.expiresAt() != null) {
+            details.add(new FieldError("expiresAt", decision.expiresAt().toString()));
+        }
+        if (decision.supportReference() != null) {
+            details.add(new FieldError("supportReference", decision.supportReference()));
+        }
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiErrorEnvelope(new ApiError(
+                "USER_CAPABILITY_RESTRICTED",
+                exception.getMessage(),
+                List.copyOf(details),
+                CorrelationIdFilter.current(request))));
+    }
 
     @ExceptionHandler(AddressValidationException.class)
     public ResponseEntity<ApiErrorEnvelope> handleAddressValidation(

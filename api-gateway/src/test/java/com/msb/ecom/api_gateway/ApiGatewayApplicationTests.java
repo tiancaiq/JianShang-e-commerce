@@ -4,12 +4,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.env.Environment;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 
 import org.mockito.Mockito;
 import org.mockito.ArgumentMatchers;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.ActiveProfiles;
 import io.restassured.RestAssured;
@@ -24,6 +26,9 @@ class ApiGatewayApplicationTests {
 
 	@LocalServerPort
 	private Integer port;
+
+	@Autowired
+	private Environment environment;
 
 	@MockitoBean
 	private JwtDecoder jwtDecoder;
@@ -74,6 +79,28 @@ class ApiGatewayApplicationTests {
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldUseHttp11CompatibleGatewayClient() {
+		org.assertj.core.api.Assertions.assertThat(
+				environment.getProperty("spring.http.client.factory"))
+				.isEqualTo("simple");
+	}
+
+	@Test
+	void shouldKeepMarketplaceDiscoveryTimeoutSeparateFromListingAgentTimeout() {
+		org.assertj.core.api.Assertions.assertThat(
+				environment.getProperty(
+						"resilience4j.timelimiter.instances.agentServiceCircuitBreaker.timeout-duration"))
+				.isEqualTo("15s");
+		org.assertj.core.api.Assertions.assertThat(
+				environment.getProperty(
+						"resilience4j.timelimiter.instances.agentDiscoveryServiceCircuitBreaker.timeout-duration"))
+				.isEqualTo("35s");
+		org.assertj.core.api.Assertions.assertThat(
+				environment.getProperty("spring.cloud.gateway.mvc.streaming-buffer-size"))
+				.isEqualTo("128");
 	}
 
 	@Test
@@ -272,6 +299,16 @@ class ApiGatewayApplicationTests {
 				.header("Authorization", "Bearer token")
 				.when()
 				.get("/api/v1/businesses/01B00000000000000000000001/orders")
+				.then()
+				.statusCode(404);
+	}
+
+	@Test
+	void deferredBuyerOrderRouteReturnsSafeNotFoundInsteadOfUnexpectedError() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/orders")
 				.then()
 				.statusCode(404);
 	}

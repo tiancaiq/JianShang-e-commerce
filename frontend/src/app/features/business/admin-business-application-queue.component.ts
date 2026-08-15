@@ -46,7 +46,7 @@ type ReviewQueueStatus = 'PENDING_VERIFICATION' | 'UNDER_REVIEW';
           </div>
         </div>
       } @else if (errorMsg()) {
-        <div class="state-panel error">
+        <div class="state-panel error" role="alert">
           <div>
             <strong>{{ errorMsg() }}</strong>
             <p>Try again to reload the current business review queue.</p>

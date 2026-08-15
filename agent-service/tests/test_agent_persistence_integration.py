@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -187,6 +188,15 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
         )
 
         self.assertEqual(BeginInvocationResult.CREATED, created.result)
+        correlated, correlated_user = (
+            await self.repository.get_invocation_for_client_message(
+                session_id=session.session_id,
+                actor_user_id=ACTOR_A,
+                client_message_id="01C00000000000000000000001",
+            )
+        )
+        self.assertEqual(created.invocation.invocation_id, correlated.invocation_id)
+        self.assertEqual(created.user_message.message_id, correlated_user.message_id)
         self.assertEqual(
             BeginInvocationResult.DEDUPLICATED_PENDING,
             duplicate.result,
@@ -250,6 +260,183 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
         )
         self.assertEqual(1, len(page.messages))
         self.assertEqual("USER", page.messages[0].role.value)
+
+    async def test_guarded_failed_assistant_retry_reuses_only_user_row(self) -> None:
+        session, _ = await self._session()
+        client_message_id = "01C00000000000000000000009"
+        created = await self._begin(
+            session.session_id,
+            client_message_id,
+            "Irvine, Orange County.",
+        )
+        _, assistant = await self.repository.fail_invocation_with_assistant(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            error_code=(
+                "DISCOVERY_ORCHESTRATOR_RUN_FAILED_TOOL_EXECUTION_"
+                "QUERY_EMBEDDING_TIMEOUT"
+            ),
+            body="I could not finish checking current listings.",
+            sources=(),
+            actions=(
+                {"type": "DISCOVERY_RESULT", "result": {"outcome": "HANDOFF"}},
+            ),
+            latency_ms=25,
+            now=NOW + timedelta(seconds=1),
+            resolution_type=AgentResolutionType.PARTIAL,
+        )
+
+        retry = await self._begin(
+            session.session_id,
+            client_message_id,
+            "Irvine, Orange County.",
+            now=NOW + timedelta(seconds=2),
+        )
+        page = await self.repository.list_messages(
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            limit=10,
+        )
+
+        self.assertEqual(BeginInvocationResult.RETRY_STARTED, retry.result)
+        self.assertEqual(created.user_message.message_id, retry.user_message.message_id)
+        self.assertIsNone(retry.invocation.assistant_message_id)
+        self.assertEqual(1, sum(item.role.value == "USER" for item in page.messages))
+        self.assertNotIn(assistant.message_id, {item.message_id for item in page.messages})
+        self.assertEqual(0, sum(item.role.value == "ASSISTANT" for item in page.messages))
+
+    async def test_explicit_stop_reconciles_graph_cancel_without_duplicate_rows(self) -> None:
+        session, _ = await self._session()
+        created = await self._begin(
+            session.session_id,
+            "01C00000000000000000000014",
+            "Find a used bicycle under $500.",
+        )
+        graph_cancel = "DISCOVERY_ORCHESTRATOR_RUN_FAILED_GRAPH_CANCEL"
+        stopped = "Response stopped before the answer began."
+        await self.repository.fail_invocation(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            error_code=graph_cancel,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=20,
+            estimated_cost=Decimal("0"),
+            now=NOW + timedelta(seconds=1),
+        )
+
+        reconciled, assistant = await self.repository.fail_invocation_with_assistant(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            error_code="DISCOVERY_FINAL_ANSWER_STREAM_CANCELLED",
+            body=stopped,
+            sources=(),
+            actions=({
+                "type": "DISCOVERY_RESULT",
+                "result": {"outcome": "HANDOFF", "message": stopped},
+            },),
+            latency_ms=25,
+            now=NOW + timedelta(seconds=2),
+            resolution_type=AgentResolutionType.PARTIAL,
+            replace_failed_error_codes=(graph_cancel,),
+        )
+        repeated, repeated_assistant = (
+            await self.repository.fail_invocation_with_assistant(
+                invocation_id=created.invocation.invocation_id,
+                actor_user_id=ACTOR_A,
+                error_code="DISCOVERY_FINAL_ANSWER_STREAM_CANCELLED",
+                body=stopped,
+                sources=(),
+                actions=({
+                    "type": "DISCOVERY_RESULT",
+                    "result": {"outcome": "HANDOFF", "message": stopped},
+                },),
+                latency_ms=25,
+                now=NOW + timedelta(seconds=3),
+                resolution_type=AgentResolutionType.PARTIAL,
+                replace_failed_error_codes=(graph_cancel,),
+            )
+        )
+        page = await self.repository.list_messages(
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            limit=10,
+        )
+
+        self.assertEqual(AgentInvocationStatus.FAILED, reconciled.result_status)
+        self.assertEqual(
+            "DISCOVERY_FINAL_ANSWER_STREAM_CANCELLED", reconciled.error_code
+        )
+        self.assertEqual(assistant.message_id, repeated_assistant.message_id)
+        self.assertEqual(reconciled.assistant_message_id, repeated.assistant_message_id)
+        self.assertEqual(1, sum(item.role.value == "USER" for item in page.messages))
+        self.assertEqual(1, sum(item.role.value == "ASSISTANT" for item in page.messages))
+
+    async def test_structuring_failure_retry_persists_one_user_and_one_final_answer(
+        self,
+    ) -> None:
+        session, _ = await self._session()
+        client_message_id = "01C00000000000000000000010"
+        created = await self._begin(
+            session.session_id,
+            client_message_id,
+            "Find a desk chair under $100.",
+        )
+        await self.repository.fail_invocation_with_assistant(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            error_code=(
+                "DISCOVERY_ORCHESTRATOR_RUN_FAILED_"
+                "STRUCTURED_RESPONSE_PARSE_RESPONSE_SCHEMA"
+            ),
+            body="I could not safely finish structuring the verified response.",
+            sources=(),
+            actions=(
+                {"type": "DISCOVERY_RESULT", "result": {"outcome": "HANDOFF"}},
+            ),
+            latency_ms=25,
+            now=NOW + timedelta(seconds=1),
+        )
+
+        retry = await self._begin(
+            session.session_id,
+            client_message_id,
+            "Find a desk chair under $100.",
+            now=NOW + timedelta(seconds=2),
+        )
+        _, final_assistant = await self.repository.complete_invocation(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            body="Verified current matches.",
+            resolution_type=AgentResolutionType.ANSWERED,
+            sources=(),
+            actions=(
+                {"type": "DISCOVERY_RESULT", "result": {"outcome": "DETAIL"}},
+            ),
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=40,
+            estimated_cost=Decimal("0"),
+            now=NOW + timedelta(seconds=3),
+        )
+        page = await self.repository.list_messages(
+            session_id=session.session_id,
+            actor_user_id=ACTOR_A,
+            limit=10,
+        )
+        stored_user, stored_assistant = await self.repository.get_invocation_messages(
+            invocation_id=created.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+        )
+
+        self.assertEqual(BeginInvocationResult.RETRY_STARTED, retry.result)
+        self.assertEqual(1, sum(item.role.value == "USER" for item in page.messages))
+        self.assertEqual(
+            1,
+            sum(item.body == "Verified current matches." for item in page.messages),
+        )
+        self.assertEqual(created.user_message.message_id, stored_user.message_id)
+        self.assertEqual(final_assistant.message_id, stored_assistant.message_id)
 
     async def test_success_tool_audit_pagination_and_read_only_guard(self) -> None:
         session, _ = await self._session()
@@ -438,6 +625,104 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
             AgentPersistenceErrorCode.SESSION_NOT_OPEN,
             captured.exception.code,
         )
+
+    async def test_hybrid_source_refs_and_long_failure_codes_round_trip(self) -> None:
+        session, _ = await self._session()
+        begun = await self._begin(
+            session.session_id,
+            "01C00000000000000000000040",
+            "Find a desk chair under $100.",
+        )
+        source_refs = (
+            {
+                "listingId": "81ARZ3NDEKTSV4RRFFQ69G5FAC",
+                "listingVersion": 0,
+                "finalRank": 1,
+                "mode": "VECTOR_ONLY",
+                "matchedBy": ["VECTOR"],
+                "reasonCode": "VECTOR_MATCH",
+                "checkedAt": NOW.isoformat(),
+            },
+            {
+                "listingId": "Z1ARZ3NDEKTSV4RRFFQ69G5FAC",
+                "listingVersion": 7,
+                "finalRank": 2,
+                "mode": "HYBRID",
+                "matchedBy": ["LEXICAL", "VECTOR"],
+                "reasonCode": "LEXICAL_AND_VECTOR_MATCH",
+                "checkedAt": NOW.isoformat(),
+            },
+        )
+        await self.repository.append_tool_call(
+            invocation_id=begun.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            sequence_number=1,
+            tool_name="SEARCH_INDIVIDUAL",
+            argument_hash="a" * 64,
+            result_hash="b" * 64,
+            source_refs=source_refs,
+            result_status=AgentToolCallStatus.SUCCEEDED,
+            error_code=None,
+            latency_ms=25,
+            now=NOW,
+        )
+        await self.repository.append_tool_call(
+            invocation_id=begun.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            sequence_number=2,
+            tool_name="CHECK_AVAILABILITY",
+            argument_hash="c" * 64,
+            result_hash="d" * 64,
+            source_refs=(),
+            result_status=AgentToolCallStatus.SUCCEEDED,
+            error_code=None,
+            latency_ms=10,
+            now=NOW,
+        )
+        failure = await self._begin(
+            session.session_id,
+            "01C00000000000000000000041",
+            "Try another search",
+        )
+        long_code = (
+            "DISCOVERY_ORCHESTRATOR_RUN_FAILED_"
+            "TOOL_EXECUTION_PRODUCT_HYBRID_RESPONSE_VALIDATION"
+        )
+        await self.repository.fail_invocation(
+            invocation_id=failure.invocation.invocation_id,
+            actor_user_id=ACTOR_A,
+            error_code=long_code,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=100,
+            estimated_cost=Decimal("0"),
+            now=NOW,
+        )
+
+        async with self.repository._pool.acquire() as connection:  # noqa: SLF001
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT source_refs_json
+                    FROM agent_tool_calls
+                    WHERE invocation_id = %s
+                    """,
+                    (begun.invocation.invocation_id,),
+                )
+                self.assertEqual(
+                    list(source_refs),
+                    json.loads((await cursor.fetchone())[0]),
+                )
+                await cursor.execute(
+                    """
+                    SELECT error_code
+                    FROM agent_invocations
+                    WHERE invocation_id = %s
+                    """,
+                    (failure.invocation.invocation_id,),
+                )
+                self.assertEqual(long_code, (await cursor.fetchone())[0])
+            await connection.rollback()
 
     async def test_retention_separates_content_and_safe_audit_windows(self) -> None:
         old = NOW - timedelta(days=100)
@@ -666,7 +951,10 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
         migration_directory = Path(__file__).parents[1] / "db" / "migration"
         async with self.repository._pool.acquire() as connection:  # noqa: SLF001
             async with connection.cursor() as cursor:
-                for migration_path in sorted(migration_directory.glob("V*.sql")):
+                for migration_path in sorted(
+                    migration_directory.glob("V*.sql"),
+                    key=lambda path: int(path.name.split("__", 1)[0][1:]),
+                ):
                     statements = [
                         statement.strip()
                         for statement in migration_path.read_text(

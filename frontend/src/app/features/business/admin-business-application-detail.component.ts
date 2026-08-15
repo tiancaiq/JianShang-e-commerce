@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -8,11 +9,15 @@ import {
 import { BusinessApplicationService } from '../../core/services/business-application.service';
 import { ToastService } from '../../core/services/toast.service';
 import { StatusPillComponent } from '../../shared/components/ui/status-pill.component';
+import { AdminTimelineEntry } from '../../core/models/admin-timeline.model';
+import { AdminAuditTimelineComponent } from '../admin/admin-audit-timeline.component';
+import { AdminService } from '../../core/services/admin.service';
+import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
 
 @Component({
   selector: 'app-admin-business-application-detail',
   standalone: true,
-  imports: [FormsModule, RouterLink, StatusPillComponent],
+  imports: [DatePipe, FormsModule, RouterLink, StatusPillComponent, AdminAuditTimelineComponent],
   template: `
     <section class="admin-business-detail">
       <header class="page-header">
@@ -38,7 +43,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
           </div>
         </div>
       } @else if (errorMsg()) {
-        <div class="state-panel error">
+        <div class="state-panel error" role="alert">
           <div>
             <strong>{{ errorMsg() }}</strong>
             <p>The record may have moved, or your admin session may need attention.</p>
@@ -106,7 +111,13 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
               </div>
               <div>
                 <dt>Submitted</dt>
-                <dd>{{ data.submittedAt || 'Not submitted' }}</dd>
+                <dd>
+                  @if (data.submittedAt) {
+                    <time [attr.datetime]="data.submittedAt" [title]="data.submittedAt">{{ data.submittedAt | date: 'medium' }}</time>
+                  } @else {
+                    Not submitted
+                  }
+                </dd>
               </div>
               <div>
                 <dt>Reviewer</dt>
@@ -122,7 +133,13 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
               </div>
               <div>
                 <dt>Decided</dt>
-                <dd>{{ data.decidedAt || 'None' }}</dd>
+                <dd>
+                  @if (data.decidedAt) {
+                    <time [attr.datetime]="data.decidedAt" [title]="data.decidedAt">{{ data.decidedAt | date: 'medium' }}</time>
+                  } @else {
+                    None
+                  }
+                </dd>
               </div>
             </dl>
           </section>
@@ -156,7 +173,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
                 </label>
 
                 @if (decisionErrorMsg()) {
-                  <div id="decision-reason-error" class="decision-error">{{ decisionErrorMsg() }}</div>
+                  <div id="decision-reason-error" class="decision-error" role="alert">{{ decisionErrorMsg() }}</div>
                 }
 
                 <div class="decision-actions">
@@ -172,6 +189,14 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
             <h2>Description</h2>
             <p>{{ data.description || 'None' }}</p>
           </section>
+
+          <app-admin-audit-timeline
+            class="detail-section-wide"
+            [entries]="timeline()"
+            [loading]="timelineLoading()"
+            [error]="timelineErrorMsg()"
+            title="Business audit timeline"
+          />
         </div>
       }
     </section>
@@ -392,12 +417,16 @@ export class AdminBusinessApplicationDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly businessApplicationService = inject(BusinessApplicationService);
   private readonly toastService = inject(ToastService);
+  private readonly adminService = inject(AdminService);
 
   readonly loading = signal(true);
   readonly errorMsg = signal('');
   readonly decisionErrorMsg = signal('');
   readonly savingDecision = signal(false);
   readonly application = signal<BusinessApplication | null>(null);
+  readonly timeline = signal<AdminTimelineEntry[]>([]);
+  readonly timelineLoading = signal(false);
+  readonly timelineErrorMsg = signal('');
   decision: BusinessApplicationDecision = 'APPROVE';
   reason = '';
 
@@ -415,6 +444,7 @@ export class AdminBusinessApplicationDetailComponent implements OnInit {
 
     this.loading.set(true);
     this.errorMsg.set('');
+    this.loadTimeline(id);
     this.businessApplicationService.getAdminApplication(id).subscribe({
       next: response => {
         this.application.set(response.data);
@@ -427,8 +457,24 @@ export class AdminBusinessApplicationDetailComponent implements OnInit {
     });
   }
 
+  private loadTimeline(id: string): void {
+    this.timelineLoading.set(true);
+    this.timelineErrorMsg.set('');
+    this.businessApplicationService.getAdminTimeline(id).subscribe({
+      next: response => {
+        this.timeline.set(response.data);
+        this.timelineLoading.set(false);
+      },
+      error: () => {
+        this.timelineErrorMsg.set('Business application audit history could not be loaded.');
+        this.timelineLoading.set(false);
+      },
+    });
+  }
+
   canDecide(application: BusinessApplication): boolean {
-    return application.status === 'PENDING_VERIFICATION' || application.status === 'UNDER_REVIEW';
+    return this.adminService.hasPermission(ADMIN_PERMISSIONS.BUSINESS_APPLICATION_DECIDE)
+      && (application.status === 'PENDING_VERIFICATION' || application.status === 'UNDER_REVIEW');
   }
 
   // Persists a platform admin decision using the loaded aggregate version for optimistic locking.
@@ -461,6 +507,7 @@ export class AdminBusinessApplicationDetailComponent implements OnInit {
         this.reason = '';
         this.savingDecision.set(false);
         this.toastService.success('Business application decision saved.');
+        this.loadTimeline(application.id);
       },
       error: error => {
         this.savingDecision.set(false);
@@ -471,6 +518,7 @@ export class AdminBusinessApplicationDetailComponent implements OnInit {
 
   private decisionError(error: { status?: number }): string {
     if (error.status === 409) {
+      this.loadApplication();
       return 'The application changed. Refresh and try again.';
     }
     if (error.status === 403) {

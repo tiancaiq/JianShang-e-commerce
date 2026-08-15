@@ -1,8 +1,13 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
+import { AdminService } from '../../core/services/admin.service';
+import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 import { environment } from '../../../environments/environment';
+import {
+  ADMIN_SEARCH_MAINTENANCE_ENABLED,
+} from '../../features/admin/admin-search-maintenance.capability';
 
 @Component({
   selector: 'app-admin-layout',
@@ -10,23 +15,47 @@ import { environment } from '../../../environments/environment';
   imports: [RouterLink, RouterLinkActive, RouterOutlet, ToastContainerComponent],
   template: `
     <div class="admin-shell">
-      <aside class="admin-sidebar">
-        <a routerLink="/admin" class="brand">MSB<span>Admin</span></a>
-        <nav aria-label="Admin navigation">
-          <a routerLink="/admin/dashboard" routerLinkActive="active">Dashboard</a>
-          <a routerLink="/admin/business-applications" routerLinkActive="active">Business Review</a>
-          <a routerLink="/admin/listings/moderation" routerLinkActive="active">Listing Review</a>
-          @if (categoryGuidanceEnabled) {
-            <a routerLink="/admin/category-guidance" routerLinkActive="active">Category Guidance</a>
+      <aside class="admin-sidebar" [class.menu-open]="mobileMenuOpen()">
+        <div class="sidebar-heading">
+          <a routerLink="/admin" class="brand" (click)="closeMobileMenu()">MSB<span>Admin</span></a>
+          <button
+            type="button"
+            class="menu-toggle"
+            aria-controls="admin-navigation"
+            [attr.aria-expanded]="mobileMenuOpen()"
+            (click)="mobileMenuOpen.set(!mobileMenuOpen())"
+          >Menu</button>
+        </div>
+        <nav id="admin-navigation" aria-label="Admin navigation">
+          @if (adminService.hasPermission(permissions.DASHBOARD_READ)) {
+            <a routerLink="/admin/dashboard" routerLinkActive="active" (click)="closeMobileMenu()">Dashboard</a>
+          }
+          @if (adminService.hasPermission(permissions.USER_READ)) {
+            <a routerLink="/admin/users" routerLinkActive="active" (click)="closeMobileMenu()">Users</a>
+          }
+          @if (adminService.hasPermission(permissions.BUSINESS_READ)) {
+            <a routerLink="/admin/businesses" routerLinkActive="active" (click)="closeMobileMenu()">Businesses</a>
+          }
+          @if (adminService.hasPermission(permissions.BUSINESS_APPLICATION_READ)) {
+            <a routerLink="/admin/business-applications" routerLinkActive="active" (click)="closeMobileMenu()">Business Review</a>
+          }
+          @if (adminService.hasPermission(permissions.LISTING_MODERATION_READ)) {
+            <a routerLink="/admin/listings/moderation" routerLinkActive="active" (click)="closeMobileMenu()">Listing Review</a>
+          }
+          @if (categoryGuidanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
+            <a routerLink="/admin/category-guidance" routerLinkActive="active" (click)="closeMobileMenu()">Category Guidance</a>
+          }
+          @if (adminSearchMaintenanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
+            <a routerLink="/admin/search-maintenance" routerLinkActive="active" (click)="closeMobileMenu()">Search Maintenance</a>
           }
         </nav>
-        <a routerLink="/" class="back-link">Marketplace</a>
+        <a routerLink="/" class="back-link" (click)="closeMobileMenu()">Marketplace</a>
       </aside>
 
       <section class="admin-main">
         <header class="admin-header">
           <h1>Admin</h1>
-          <button type="button" (click)="authService.logout('admin-portal')">Logout</button>
+          <button type="button" (click)="logout()">Logout</button>
         </header>
         <main class="admin-content">
           <div class="admin-content-inner">
@@ -68,6 +97,17 @@ import { environment } from '../../../environments/environment';
 
     .brand span {
       color: var(--color-info);
+    }
+
+    .sidebar-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .menu-toggle {
+      display: none;
     }
 
     nav {
@@ -160,15 +200,68 @@ import { environment } from '../../../environments/environment';
       .admin-sidebar {
         position: static;
         width: auto;
+        gap: 0.35rem;
+        padding: 0.65rem 0.75rem;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .brand {
+        padding: 0.4rem 0.25rem;
+      }
+
+      .menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-primary);
+        color: var(--color-text-primary);
+        padding: 0.5rem 0.8rem;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .admin-sidebar nav,
+      .admin-sidebar .back-link {
+        display: none;
+      }
+
+      .admin-sidebar.menu-open nav,
+      .admin-sidebar.menu-open .back-link {
+        display: flex;
+      }
+
+      .admin-sidebar .back-link {
+        margin-top: 0.25rem;
       }
 
       .admin-main {
         margin-left: 0;
+      }
+
+      .admin-content-inner {
+        padding: 1rem;
       }
     }
   `],
 })
 export class AdminLayoutComponent {
   authService = inject(AuthService);
+  readonly adminService = inject(AdminService);
+  readonly permissions = ADMIN_PERMISSIONS;
+  readonly mobileMenuOpen = signal(false);
   readonly categoryGuidanceEnabled = environment.features.categoryGuidance;
+  readonly adminSearchMaintenanceEnabled = inject(ADMIN_SEARCH_MAINTENANCE_ENABLED);
+
+  closeMobileMenu(): void {
+    this.mobileMenuOpen.set(false);
+  }
+
+  logout(): void {
+    this.adminService.clearCurrentAdmin();
+    this.authService.logout('admin-portal');
+  }
 }

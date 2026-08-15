@@ -103,6 +103,7 @@ class MarketplaceDiscoveryEvaluationTest(unittest.TestCase):
             {
                 "ASK_CLARIFY",
                 "RECOMMEND",
+                "COMPARE",
                 "NO_RESULTS",
                 "REFUSE",
                 "HANDOFF",
@@ -117,7 +118,7 @@ class MarketplaceDiscoveryEvaluationTest(unittest.TestCase):
         self.assertTrue(all(item.passed for item in report.case_results))
         self.assertTrue(
             all(
-                item.call_counts.fake_model <= 5
+                item.call_counts.fake_model <= 7
                 and item.call_counts.fake_search <= 2
                 and item.call_counts.fake_detail <= 5
                 and item.call_counts.fake_search + item.call_counts.fake_detail <= 6

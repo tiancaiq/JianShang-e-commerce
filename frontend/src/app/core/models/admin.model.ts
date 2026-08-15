@@ -1,6 +1,11 @@
+import { AdminPermission, AdminRole } from '../security/admin-permissions';
+
 export interface PlatformAdmin {
   userId: string;
   role: 'PLATFORM_ADMIN';
+  roles: AdminRole[];
+  permissions: AdminPermission[];
+  accountState: 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
 }
 
 export interface AdminBusinessSummary {

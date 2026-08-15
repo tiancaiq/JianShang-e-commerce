@@ -24,7 +24,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.equalTo;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -63,8 +63,8 @@ class ListingReportMySqlIntegrationTests {
     private static final String OTHER_REPORTER_ID = "01U00000000000000000000093";
     private static final String BUSINESS_ID = "01B00000000000000000000091";
     private static final String STORE_ID = "01S00000000000000000000091";
-    private static final String IMAGE_ID = "01I00000000000000000000091";
-    private static final String MEDIA_ID = "01O00000000000000000000091";
+    private static final String IMAGE_ID = "01N00000000000000000000091";
+    private static final String MEDIA_ID = "01P00000000000000000000091";
     private static final Instant NOW = Instant.parse("2026-07-20T10:15:30Z");
 
     @ServiceConnection
@@ -203,10 +203,8 @@ class ListingReportMySqlIntegrationTests {
         assertThat(created.created()).isTrue();
         assertThat(replay.created()).isFalse();
         assertThat(semanticDuplicate.created()).isFalse();
-        assertThat(Set.of(
-                created.response().reportId(),
-                replay.response().reportId(),
-                semanticDuplicate.response().reportId())).hasSize(1);
+        assertThat(replay.response().reportId()).isEqualTo(created.response().reportId());
+        assertThat(semanticDuplicate.response().reportId()).isEqualTo(created.response().reportId());
         assertThat(count("listing_reports")).isEqualTo(1);
         assertThat(countWhere("outbox_events", "event_type = 'listing-report.received.v1'"))
                 .isEqualTo(1);
@@ -238,7 +236,7 @@ class ListingReportMySqlIntegrationTests {
         jdbcTemplate.update("update listings set status = 'ACTIVE' where id = ?", LISTING_ID);
 
         ListingReportCreateRequest invalidMedia = request("DUPLICATE_OR_SPAM", false);
-        invalidMedia.setListingMediaIds(List.of("01I00000000000000000000099"));
+        invalidMedia.setListingMediaIds(List.of("01N00000000000000000000099"));
         assertThatThrownBy(() -> service.create(
                 invalidMedia,
                 "report-media-key-0001",
@@ -543,8 +541,8 @@ class ListingReportMySqlIntegrationTests {
     }
 
     private void assertBusinessAuthFailureLeavesNoState(RuntimeException exception) {
-        when(authServiceClient.checkBusinessListingPermission(anyString(), anyString()))
-                .thenThrow(exception);
+        doThrow(exception).when(authServiceClient)
+                .checkBusinessListingPermission(anyString(), anyString());
         assertThatThrownBy(() -> service.create(
                 request("OTHER_POLICY_CONCERN", false),
                 "report-auth-failure-key-0001",
@@ -554,7 +552,7 @@ class ListingReportMySqlIntegrationTests {
     }
 
     private void assertCurrentUserFailureLeavesNoState(RuntimeException exception) {
-        when(authServiceClient.requireCurrentUserForReport(anyString())).thenThrow(exception);
+        doThrow(exception).when(authServiceClient).requireCurrentUserForReport(anyString());
         assertThatThrownBy(() -> service.create(
                 request("OTHER_POLICY_CONCERN", false),
                 "report-actor-failure-key-0001",

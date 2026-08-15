@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from typing import Any, Generic, TypeVar
 
 from openai import AsyncOpenAI
@@ -26,9 +27,9 @@ from .schemas import (
 LOGGER = logging.getLogger(__name__)
 StructuredResultT = TypeVar("StructuredResultT", bound=BaseModel)
 _DISCOVERY_TOOL_NAMES = {
+    "CHECK_AVAILABILITY",
     "SEARCH_INDIVIDUAL",
     "GET_LISTING",
-    "DiscoveryTurnResult",
 }
 
 
@@ -47,6 +48,16 @@ class DiscoveryProviderResult:
 
     content: str
     tool_calls: tuple[DiscoveryProviderToolCall, ...]
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+@dataclass(frozen=True)
+class DiscoveryAnswerStreamResult:
+    """Summarizes one completed user-facing stream without retaining internals."""
+
+    text: str
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -180,6 +191,8 @@ class OpenAIProvider:
         maximum_output_tokens: int,
         maximum_tool_calls: int,
         correlation_id: str,
+        timeout_seconds: float | None = None,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> DiscoveryProviderResult:
         """Run one stored-disabled discovery ReAct model step with allowlisted tools."""
 
@@ -227,17 +240,52 @@ class OpenAIProvider:
         started = time.monotonic()
         operation = "marketplace_discovery_turn"
         try:
-            response = await self._responses().create(
-                model=self._settings.openai_model,
-                instructions=instructions,
-                input=input_items,
-                tools=tools,
-                tool_choice="required",
-                max_output_tokens=maximum_output_tokens,
-                max_tool_calls=maximum_tool_calls,
-                truncation="disabled",
-                store=False,
+            request_timeout = _bounded_discovery_timeout(
+                timeout_seconds,
+                fallback=self._settings.openai_timeout_seconds,
             )
+            request: dict[str, object] = {
+                "model": self._settings.openai_model,
+                "instructions": instructions,
+                "input": input_items,
+                "tools": tools,
+                "tool_choice": "auto",
+                "max_output_tokens": maximum_output_tokens,
+                "max_tool_calls": maximum_tool_calls,
+                "truncation": "disabled",
+                "store": False,
+                "timeout": request_timeout,
+            }
+            if self._settings.openai_model.startswith("gpt-5"):
+                # Discovery model calls are tightly budgeted; minimal reasoning
+                # keeps tool selection inside that application-owned ceiling.
+                request["reasoning"] = {"effort": "minimal"}
+            streamed_text: str | None = None
+            if on_text_delta is None:
+                response = await self._responses().create(**request)
+            else:
+                parts: list[str] = []
+                completed = False
+                async with self._responses().stream(**request) as stream:
+                    async for event in stream:
+                        event_type = getattr(event, "type", None)
+                        if event_type == "response.output_text.delta":
+                            delta = getattr(event, "delta", None)
+                            if not isinstance(delta, str) or not delta:
+                                raise invalid_provider_response()
+                            parts.append(delta)
+                            if len("".join(parts).encode("utf-8")) > 8_000:
+                                raise invalid_provider_response()
+                            await on_text_delta(delta)
+                        elif event_type == "response.completed":
+                            completed = True
+                        elif event_type in {"response.failed", "response.incomplete", "error"}:
+                            raise invalid_provider_response()
+                        # Reasoning and lifecycle events are intentionally ignored.
+                    response = await stream.get_final_response()
+                if not completed:
+                    raise invalid_provider_response()
+                streamed_text = "".join(parts)
             if getattr(response, "status", "completed") != "completed":
                 raise invalid_provider_response()
             tool_calls: list[DiscoveryProviderToolCall] = []
@@ -268,10 +316,15 @@ class OpenAIProvider:
                         arguments=arguments,
                     )
                 )
-            if not tool_calls or len(tool_calls) > maximum_tool_calls:
-                raise invalid_provider_response()
             content = getattr(response, "output_text", "") or ""
             if not isinstance(content, str) or len(content.encode("utf-8")) > 8_000:
+                raise invalid_provider_response()
+            if (
+                len(tool_calls) > maximum_tool_calls
+                or (not tool_calls and not content.strip())
+                or (tool_calls and content.strip())
+                or (streamed_text is not None and streamed_text != content)
+            ):
                 raise invalid_provider_response()
             input_tokens, output_tokens = _bounded_usage(response)
             if output_tokens > maximum_output_tokens:
@@ -285,6 +338,111 @@ class OpenAIProvider:
             )
             self._log_success(operation, correlation_id, started, response)
             return result
+        except LlmProviderError as error:
+            self._log_failure(operation, correlation_id, started, error)
+            raise
+        except Exception as error:
+            mapped = classify_openai_error(error)
+            self._log_failure(operation, correlation_id, started, mapped)
+            raise mapped from error
+
+    async def discovery_answer_stream(
+        self,
+        *,
+        instructions: str,
+        facts: dict[str, object],
+        maximum_output_tokens: int,
+        correlation_id: str,
+        on_text_delta: Callable[[str], Awaitable[None]],
+        timeout_seconds: float | None = None,
+    ) -> DiscoveryAnswerStreamResult:
+        """Stream only a designated tool-free answer over already-validated facts."""
+
+        if (
+            not isinstance(instructions, str)
+            or not instructions.strip()
+            or len(instructions.encode("utf-8")) > 8_000
+            or not isinstance(facts, dict)
+            or not 64 <= maximum_output_tokens <= 800
+            or not callable(on_text_delta)
+        ):
+            raise invalid_provider_response()
+        try:
+            encoded_facts = json.dumps(
+                facts,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as error:
+            raise invalid_provider_response() from error
+        if not 2 <= len(encoded_facts.encode("utf-8")) <= 32_000:
+            raise invalid_provider_response()
+
+        started = time.monotonic()
+        operation = "marketplace_discovery_final_stream"
+        try:
+            request: dict[str, object] = {
+                "model": self._settings.openai_model,
+                "instructions": instructions,
+                "input": [{"role": "user", "content": encoded_facts}],
+                "max_output_tokens": maximum_output_tokens,
+                "truncation": "disabled",
+                "store": False,
+                "timeout": _bounded_discovery_timeout(
+                    timeout_seconds,
+                    fallback=self._settings.openai_timeout_seconds,
+                ),
+            }
+            if self._settings.openai_model.startswith("gpt-5"):
+                request["reasoning"] = {"effort": "minimal"}
+            text_parts: list[str] = []
+            done_text: str | None = None
+            completed = False
+            async with self._responses().stream(**request) as stream:
+                async for event in stream:
+                    event_type = getattr(event, "type", None)
+                    if event_type == "response.output_text.delta":
+                        delta = getattr(event, "delta", None)
+                        if not isinstance(delta, str) or not delta:
+                            raise invalid_provider_response()
+                        text_parts.append(delta)
+                        if len("".join(text_parts)) > 800:
+                            raise invalid_provider_response()
+                        await on_text_delta(delta)
+                    elif event_type == "response.output_text.done":
+                        value = getattr(event, "text", None)
+                        if not isinstance(value, str):
+                            raise invalid_provider_response()
+                        done_text = value
+                    elif event_type == "response.completed":
+                        completed = True
+                    elif event_type in {
+                        "response.failed",
+                        "response.incomplete",
+                        "error",
+                    }:
+                        raise invalid_provider_response()
+                    # All reasoning, summaries, tool, and lifecycle details are private.
+                response = await stream.get_final_response()
+            text = "".join(text_parts)
+            if (
+                not completed
+                or not text.strip()
+                or done_text != text
+                or getattr(response, "status", "completed") != "completed"
+            ):
+                raise invalid_provider_response()
+            input_tokens, output_tokens = _bounded_usage(response)
+            if output_tokens > maximum_output_tokens:
+                raise invalid_provider_response()
+            self._log_success(operation, correlation_id, started, response)
+            return DiscoveryAnswerStreamResult(
+                text=text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=max(0, round((time.monotonic() - started) * 1_000)),
+            )
         except LlmProviderError as error:
             self._log_failure(operation, correlation_id, started, error)
             raise
@@ -509,6 +667,22 @@ def _serialize_output_item(item: Any) -> Any:
     if hasattr(item, "model_dump"):
         return item.model_dump(mode="json")
     return item
+
+
+def _bounded_discovery_timeout(
+    timeout_seconds: float | None,
+    *,
+    fallback: float,
+) -> float:
+    """Keep provider transport timeouts aligned with the discovery model budget."""
+
+    value = fallback if timeout_seconds is None else timeout_seconds
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise invalid_provider_response()
+    timeout = float(value)
+    if not 0 < timeout <= fallback <= 60:
+        raise invalid_provider_response()
+    return timeout
 
 
 def _token_usage(response: Any) -> tuple[int | None, int | None, int | None]:

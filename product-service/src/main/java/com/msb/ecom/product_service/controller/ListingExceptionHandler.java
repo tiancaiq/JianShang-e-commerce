@@ -13,6 +13,12 @@ import com.msb.ecom.product_service.model.ListingNotFoundException;
 import com.msb.ecom.product_service.model.ListingVersionConflictException;
 import com.msb.ecom.product_service.model.ModerationCaseNotFoundException;
 import com.msb.ecom.product_service.model.ModerationCaseVersionConflictException;
+import com.msb.ecom.product_service.model.UserCapabilityDecisionUnavailableException;
+import com.msb.ecom.product_service.model.UserCapabilityRestrictedException;
+import com.msb.ecom.product_service.model.BusinessCapabilityRestrictedException;
+import com.msb.ecom.product_service.model.BusinessCapabilityDecisionUnavailableException;
+import com.msb.ecom.product_service.enforcement.EnforcementExceptions;
+import com.msb.ecom.common.web.error.FieldError;
 import com.msb.ecom.product_service.search.ListingSearchUnavailableException;
 import com.msb.ecom.product_service.knowledge.ListingKnowledgeSourceNotFoundException;
 import com.msb.ecom.product_service.knowledge.CategoryGuidanceCategoryInactiveException;
@@ -31,6 +37,86 @@ import java.util.List;
 @RestControllerAdvice
 @Slf4j
 public class ListingExceptionHandler {
+
+    @ExceptionHandler(EnforcementExceptions.Validation.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementValidation(
+            EnforcementExceptions.Validation exception, HttpServletRequest request) {
+        return ResponseEntity.badRequest().body(new ApiErrorEnvelope(new ApiError(
+                "LISTING_ENFORCEMENT_INVALID", exception.getMessage(), List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(EnforcementExceptions.NotFound.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementNotFound(
+            EnforcementExceptions.NotFound exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiErrorEnvelope(new ApiError(
+                "LISTING_ENFORCEMENT_NOT_FOUND", exception.getMessage(), List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(EnforcementExceptions.Conflict.class)
+    public ResponseEntity<ApiErrorEnvelope> handleEnforcementConflict(
+            EnforcementExceptions.Conflict exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiErrorEnvelope(new ApiError(
+                "LISTING_ENFORCEMENT_CONFLICT", exception.getMessage(), List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BusinessCapabilityRestrictedException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessCapabilityRestricted(
+            BusinessCapabilityRestrictedException exception,
+            HttpServletRequest request) {
+        List<FieldError> details = new java.util.ArrayList<>();
+        details.add(new FieldError("scope", exception.scope()));
+        if (exception.effectiveAction() != null) details.add(new FieldError("effectiveAction", exception.effectiveAction()));
+        if (exception.expiresAt() != null) details.add(new FieldError("expiresAt", exception.expiresAt()));
+        if (exception.supportReference() != null) details.add(new FieldError("supportReference", exception.supportReference()));
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiErrorEnvelope(new ApiError(
+                "BUSINESS_CAPABILITY_RESTRICTED", exception.getMessage(), List.copyOf(details),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(BusinessCapabilityDecisionUnavailableException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleBusinessCapabilityDecisionUnavailable(
+            BusinessCapabilityDecisionUnavailableException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ApiErrorEnvelope(new ApiError(
+                "ENFORCEMENT_DECISION_UNAVAILABLE", exception.getMessage(), List.of(),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(UserCapabilityRestrictedException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleUserCapabilityRestricted(
+            UserCapabilityRestrictedException exception,
+            HttpServletRequest request) {
+        List<FieldError> details = new java.util.ArrayList<>();
+        details.add(new FieldError("scope", exception.scope()));
+        if (exception.effectiveAction() != null) {
+            details.add(new FieldError("effectiveAction", exception.effectiveAction()));
+        }
+        if (exception.expiresAt() != null) {
+            details.add(new FieldError("expiresAt", exception.expiresAt()));
+        }
+        if (exception.supportReference() != null) {
+            details.add(new FieldError("supportReference", exception.supportReference()));
+        }
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiErrorEnvelope(new ApiError(
+                "USER_CAPABILITY_RESTRICTED",
+                exception.getMessage(),
+                List.copyOf(details),
+                CorrelationIdFilter.current(request))));
+    }
+
+    @ExceptionHandler(UserCapabilityDecisionUnavailableException.class)
+    public ResponseEntity<ApiErrorEnvelope> handleUserCapabilityDecisionUnavailable(
+            UserCapabilityDecisionUnavailableException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ApiErrorEnvelope(new ApiError(
+                "ENFORCEMENT_DECISION_UNAVAILABLE",
+                exception.getMessage(),
+                List.of(),
+                CorrelationIdFilter.current(request))));
+    }
 
     @ExceptionHandler(ListingAuthorizationException.class)
     public ResponseEntity<ApiErrorEnvelope> handleListingAuthorization(

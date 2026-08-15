@@ -10,6 +10,7 @@ import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
 import com.msb.ecom.order_service.repository.CheckoutRepository;
 import com.msb.ecom.order_service.repository.CheckoutPaymentBindingRepository;
+import com.msb.ecom.order_service.repository.OrderConfirmationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -47,6 +49,7 @@ class CheckoutPaymentServiceTests {
     private final CheckoutPaymentBindingRepository paymentBindings =
             mock(CheckoutPaymentBindingRepository.class);
     private final PaymentIntentClient client = mock(PaymentIntentClient.class);
+    private final ProductCommerceClient products = mock(ProductCommerceClient.class);
     private CheckoutPaymentService service;
 
     @BeforeEach
@@ -100,6 +103,51 @@ class CheckoutPaymentServiceTests {
         verify(buyers, never()).resolveBuyer(any());
         verify(repository, never()).findOwned(any(), any());
         verify(client, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void buyingRestrictionFailsAfterOwnedCheckoutLookupButBeforePaymentIntentCreation() {
+        when(repository.findOwned(CHECKOUT_ID, BUYER_ID))
+                .thenReturn(Optional.of(checkout(CheckoutStatus.PENDING_PAYMENT, NOW.plusSeconds(900))));
+        org.mockito.Mockito.doThrow(new CheckoutException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "USER_CAPABILITY_RESTRICTED",
+                "Buying is currently unavailable for this marketplace account."))
+                .when(buyers).requireCapability(BUYER_ID, "USER_BUYING");
+
+        assertThatThrownBy(() -> service.create(CHECKOUT_ID, KEY, "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(403);
+                    assertThat(exception.code()).isEqualTo("USER_CAPABILITY_RESTRICTED");
+                });
+
+        verify(repository).findOwned(CHECKOUT_ID, BUYER_ID);
+        verify(client, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void listingRestrictionFailsBeforePaymentIntentCreation() {
+        when(repository.findOwned(CHECKOUT_ID, BUYER_ID))
+                .thenReturn(Optional.of(checkout(CheckoutStatus.PENDING_PAYMENT, NOW.plusSeconds(900))));
+        org.mockito.Mockito.doThrow(new CheckoutException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "LISTING_PURCHASABILITY_RESTRICTED",
+                "This item is unavailable for purchase."))
+                .when(products).requirePurchasable(Set.of(
+                        "01L00000000000000000000001",
+                        "01L00000000000000000000002"));
+
+        assertThatThrownBy(() -> service.create(CHECKOUT_ID, KEY, "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(403);
+                    assertThat(exception.code()).isEqualTo("LISTING_PURCHASABILITY_RESTRICTED");
+                });
+
+        verify(products).requirePurchasable(Set.of(
+                "01L00000000000000000000001",
+                "01L00000000000000000000002"));
+        verify(client, never()).create(any(), any(), any());
+        verify(paymentBindings, never()).insertOrVerify(any());
     }
 
     @Test
@@ -267,6 +315,8 @@ class CheckoutPaymentServiceTests {
                 checkoutProperties,
                 paymentProperties,
                 client,
+                products,
+                mock(OrderConfirmationRepository.class),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

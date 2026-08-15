@@ -103,6 +103,34 @@ class OrderCancellationServiceTests {
     }
 
     @Test
+    void acceptedProcessingShippedAndDeliveredGroupsAreAuthoritativelyNotCancellable() {
+        OrderCancellationService service = transactionalService();
+        when(actors.currentActor()).thenReturn(
+                new CurrentActor("buyer-subject", "token", null, null, true));
+        when(buyers.resolveBuyer("buyer-subject")).thenReturn(BUYER_ID);
+        when(repository.lockOwnedOrder(ORDER_ID, BUYER_ID)).thenReturn(Optional.of(
+                new OrderCancellationRepository.OrderRecord(
+                        ORDER_ID, id(10), BUYER_ID, "CONFIRMED", "SUCCEEDED", 0)));
+        when(repository.lockBuyerCommandScope(BUYER_ID)).thenReturn(true);
+
+        int index = 0;
+        for (String status : List.of("ACCEPTED", "PROCESSING", "SHIPPED", "DELIVERED")) {
+            String key = "cancel-started-" + status.toLowerCase();
+            when(repository.findCommand(BUYER_ID, OrderCancellationService.OPERATION, key))
+                    .thenReturn(Optional.empty());
+            when(repository.lockCommand(BUYER_ID, OrderCancellationService.OPERATION, key))
+                    .thenReturn(Optional.empty());
+            when(repository.lockGroups(ORDER_ID)).thenReturn(List.of(
+                    new OrderCancellationRepository.GroupRecord(
+                            id(30 + index++), id(40), status, "NONE", NOW.plusSeconds(60))));
+
+            assertCode(() -> service.request(ORDER_ID, "0", key, false, "correlation"),
+                    "ORDER_CANCELLATION_FULFILLMENT_STARTED");
+        }
+        verifyNoInteractions(ids);
+    }
+
+    @Test
     void expiredKeyIsRemovedBeforeReplayLookupAndNormalOwnershipEvaluation() {
         OrderCancellationService service = transactionalService();
         when(actors.currentActor()).thenReturn(

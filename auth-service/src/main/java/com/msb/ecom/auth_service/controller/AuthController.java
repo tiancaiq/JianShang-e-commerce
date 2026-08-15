@@ -6,7 +6,9 @@ import com.msb.ecom.auth_service.dto.AvatarUploadRequest;
 import com.msb.ecom.auth_service.dto.AvatarUploadResponse;
 import com.msb.ecom.auth_service.dto.CurrentUserResponse;
 import com.msb.ecom.auth_service.dto.UpdateCurrentUserRequest;
+import com.msb.ecom.auth_service.dto.AdminUserContracts.UserMarketplaceCapabilities;
 import com.msb.ecom.auth_service.service.AuthService;
+import com.msb.ecom.auth_service.service.UserCapabilityService;
 import com.msb.ecom.common.web.http.IfMatchVersion;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class AuthController {
     private static final String PROFILE_VERSION_REQUIRED = "If-Match must contain the current profile version";
 
     private final AuthService authService;
+    private final UserCapabilityService userCapabilityService;
 
     @GetMapping("/me")
     public ApiDataResponse<CurrentUserResponse> me() {
@@ -45,6 +48,11 @@ public class AuthController {
         return new ApiDataResponse<>(authService.updateCurrentUser(
                 request,
                 IfMatchVersion.parseRequired(ifMatch, PROFILE_VERSION_REQUIRED)));
+    }
+
+    @GetMapping("/me/marketplace-capabilities")
+    public ApiDataResponse<UserMarketplaceCapabilities> marketplaceCapabilities() {
+        return new ApiDataResponse<>(userCapabilityService.currentUserCapabilities());
     }
 
     @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

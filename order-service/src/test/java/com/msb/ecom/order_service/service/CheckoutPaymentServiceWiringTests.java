@@ -5,6 +5,7 @@ import com.msb.ecom.order_service.config.CheckoutPaymentProperties;
 import com.msb.ecom.order_service.config.CheckoutProperties;
 import com.msb.ecom.order_service.repository.CheckoutRepository;
 import com.msb.ecom.order_service.repository.CheckoutPaymentBindingRepository;
+import com.msb.ecom.order_service.repository.OrderConfirmationRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -35,6 +36,12 @@ class CheckoutPaymentServiceWiringTests {
 
     @MockitoBean
     PaymentIntentClient paymentIntentClient;
+
+    @MockitoBean
+    ProductCommerceClient productCommerceClient;
+
+    @MockitoBean
+    OrderConfirmationRepository orderConfirmationRepository;
 
     @Autowired
     CheckoutPaymentService checkoutPaymentService;

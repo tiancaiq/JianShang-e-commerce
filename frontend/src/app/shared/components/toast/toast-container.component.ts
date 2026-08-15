@@ -7,8 +7,14 @@ import { ToastService } from '../../../core/services/toast.service';
   template: `
     <div class="toast-container">
       @for (toast of toastService.toasts(); track toast.id) {
-        <div class="toast" [class]="'toast--' + toast.type" (click)="toastService.dismiss(toast.id)">
-          <div class="toast-icon">
+        <div
+          class="toast"
+          [class]="'toast--' + toast.type"
+          [attr.role]="toast.type === 'error' ? 'alert' : 'status'"
+          [attr.aria-live]="toast.type === 'error' ? 'assertive' : 'polite'"
+          aria-atomic="true"
+        >
+          <div class="toast-icon" aria-hidden="true">
             @switch (toast.type) {
               @case ('success') { <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg> }
               @case ('error') { <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg> }
@@ -17,6 +23,12 @@ import { ToastService } from '../../../core/services/toast.service';
             }
           </div>
           <span class="toast-message">{{ toast.message }}</span>
+          <button
+            type="button"
+            class="toast-dismiss"
+            [attr.aria-label]="'Dismiss notification: ' + toast.message"
+            (click)="toastService.dismiss(toast.id)"
+          >×</button>
         </div>
       }
     </div>
@@ -41,7 +53,6 @@ import { ToastService } from '../../../core/services/toast.service';
       border-radius: var(--radius-lg);
       background: var(--color-bg-elevated);
       border: 1px solid var(--color-border);
-      cursor: pointer;
       animation: slideInRight 0.3s ease-out;
       box-shadow: var(--shadow-lg);
     }
@@ -67,9 +78,30 @@ import { ToastService } from '../../../core/services/toast.service';
     }
 
     .toast-message {
+      flex: 1;
       font-size: 0.8125rem;
       color: var(--color-text-primary);
       line-height: 1.4;
+    }
+
+    .toast-dismiss {
+      width: 1.75rem;
+      height: 1.75rem;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 1.15rem;
+      line-height: 1;
+    }
+
+    .toast-dismiss:hover,
+    .toast-dismiss:focus-visible {
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
     }
 
     @keyframes slideInRight {

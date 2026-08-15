@@ -29,6 +29,9 @@ class CheckoutServiceWiringTests {
     BuyerIdentityClient buyerIdentityClient;
 
     @MockitoBean
+    ProductCommerceClient productCommerceClient;
+
+    @MockitoBean
     CheckoutCalculationService calculationService;
 
     @MockitoBean

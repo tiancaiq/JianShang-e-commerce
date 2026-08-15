@@ -110,10 +110,12 @@ public final class CommonApiExceptionHandler {
     ) {
         String correlationId = CorrelationIdFilter.current(request);
         log.error(
-                "event={} correlationId={} exceptionCategory={}",
+                "event={} correlationId={} exceptionCategory={} exceptionClass={} rootCauseClass={}",
                 UNEXPECTED_EXCEPTION_EVENT,
                 correlationId,
-                safeExceptionCategory(exception)
+                safeExceptionCategory(exception),
+                exception.getClass().getSimpleName(),
+                rootCauseClass(exception)
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(envelope(
@@ -129,6 +131,14 @@ public final class CommonApiExceptionHandler {
         return exception instanceof RuntimeException
                 ? "RUNTIME_EXCEPTION"
                 : "CHECKED_EXCEPTION";
+    }
+
+    private String rootCauseClass(Exception exception) {
+        Throwable cause = exception;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        return cause.getClass().getSimpleName();
     }
 
     private ResponseEntity<ApiErrorEnvelope> response(

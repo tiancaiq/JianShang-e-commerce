@@ -24,6 +24,16 @@ class ProviderErrorCode(StrEnum):
     INVALID_RESPONSE = "OPENAI_INVALID_RESPONSE"
 
 
+class ProviderFailureKind(StrEnum):
+    """Stable provider failure source for safe downstream telemetry."""
+
+    CONFIGURATION = "configuration"
+    TRANSPORT = "transport"
+    STATUS = "status"
+    TIMEOUT = "timeout"
+    RESPONSE_SCHEMA = "response_schema"
+
+
 class LlmProviderError(RuntimeError):
     """Carries a stable, non-secret provider failure classification."""
 
@@ -34,11 +44,13 @@ class LlmProviderError(RuntimeError):
         *,
         retryable: bool,
         status_code: int,
+        failure_kind: ProviderFailureKind | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
         self.status_code = status_code
+        self.failure_kind = failure_kind
 
 
 def provider_not_configured() -> LlmProviderError:
@@ -47,6 +59,7 @@ def provider_not_configured() -> LlmProviderError:
         "OpenAI runtime credentials are not configured",
         retryable=False,
         status_code=503,
+        failure_kind=ProviderFailureKind.CONFIGURATION,
     )
 
 
@@ -56,6 +69,7 @@ def invalid_provider_response() -> LlmProviderError:
         "OpenAI returned an unusable structured response",
         retryable=False,
         status_code=502,
+        failure_kind=ProviderFailureKind.RESPONSE_SCHEMA,
     )
 
 
@@ -68,6 +82,7 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
             "OpenAI rejected the configured credentials",
             retryable=False,
             status_code=503,
+            failure_kind=ProviderFailureKind.STATUS,
         )
     if isinstance(error, (PermissionDeniedError, NotFoundError)):
         return LlmProviderError(
@@ -75,6 +90,7 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
             "The configured OpenAI model is unavailable to this project",
             retryable=False,
             status_code=503,
+            failure_kind=ProviderFailureKind.STATUS,
         )
     if isinstance(error, RateLimitError):
         error_code = getattr(error, "code", None)
@@ -84,12 +100,14 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
                 "OpenAI project quota is exhausted",
                 retryable=False,
                 status_code=503,
+                failure_kind=ProviderFailureKind.STATUS,
             )
         return LlmProviderError(
             ProviderErrorCode.RATE_LIMITED,
             "OpenAI rate limited the request",
             retryable=True,
             status_code=503,
+            failure_kind=ProviderFailureKind.STATUS,
         )
     if isinstance(error, APITimeoutError):
         return LlmProviderError(
@@ -97,6 +115,7 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
             "OpenAI request timed out",
             retryable=True,
             status_code=504,
+            failure_kind=ProviderFailureKind.TIMEOUT,
         )
     if isinstance(error, APIConnectionError):
         return LlmProviderError(
@@ -104,6 +123,7 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
             "OpenAI could not be reached",
             retryable=True,
             status_code=503,
+            failure_kind=ProviderFailureKind.TRANSPORT,
         )
     if isinstance(error, APIStatusError) and error.status_code >= 500:
         return LlmProviderError(
@@ -111,11 +131,12 @@ def classify_openai_error(error: Exception) -> LlmProviderError:
             "OpenAI is temporarily unavailable",
             retryable=True,
             status_code=503,
+            failure_kind=ProviderFailureKind.STATUS,
         )
     return LlmProviderError(
         ProviderErrorCode.UNAVAILABLE,
         "OpenAI request failed",
         retryable=False,
         status_code=502,
+        failure_kind=ProviderFailureKind.TRANSPORT,
     )
-

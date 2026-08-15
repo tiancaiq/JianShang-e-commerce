@@ -5,6 +5,7 @@ import { of, throwError } from 'rxjs';
 import { AdminListingModerationCase } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AdminService } from '../../core/services/admin.service';
 import { AdminListingModerationComponent } from './admin-listing-moderation.component';
 
 describe('AdminListingModerationComponent', () => {
@@ -13,6 +14,7 @@ describe('AdminListingModerationComponent', () => {
   let listingService: jasmine.SpyObj<ListingService>;
   let toastService: jasmine.SpyObj<ToastService>;
   let router: jasmine.SpyObj<Router>;
+  let adminService: jasmine.SpyObj<AdminService>;
 
   const moderationCase: AdminListingModerationCase = {
     id: '01MC0000000000000000000001',
@@ -48,6 +50,17 @@ describe('AdminListingModerationComponent', () => {
     ]);
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
+    adminService = jasmine.createSpyObj<AdminService>('AdminService', ['getCurrentAdmin', 'hasPermission']);
+    adminService.hasPermission.and.returnValue(true);
+    adminService.getCurrentAdmin.and.returnValue(of({
+      data: {
+        userId: '01A00000000000000000000001',
+        role: 'PLATFORM_ADMIN',
+        roles: ['SUPER_ADMIN'],
+        permissions: ['admin.listing.moderation.read', 'admin.listing.moderation.claim', 'admin.listing.moderation.resolve'],
+        accountState: 'ACTIVE',
+      },
+    }));
 
     listingService.getListingModerationCases.and.returnValue(of([moderationCase]));
     listingService.claimListingModerationCase.and.returnValue(of({
@@ -69,6 +82,7 @@ describe('AdminListingModerationComponent', () => {
         { provide: ListingService, useValue: listingService },
         { provide: ToastService, useValue: toastService },
         { provide: Router, useValue: router },
+        { provide: AdminService, useValue: adminService },
       ],
     }).compileComponents();
 
@@ -85,6 +99,19 @@ describe('AdminListingModerationComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('NORMAL');
     expect(fixture.nativeElement.textContent).toContain('Alex Seller');
     expect(fixture.nativeElement.textContent).toContain('01U00000000000000000000001');
+    const filterButtons = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('.filter-btn'),
+    ) as HTMLButtonElement[];
+    expect(filterButtons.find(button => button.textContent?.trim() === 'Open')?.getAttribute('aria-pressed')).toBe('true');
+    expect(filterButtons.find(button => button.textContent?.trim() === 'Resolved')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('renders read-only queue cards without claim permission', () => {
+    adminService.hasPermission.and.callFake(permission => permission === 'admin.listing.moderation.read');
+    fixture.detectChanges();
+
+    const buttons = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'));
+    expect(buttons.some(button => button.textContent?.trim() === 'Claim')).toBeFalse();
   });
 
   it('reloads the queue when the filter changes', () => {

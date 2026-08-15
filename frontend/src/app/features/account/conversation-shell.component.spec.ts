@@ -4,12 +4,16 @@ import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angul
 import { BehaviorSubject, Subject, of } from 'rxjs';
 import { ConversationPage, ConversationSummary } from '../../core/models/chat.model';
 import { ChatService } from '../../core/services/chat.service';
+import { AgentMarketplaceDiscoveryService } from '../agent/agent-marketplace-discovery.service';
+import { AgentMarketplaceV2Service } from '../agent/agent-marketplace-v2.service';
 import { ConversationShellComponent } from './conversation-shell.component';
 
 describe('ConversationShellComponent', () => {
   let fixture: ComponentFixture<ConversationShellComponent>;
   let component: ConversationShellComponent;
   let chatService: jasmine.SpyObj<ChatService>;
+  let discoveryService: jasmine.SpyObj<AgentMarketplaceDiscoveryService>;
+  let v2Service: jasmine.SpyObj<AgentMarketplaceV2Service>;
   let paramMap: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
   let conversationRead: Subject<string>;
   let router: Router;
@@ -99,6 +103,37 @@ describe('ConversationShellComponent', () => {
       'ChatService',
       ['getConversations', 'getConversation', 'getMessages', 'sendMessage', 'markRead', 'markDone', 'confirmCompletion', 'notifyConversationRead'],
     );
+    discoveryService = jasmine.createSpyObj<AgentMarketplaceDiscoveryService>(
+      'AgentMarketplaceDiscoveryService',
+      ['createOrResumeSession', 'getSession', 'getMessages', 'sendMessage', 'excludeListing', 'streamMessage', 'retryResponse'],
+    );
+    v2Service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
+      'AgentMarketplaceV2Service',
+      ['createSession', 'listMessages', 'streamMessage', 'retryResponse', 'stopMessage'],
+    );
+    v2Service.createSession.and.returnValue(of({
+      sessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', sessionType: 'MARKETPLACE_AGENT_V2',
+      status: 'OPEN', createdAt: '2026-08-03T01:00:00Z', updatedAt: '2026-08-03T01:00:00Z',
+    }));
+    v2Service.listMessages.and.returnValue(of({ data: [], hasMore: false }));
+    discoveryService.createOrResumeSession.and.returnValue(of({
+      id: '01D00000000000000000000001',
+      sessionType: 'MARKETPLACE_DISCOVERY',
+      status: 'OPEN',
+      preferenceState: {
+        query: null, categoryId: null, condition: null, minPrice: null,
+        maxPrice: null, city: null, county: null, selectedListingId: null,
+      },
+      preferenceVersion: 0,
+      clarificationTurnCount: 0,
+      clarificationQuestionCount: 0,
+      exclusions: [],
+      createdAt: '2026-07-20T02:00:00Z',
+      updatedAt: '2026-07-20T02:00:00Z',
+    }));
+    discoveryService.getMessages.and.returnValue(of({
+      data: [], nextCursor: null, hasMore: false,
+    }));
     Object.defineProperty(chatService, 'conversationRead$', {
       value: conversationRead.asObservable(),
     });
@@ -151,6 +186,8 @@ describe('ConversationShellComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: ChatService, useValue: chatService },
+        { provide: AgentMarketplaceDiscoveryService, useValue: discoveryService },
+        { provide: AgentMarketplaceV2Service, useValue: v2Service },
         { provide: ActivatedRoute, useValue: { paramMap } },
       ],
     }).compileComponents();
@@ -216,7 +253,7 @@ describe('ConversationShellComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('No conversations yet.');
   });
 
-  it('navigates the enabled agent row to the reserved agent route without using ChatService as an agent client', () => {
+  it('opens discovery assistant in the messages chat without using ChatService as an agent client', () => {
     Object.defineProperty(component, 'aiAssistantEnabled', { value: true });
     fixture.detectChanges();
     chatService.getConversation.calls.reset();
@@ -225,12 +262,18 @@ describe('ConversationShellComponent', () => {
     fixture.nativeElement.querySelector('.agent-row').click();
     fixture.detectChanges();
 
-    expect(router.navigate).toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(router.navigate).not.toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('How can I help?');
+    expect(fixture.nativeElement.textContent).toContain('Message the marketplace assistant');
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
     expect(chatService.getConversation).not.toHaveBeenCalled();
     expect(chatService.getMessages).not.toHaveBeenCalled();
+    expect(discoveryService.createOrResumeSession).toHaveBeenCalledWith(false);
+    expect(discoveryService.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('uses the same single Agent destination when discovery alone is enabled', () => {
+  it('uses the same inline discovery assistant when discovery alone is enabled', () => {
     Object.defineProperty(component, 'aiDiscoveryEnabled', { value: true });
     fixture.detectChanges();
     chatService.getConversation.calls.reset();
@@ -238,12 +281,48 @@ describe('ConversationShellComponent', () => {
 
     const row = fixture.nativeElement.querySelector('.agent-row') as HTMLButtonElement;
     expect(row).not.toBeNull();
-    expect(row.textContent).toContain('Marketplace discovery');
+    expect(row.textContent).toContain('Marketplace assistant');
     row.click();
+    fixture.detectChanges();
 
-    expect(router.navigate).toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(router.navigate).not.toHaveBeenCalledWith(['/account/messages/agent']);
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
     expect(chatService.getConversation).not.toHaveBeenCalled();
     expect(chatService.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('cuts the Marketplace assistant pane over to V2 when its build flag is enabled', async () => {
+    Object.defineProperty(component, 'agentV2Enabled', { value: true });
+    Object.defineProperty(component, 'aiAssistantEnabled', { value: true });
+    fixture.detectChanges();
+
+    fixture.nativeElement.querySelector('.agent-row').click();
+    fixture.detectChanges();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-v2-page')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Marketplace assistant');
+    expect(fixture.nativeElement.textContent).not.toContain('Development evaluation');
+    expect(fixture.nativeElement.textContent).not.toContain('Latest safe evaluation evidence');
+    expect(v2Service.createSession).toHaveBeenCalledOnceWith(false);
+    expect(discoveryService.createOrResumeSession).not.toHaveBeenCalled();
+  });
+
+  it('treats the reserved agent route parameter as inline discovery, not a conversation id', () => {
+    Object.defineProperty(component, 'aiAssistantEnabled', { value: true });
+    paramMap.next(convertToParamMap({ conversationId: 'agent' }));
+
+    fixture.detectChanges();
+
+    expect(component.agentSelected()).toBeTrue();
+    expect(fixture.nativeElement.querySelector('app-agent-marketplace-discovery')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('How can I help?');
+    expect(fixture.nativeElement.textContent).not.toContain('Choose a listing');
+    expect(chatService.getConversation).not.toHaveBeenCalledWith('agent');
+    expect(discoveryService.createOrResumeSession).toHaveBeenCalledWith(false);
   });
 
   it('opens a direct conversation route', () => {

@@ -37,7 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
 
@@ -111,6 +113,9 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
         assertThat(inventory.sideEffects).hasValue(1);
         assertThat(count("orders")).isEqualTo(1);
         assertThat(count("business_orders")).isEqualTo(2);
+        assertThat(jdbc.queryForList(
+                "SELECT store_name FROM business_orders ORDER BY business_id",
+                String.class)).containsExactly("Demo Store 200", "Demo Store 201");
         assertThat(count("order_items")).isEqualTo(2);
         assertThat(count("order_addresses")).isEqualTo(1);
         assertThat(count("order_status_history")).isEqualTo(1);
@@ -266,6 +271,35 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
         assertThat(illegal.safeCode()).isEqualTo("CHECKOUT_STATE_ILLEGAL");
         assertThat(inventory.calls).hasValue(0);
         assertThat(reservingInventory.calls).hasValue(0);
+        assertThat(count("orders")).isZero();
+    }
+
+    @Test
+    void listingRestrictionRetriesBeforeInventoryCommitOrOrderCreation() {
+        CheckoutAggregate checkout = seedPendingCheckout();
+        FakeInventory inventory = new FakeInventory(checkout);
+        ProductCommerceClient products = mock(ProductCommerceClient.class);
+        doThrow(new com.msb.ecom.order_service.model.CheckoutException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "LISTING_PURCHASABILITY_RESTRICTED",
+                "This item is unavailable for purchase."))
+                .when(products).requirePurchasable(checkout.items().stream()
+                        .map(CheckoutAggregate.Item::listingId)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+        var handler = new PaymentSucceededOrderConfirmationHandler(
+                new OrderConfirmationProperties(true, consumerName(), Duration.ofSeconds(30)),
+                new PaymentEventValidator(), checkouts, bindings, orders, inventory, null, products,
+                new CheckoutUlidGenerator(Clock.fixed(NOW, ZoneOffset.UTC)), objectMapper,
+                transactionManager, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        OrderConfirmationResult result = handler.handle(event(913));
+
+        assertThat(result.outcome()).isEqualTo(OrderConfirmationResult.Outcome.RETRY_REQUIRED);
+        assertThat(result.safeCode()).isEqualTo("LISTING_PURCHASABILITY_RESTRICTED");
+        verify(products).requirePurchasable(checkout.items().stream()
+                .map(CheckoutAggregate.Item::listingId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+        assertThat(inventory.calls).hasValue(0);
         assertThat(count("orders")).isZero();
     }
 
@@ -432,6 +466,7 @@ class PaymentSucceededOrderConfirmationMySqlIntegrationTests {
                 id(listing),
                 id(business),
                 id(store),
+                "Demo Store " + store,
                 1,
                 "Store item " + line,
                 "SKU-" + line,

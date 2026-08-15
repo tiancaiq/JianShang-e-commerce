@@ -1,0 +1,12 @@
+.hero span,
+.panel h3 + p small,
+.member span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 800px) {
+  .grid.two {
+    grid-template-columns: 1fr;
+  }
+}

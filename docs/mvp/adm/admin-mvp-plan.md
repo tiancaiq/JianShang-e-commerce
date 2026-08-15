@@ -8,7 +8,7 @@ discarded work.
 
 MVP admin must support:
 
-- Platform-admin authorization for the admin portal.
+- Fine-grained, application-owned authorization for the admin portal.
 - Business application queue, review detail, and decisions.
 - Listing moderation case queue, claim/release, review detail, and decisions.
 - Decision history and minimal audit visibility for the workflows above.
@@ -22,7 +22,7 @@ release slices even when the admin portal eventually needs views for them.
 Already implemented:
 
 - Admin frontend route group protected by auth guard.
-- Platform admin check through `/api/v1/admin/me`.
+- Effective admin roles and permissions through `/api/v1/admin/me`.
 - Business application decision:
   `POST /api/v1/admin/business-applications/{id}/decision`.
 - Basic listing moderation queue:
@@ -32,12 +32,30 @@ Already implemented:
 - Business application queue, detail, and versioned decision UX.
 - Listing moderation case queue, claim/release, review detail, and case
   resolution through the claimed case workflow.
+- Normalized chronological audit timelines on business application and listing
+  moderation detail pages.
+- Explicit listing case ownership capabilities that make cases assigned to
+  another admin, and resolved cases, read-only before an action is attempted.
 
-Known MVP gaps:
+`ADM-MVP-RC-01` completes the approved MVP workflows and `ADM-SEC-01`
+completes their fine-grained authorization foundation. `ADM-ENF-00`,
+`ADM-USER-01/02`, `ADM-BUS-04/05`, and `ADM-LIST-06` add reversible user,
+business, and listing enforcement with authoritative runtime checks. Search
+Maintenance remains ongoing, feature-gated work outside this release train.
+Category Guidance remains disabled by default. Reports, investigation cases,
+appeals, disputes, financial administration, payout enforcement, and AI
+automation remain deferred.
 
-- Admin decision history is split across workflow tables and is not surfaced
-  cleanly in the admin UI.
-- Admin UX still needs consistent history visibility across workflows.
+Cleanup verification status:
+
+| Milestone | Status |
+|---|---|
+| `ADM-MVP-RC-01` | Complete |
+| `ADM-SEC-01` | Complete |
+| `ADM-ENF-00` | Complete |
+| `ADM-USER-01/02` | Complete |
+| `ADM-BUS-04/05` | Complete |
+| `ADM-LIST-06` | Complete |
 
 ## MVP Slices
 
@@ -56,7 +74,7 @@ Deliverables:
 Acceptance criteria:
 
 - Non-admin users cannot load protected admin data.
-- Admin APIs verify `PLATFORM_ADMIN`.
+- Admin APIs verify the permission required by the requested operation.
 - Admin action requests carry actor context and correlation ID.
 
 ### ADM-BUS-01 Business application queue
@@ -241,6 +259,8 @@ Acceptance criteria:
 
 ### ADM-AUD-01 Minimal admin audit visibility
 
+Status: complete as part of `ADM-MVP-RC-01`.
+
 Goal: show enough history for admins to understand decisions made in MVP
 workflows.
 
@@ -258,18 +278,152 @@ Acceptance criteria:
 - Audit views do not include passwords, tokens, payment details, unrestricted
   chat bodies, or unrelated PII.
 
+Implementation notes:
+
+- Auth Service owns the business application timeline at
+  `GET /api/v1/admin/business-applications/{id}/timeline`.
+- Product Service owns the listing case timeline at
+  `GET /api/v1/admin/moderation/listing-cases/{caseId}/timeline`.
+- Both endpoints use the normalized admin timeline response contract while
+  retaining service-local persistence and authorization.
+- Listing case creation, reopen, claim, release, reassignment through a later
+  claim, resolution, active edit, and active removal are retained as immutable
+  audit entries when applicable.
+- Actor identity comes from the authenticated backend principal. Client actor
+  or reviewer identifiers are never accepted.
+
+## ADM-MVP-RC-01 Release Candidate
+
+Status: complete.
+
+Release-candidate coverage includes:
+
+- Complete business submission/provider/admin-decision timeline rendering.
+- Complete listing case creation, claim, release/reassignment, decision,
+  resolution, active edit, and active removal timeline rendering.
+- Reviewer display values and correlation IDs where available.
+- Explicit `canClaim`, `canRelease`, `canResolve`, `isReadOnly`, and
+  `readOnlyReason` frontend capabilities.
+- Explicit `403` messages and `409` state reloads without silently retrying a
+  moderation decision.
+- Playwright coverage in `frontend/e2e/admin-release-candidate.spec.ts` for
+  admin access, business approval, listing claim/resolution, a second admin's
+  read-only view, and audit visibility.
+
+The Playwright fixture uses the repository's existing local Keycloak/MySQL
+setup and requires the Docker-backed application stack to be running. The
+release-candidate browser workflow passed against that stack on 2026-08-12.
+
+## ADM-SEC-01 Fine-grained admin authorization
+
+Status: complete.
+
+Auth Service application persistence is the source of truth for admin role
+assignments and role-to-permission mappings. Keycloak authenticates the user
+and supplies the stable subject used to find the application user; Keycloak
+realm roles are not a second admin-authorization source. Existing
+`PLATFORM_ADMIN` assignments are copied to `SUPER_ADMIN` during migration and
+remain recognized during the compatibility period.
+
+The initial roles are `SUPER_ADMIN`, `TRUST_AND_SAFETY_ADMIN`,
+`BUSINESS_REVIEWER`, `LISTING_MODERATOR`, `SUPPORT_ADMIN`, `AUDITOR`, and the
+unassigned reserved role `AI_ADMIN_AGENT`. `ADM-USER-01/02` additionally adds
+the least-privileged `USER_RESTRICTOR` role for user read, restrict, and
+reinstate operations without suspend, ban, or PII access. `SUPER_ADMIN` has every registered
+permission. The focused reviewer and moderator roles have only the read and
+command permissions needed by their current workflows; `AUDITOR` is read-only.
+`AI_ADMIN_AGENT` has no permissions, is not assigned, and does not enable AI
+execution or automatic actions.
+
+Current workflow permissions are:
+
+- `admin.dashboard.read` and `admin.audit.read`.
+- `admin.business.application.read` and
+  `admin.business.application.decide`.
+- `admin.listing.moderation.read`, `admin.listing.moderation.claim`, and
+  `admin.listing.moderation.resolve`.
+- `admin.listing.edit` and `admin.listing.remove`.
+
+User, business, and listing-enforcement identifiers are activated by their
+target vertical migrations. Report and role-management identifiers remain
+reserved; registration of those identifiers does not implement their workflows.
+
+`GET /api/v1/admin/me` returns the application user ID, effective roles,
+effective permissions, and account state. Backend services enforce the
+specific permission before every existing business/listing admin operation;
+listing-case ownership, resolved-state, authenticated actor, and optimistic
+version checks remain additional mandatory constraints. Angular uses the same
+effective session to filter navigation, guard routes, and suppress unavailable
+commands, but frontend checks are not an authorization boundary.
+
+Role-assignment UI/API, reports, financial operations, payout enforcement, and
+AI automation remain explicitly deferred. User, business, and listing
+enforcement are complete target-specific workflows.
+
+## ADM-ENF-00 Shared enforcement foundation
+
+Status: complete. `ADM-USER-01/02`, `ADM-BUS-04/05`, and `ADM-LIST-06` expose
+the target-specific production workflows and runtime effects built on this
+foundation.
+
+Auth Service now owns internal enforcement records for users and businesses;
+Product Service owns the equivalent records for listings. Both foundations
+provide explicit capability scopes, reversible lifecycle history, durable
+idempotency, target/action optimistic concurrency, effective-restriction
+evaluation, ADM-SEC-01 authorization, dry-run validation, and normalized
+timeline mapping. The foundation initially exposed no production mutation
+controller or admin page; the completed target verticals now expose only their
+owned, runtime-effective commands.
+
+The model and runtime boundary are defined in
+`docs/mvp/adm/admin-enforcement-model.md`. Existing listing moderation and
+`REMOVED_BY_ADMIN` are unchanged. Keycloak disabling, login/messaging/payout
+effects, cascades, notifications, appeals, and AI execution remain outside the
+foundation. The three target integrations connect only their documented
+operational scopes and preserve independent user, business, and listing state.
+
+## ADM-USER-01/02 User administration and runtime enforcement
+
+Status: implemented and focused verification complete.
+
+Auth Service owns privacy-safe, paginated user search; user detail; active and
+historical actions; normalized enforcement timeline; create/revoke dry runs;
+confirmed commands; the authenticated user's safe capability summary; and the
+service-token-authenticated capability decision endpoint. Full email and email
+search require `admin.user.pii.read`. Read, audit, restrict, suspend, ban, and
+reinstate permissions are checked independently.
+
+`USER_BUYING` and `USER_SELLING` are operational. `USER_LOGIN` and
+`USER_MESSAGING` remain reserved and are not selectable. A marketplace ban is
+not identity deletion: Auth expands it to both operational scopes and stores
+those explicit scopes. Revocation targets one action and may reveal a weaker
+still-active action.
+
+Order Service checks buying capability before inventory reservation and before
+payment-intent creation. Product/Auth check selling capability before seller
+activation and listing mutation, including actions performed by a business
+staff member. Product also checks the individual listing owner's selling
+capability before buyer-confirmed trade completion. Existing orders, listings,
+business membership, Keycloak authentication, and other entities are not
+mutated by these actions. Decision unavailability fails protected writes closed
+with `503`; an active restriction returns `403`.
+
+Angular adds `/admin/users` and `/admin/users/:userId`, guarded by
+`admin.user.read`, with filters, a capability ledger, action/reinstatement dry
+runs, explicit confirmation, protected-account explanations, and timeline
+refresh. See `docs/mvp/adm/admin-user-control.md`.
+
 ## Deferred Admin Roadmap Scope
 
 The following features are in admin product scope but are deferred until after
 the MVP admin foundation is stable:
 
 1. Reports queue, starting with user-reported listings.
-2. User and business suspensions/restores.
-3. Support cases and staff notes.
-4. Chat evidence review with strict access auditing.
-5. Payment, order, and finance admin operations.
-6. Advanced trust, disputes, and safety tooling.
-7. AI moderation assistance.
+2. Investigation cases, appeals, and support notes.
+3. Chat evidence review with strict access auditing.
+4. Payment, order, payout, and finance admin operations.
+5. Advanced trust, disputes, and safety tooling.
+6. AI moderation assistance.
 
 These later slices need their own contracts, permissions, state machines,
 auditing rules, and release placement. They should not be mixed into the MVP
@@ -335,3 +489,20 @@ End-to-end coverage should validate:
 - Submitted listing to case creation, claim, and resolution.
 - Stale admin action handling.
 - Unauthorized user blocked from admin data.
+
+## ADM-BUS-04/05 implementation note (2026-08-15)
+
+Active-business search/detail and reversible business marketplace enforcement
+are implemented. The full new-sales and multi-member user-versus-business
+Playwright workflows pass. The operational and safety contract is documented
+in [admin-business-control.md](admin-business-control.md).
+
+## ADM-LIST-06 release boundary
+
+Reversible listing enforcement is implemented as a Product-owned policy ledger on the existing listing moderation detail. It supports `RESTRICT` and `SUSPEND`, explicit visibility/purchasability scopes, mandatory dry-run confirmation, versioned/idempotent commits, specific-action reinstatement, and audit history. It is separate from moderation decisions and `REMOVED_BY_ADMIN`.
+
+The complete Docker/Playwright matrix in
+[admin-listing-enforcement.md](admin-listing-enforcement.md) passes. Final
+cleanup delivery remains gated only on the complete post-cleanup repository,
+backend, frontend, and browser verification matrix. After that gate closes,
+the next admin milestone is `ADM-REP-00/01/02`.

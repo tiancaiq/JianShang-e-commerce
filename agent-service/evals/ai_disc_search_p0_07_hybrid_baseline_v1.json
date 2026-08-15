@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "AI_DISC_SEARCH_P0_07_FIXTURE_V1",
+  "fixtureVersion": "ai-disc-search-p0-07-hybrid-baseline-v1",
+  "cases": [
+    {
+      "caseId": "sleep-comfort-broad",
+      "relevantIds": ["SLEEP-1", "SLEEP-2", "SLEEP-3"],
+      "lexicalIds": ["SLEEP-1", "OTHER-1"],
+      "hybridIds": ["SLEEP-1", "SLEEP-2", "SLEEP-3"]
+    },
+    {
+      "caseId": "desk-chair-budget",
+      "relevantIds": ["CHAIR-1", "CHAIR-2"],
+      "lexicalIds": ["CHAIR-1", "OTHER-2"],
+      "hybridIds": ["CHAIR-1", "CHAIR-2"]
+    },
+    {
+      "caseId": "used-bicycle-irvine",
+      "relevantIds": ["BIKE-1", "BIKE-2"],
+      "lexicalIds": ["BIKE-1"],
+      "hybridIds": ["BIKE-1", "BIKE-2"]
+    },
+    {
+      "caseId": "beginner-camera-budget",
+      "relevantIds": ["CAMERA-1", "CAMERA-2"],
+      "lexicalIds": ["CAMERA-1", "OTHER-3"],
+      "hybridIds": ["CAMERA-1", "CAMERA-2"]
+    }
+  ]
+}

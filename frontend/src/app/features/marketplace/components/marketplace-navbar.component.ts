@@ -42,6 +42,16 @@ import { ToastService } from '../../../core/services/toast.service';
               }
             </a>
           }
+          @if (notificationsEnabled) {
+            <a routerLink="/account/notifications" routerLinkActive="active"
+               class="notification-link" [attr.aria-label]="notificationAriaLabel()">
+              <span aria-hidden="true">&#128276;</span>
+              Notifications
+              @if (notificationCount > 0) {
+                <span class="cart-count" aria-live="polite">{{ notificationCountLabel() }}</span>
+              }
+            </a>
+          }
           <a routerLink="/account/listings" routerLinkActive="active">
             <svg viewBox="0 0 24 24"><path d="M8 7h8l-2.2-2.2L15 3.6 19.4 8 15 12.4l-1.2-1.2L16 9H8V7zm8 10H8l2.2 2.2L9 20.4 4.6 16 9 11.6l1.2 1.2L8 15h8v2z"/></svg>
             Trades
@@ -352,6 +362,8 @@ export class MarketplaceNavbarComponent {
   @Input() authenticated = false;
   @Input() cartEnabled = false;
   @Input() cartCount = 0;
+  @Input() notificationsEnabled = false;
+  @Input() notificationCount = 0;
   @Input() currentUser: CurrentUser | null = null;
   @Output() loginRequested = new EventEmitter<void>();
   @Output() searchRequested = new EventEmitter<string>();
@@ -378,6 +390,15 @@ export class MarketplaceNavbarComponent {
   cartAriaLabel(): string {
     const count = Math.max(0, this.cartCount);
     return count === 1 ? 'Cart, 1 item' : `Cart, ${count} items`;
+  }
+
+  notificationCountLabel(): string {
+    return this.notificationCount > 99 ? '99+' : String(Math.max(0, this.notificationCount));
+  }
+
+  notificationAriaLabel(): string {
+    const count = Math.max(0, this.notificationCount);
+    return count === 1 ? 'Notifications, 1 unread' : `Notifications, ${count} unread`;
   }
 
   avatarUrl(): string | null {

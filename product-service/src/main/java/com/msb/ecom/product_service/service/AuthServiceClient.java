@@ -1,6 +1,7 @@
 package com.msb.ecom.product_service.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.msb.ecom.product_service.security.AdminPermission;
 
 import java.util.List;
 import java.util.Set;
@@ -20,6 +21,10 @@ public interface AuthServiceClient {
     BusinessListingPermissionDecision checkBusinessListingPermission(String bearerToken, String businessId);
 
     BusinessStoreContextAuthorization requireBusinessStoreContext(String bearerToken, String businessId);
+
+    void requireUserCapability(String userId, String scope);
+
+    void requireBusinessCapability(String businessId, String scope);
 
     PlatformAdminAuthorization requirePlatformAdmin(String bearerToken);
 
@@ -63,6 +68,42 @@ public interface AuthServiceClient {
         NOT_EDITABLE
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record UserCapabilityDecision(
+            String scope,
+            boolean allowed,
+            String effectiveAction,
+            String enforcementActionId,
+            String effectiveAt,
+            String expiresAt,
+            String supportReference) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record UserCapabilityDecisionResponse(
+            String userId,
+            String evaluatedAt,
+            List<UserCapabilityDecision> decisions) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BusinessCapabilityDecision(
+            String scope,
+            boolean allowed,
+            String effectiveAction,
+            String enforcementActionId,
+            String effectiveAt,
+            String expiresAt,
+            String supportReference) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BusinessCapabilityDecisionResponse(
+            String businessId,
+            String evaluatedAt,
+            List<BusinessCapabilityDecision> decisions) {
+    }
+
     final class AuthenticationException extends RuntimeException {
         public AuthenticationException() {
             super("Authenticated user is required.");
@@ -99,8 +140,40 @@ public interface AuthServiceClient {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PlatformAdminAuthorization(
             String userId,
-            String role
+            String role,
+            List<String> roles,
+            List<String> permissions,
+            String accountState
     ) {
+        public PlatformAdminAuthorization(String userId, String role) {
+            this(
+                    userId,
+                    role,
+                    List.of("SUPER_ADMIN"),
+                    List.of(
+                            AdminPermission.DASHBOARD_READ.id(),
+                            AdminPermission.AUDIT_READ.id(),
+                            AdminPermission.LISTING_MODERATION_READ.id(),
+                            AdminPermission.LISTING_MODERATION_CLAIM.id(),
+                            AdminPermission.LISTING_MODERATION_RESOLVE.id(),
+                            AdminPermission.LISTING_EDIT.id(),
+                            AdminPermission.LISTING_REMOVE.id(),
+                            AdminPermission.LISTING_SUSPEND.id(),
+                            AdminPermission.LISTING_REINSTATE.id()),
+                    "ACTIVE");
+        }
+
+        public PlatformAdminAuthorization {
+            roles = roles == null ? List.of("SUPER_ADMIN") : List.copyOf(roles);
+            permissions = permissions == null
+                    ? new PlatformAdminAuthorization(userId, role).permissions()
+                    : List.copyOf(permissions);
+            accountState = accountState == null ? "ACTIVE" : accountState;
+        }
+
+        public boolean hasPermission(AdminPermission permission) {
+            return permissions.contains(permission.id());
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

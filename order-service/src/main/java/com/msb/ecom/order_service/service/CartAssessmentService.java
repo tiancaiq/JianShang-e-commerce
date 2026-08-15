@@ -77,6 +77,9 @@ public class CartAssessmentService {
                     List.of());
         }
 
+        productClient.requirePurchasable(cart.items().stream()
+                .map(CartStoredItem::listingId).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+
         Map<SellerKey, Optional<BusinessStoreEligibilityClient.Eligibility>> eligibility = new LinkedHashMap<>();
         List<MutableLine> lines = cart.items().stream()
                 .map(item -> assessLine(item, eligibility))

@@ -30,6 +30,7 @@ public class NotificationReadService {
 
     private final NotificationReadProperties properties;
     private final NotificationActorIdentityClient identity;
+    private final NotificationBusinessAccessClient businessAccess;
     private final NotificationRepository repository;
     private final NotificationPresentationMapper presentation;
     private final NotificationReadMetrics metrics;
@@ -39,10 +40,22 @@ public class NotificationReadService {
     public NotificationReadService(
             NotificationReadProperties properties,
             NotificationActorIdentityClient identity,
+            NotificationBusinessAccessClient businessAccess,
             NotificationRepository repository,
             NotificationPresentationMapper presentation,
             NotificationReadMetrics metrics) {
-        this(properties, identity, repository, presentation, metrics, Clock.systemUTC());
+        this(properties, identity, businessAccess, repository, presentation, metrics, Clock.systemUTC());
+    }
+
+    // Retains the buyer-only construction seam used by the earlier NOT-01B tests.
+    public NotificationReadService(
+            NotificationReadProperties properties,
+            NotificationActorIdentityClient identity,
+            NotificationRepository repository,
+            NotificationPresentationMapper presentation,
+            NotificationReadMetrics metrics) {
+        this(properties, identity, unavailableBusinessAccess(), repository,
+                presentation, metrics, Clock.systemUTC());
     }
 
     NotificationReadService(
@@ -52,8 +65,21 @@ public class NotificationReadService {
             NotificationPresentationMapper presentation,
             NotificationReadMetrics metrics,
             Clock clock) {
+        this(properties, identity, unavailableBusinessAccess(), repository,
+                presentation, metrics, clock);
+    }
+
+    NotificationReadService(
+            NotificationReadProperties properties,
+            NotificationActorIdentityClient identity,
+            NotificationBusinessAccessClient businessAccess,
+            NotificationRepository repository,
+            NotificationPresentationMapper presentation,
+            NotificationReadMetrics metrics,
+            Clock clock) {
         this.properties = properties;
         this.identity = identity;
+        this.businessAccess = businessAccess;
         this.repository = repository;
         this.presentation = presentation;
         this.metrics = metrics;
@@ -94,6 +120,51 @@ public class NotificationReadService {
         } catch (DataAccessException exception) {
             throw unavailable("list", correlationId);
         }
+    }
+
+    public NotificationPageResponse listBusiness(
+            String authorization, String correlationId, String businessId,
+            String cursorValue, String limitValue) {
+        requireEnabled();
+        String boundedAuthorization = requireBearer(authorization);
+        requireBusinessId(businessId);
+        NotificationCursorCodec.Cursor cursor = NotificationCursorCodec.decode(cursorValue);
+        int limit = NotificationCursorCodec.limit(limitValue);
+        requireBusinessAccess(boundedAuthorization, correlationId, businessId);
+        try {
+            List<NotificationReadRow> loaded = repository.findScopePage(
+                    "BUSINESS", businessId, cursor == null ? null : cursor.createdAt(),
+                    cursor == null ? null : cursor.notificationId(), limit + 1);
+            boolean hasMore = loaded.size() > limit;
+            List<NotificationReadRow> visible = hasMore ? loaded.subList(0, limit) : loaded;
+            List<NotificationPageResponse.NotificationItem> items =
+                    visible.stream().map(presentation::map).toList();
+            String nextCursor = hasMore
+                    ? NotificationCursorCodec.encode(visible.get(visible.size() - 1)) : null;
+            return new NotificationPageResponse(items,
+                    new NotificationPageResponse.PageMetadata(nextCursor, hasMore));
+        } catch (NotificationReadException exception) {
+            throw exception;
+        } catch (DataAccessException exception) {
+            throw unavailable("business_list", correlationId);
+        }
+    }
+
+    public int unreadCount(String authorization, String correlationId) {
+        requireEnabled();
+        String userId = resolveRecipient(requireBearer(authorization), correlationId);
+        try { return repository.unreadCount("USER", userId); }
+        catch (DataAccessException exception) { throw unavailable("count", correlationId); }
+    }
+
+    public int businessUnreadCount(
+            String authorization, String correlationId, String businessId) {
+        requireEnabled();
+        String bearer = requireBearer(authorization);
+        requireBusinessId(businessId);
+        requireBusinessAccess(bearer, correlationId, businessId);
+        try { return repository.unreadCount("BUSINESS", businessId); }
+        catch (DataAccessException exception) { throw unavailable("business_count", correlationId); }
     }
 
     // Marks one recipient-owned notification read while preserving the first timestamp on replay.
@@ -142,6 +213,37 @@ public class NotificationReadService {
         }
     }
 
+    public void markBusinessRead(
+            String authorization, String correlationId, String businessId,
+            String notificationId, long contentLength, String transferEncoding) {
+        requireEnabled();
+        String bearer = requireBearer(authorization);
+        requireBusinessId(businessId);
+        requireId(notificationId);
+        requireNoBody(contentLength, transferEncoding);
+        requireBusinessAccess(bearer, correlationId, businessId);
+        try {
+            if (!repository.markScopeRead(
+                    "BUSINESS", businessId, notificationId, clock.instant())) {
+                throw new NotificationReadException(HttpStatus.NOT_FOUND,
+                        "NOTIFICATION_NOT_FOUND", "Notification was not found.");
+            }
+        } catch (NotificationReadException exception) { throw exception; }
+        catch (DataAccessException exception) { throw unavailable("business_read_one", correlationId); }
+    }
+
+    public void markAllBusinessRead(
+            String authorization, String correlationId, String businessId,
+            long contentLength, String transferEncoding) {
+        requireEnabled();
+        String bearer = requireBearer(authorization);
+        requireBusinessId(businessId);
+        requireNoBody(contentLength, transferEncoding);
+        requireBusinessAccess(bearer, correlationId, businessId);
+        try { repository.markScopeAllRead("BUSINESS", businessId, clock.instant()); }
+        catch (DataAccessException exception) { throw unavailable("business_read_all", correlationId); }
+    }
+
     private void requireEnabled() {
         if (!properties.enabled()) {
             throw new NotificationReadException(
@@ -170,6 +272,25 @@ public class NotificationReadService {
                     HttpStatus.BAD_REQUEST,
                     "NOTIFICATION_ID_INVALID",
                     "Notification ID is invalid.");
+        }
+    }
+
+    private void requireBusinessId(String businessId) {
+        if (businessId == null || !businessId.matches("[0-9A-Z]{26}")) {
+            throw new NotificationReadException(HttpStatus.BAD_REQUEST,
+                    "NOTIFICATION_BUSINESS_ID_INVALID", "Business ID is invalid.");
+        }
+    }
+
+    private void requireBusinessAccess(String authorization, String correlationId, String businessId) {
+        try {
+            businessAccess.requireNotificationAccess(authorization, correlationId, businessId);
+        } catch (RestNotificationBusinessAccessClient.AccessDeniedException exception) {
+            throw new NotificationReadException(HttpStatus.NOT_FOUND,
+                    "NOTIFICATION_NOT_FOUND", "Notification was not found.");
+        } catch (RestNotificationBusinessAccessClient.DependencyUnavailableException exception) {
+            throw new NotificationReadException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "NOTIFICATION_IDENTITY_UNAVAILABLE", "Notification identity could not be resolved.");
         }
     }
 
@@ -235,5 +356,11 @@ public class NotificationReadService {
         } catch (Exception exception) {
             return "unavailable";
         }
+    }
+
+    private static NotificationBusinessAccessClient unavailableBusinessAccess() {
+        return (authorization, correlationId, businessId) -> {
+            throw new RestNotificationBusinessAccessClient.DependencyUnavailableException();
+        };
     }
 }

@@ -1,4 +1,5 @@
 import {
+  adminSearchMaintenanceRoute,
   agentMessageRoutes,
   buyerAddressesRoute,
   businessOrderRoutes,
@@ -7,6 +8,7 @@ import {
   checkoutDetailRoute,
   checkoutReviewRoute,
   notificationCenterRoute,
+  marketplaceAgentV2Route,
   routes,
   sellerInventoryRoute,
 } from './app.routes';
@@ -26,6 +28,23 @@ describe('app routes', () => {
     'wallet',
     'notifications',
   ]);
+
+  it('keeps the V2 evaluation route default-hidden and authenticated when enabled', () => {
+    expect(marketplaceAgentV2Route(false)).toEqual(jasmine.objectContaining({
+      path: 'account/marketplace-agent-v2', redirectTo: '/account/messages',
+    }));
+    expect(marketplaceAgentV2Route(true)).toEqual(jasmine.objectContaining({
+      path: 'account/marketplace-agent-v2', canActivate: [authGuard],
+      loadComponent: jasmine.any(Function),
+    }));
+  });
+
+  it('routes reserved assistant links to the unified messages page after V2 cutover', () => {
+    expect(agentMessageRoutes(true, true, true)).toEqual([
+      { path: 'account/messages/agent/:sessionId', redirectTo: '/account/messages', pathMatch: 'full' },
+      { path: 'account/messages/agent', redirectTo: '/account/messages', pathMatch: 'full' },
+    ]);
+  });
 
   it('keeps marketplace routes public', () => {
     const marketplaceRoute = routes.find(route => route.path === '');
@@ -73,6 +92,16 @@ describe('app routes', () => {
       path: 'dashboard',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'users',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.user.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'users/:userId',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.user.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: 'business-applications/:id',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
@@ -83,17 +112,22 @@ describe('app routes', () => {
       redirectTo: 'dashboard',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'search-maintenance',
+      redirectTo: 'dashboard',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: '',
       redirectTo: 'dashboard',
     }));
   });
 
-  it('protects marketplace account listing routes', () => {
+  it('protects marketplace account listing and cart routes', () => {
     const marketplaceRoute = routes.find(route => route.path === '');
 
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'cart',
-      redirectTo: '/marketplace',
+      canActivate: [authGuard],
+      loadComponent: jasmine.any(Function),
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'sell',
@@ -264,6 +298,7 @@ describe('app routes', () => {
       buyerAddressesRoute(true),
       notificationCenterRoute(true),
       categoryGuidanceRoute(true),
+      adminSearchMaintenanceRoute(true),
       ...agentMessageRoutes(true),
     ];
 

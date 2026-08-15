@@ -46,5 +46,12 @@ class NotificationDisabledRouteTests {
                 .get("/api/v1/notifications")
                 .then()
                 .statusCode(404);
+
+        RestAssured.given()
+                .header("Authorization", "Bearer disabled-notification-token")
+                .when()
+                .get("/api/v1/businesses/01K0BUSINESS00000000000000/notifications")
+                .then()
+                .statusCode(404);
     }
 }

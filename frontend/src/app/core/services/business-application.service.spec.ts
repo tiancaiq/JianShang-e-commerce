@@ -168,4 +168,17 @@ describe('BusinessApplicationService', () => {
     expect(request.request.headers.has('Authorization')).toBeFalse();
     request.flush({ data: application });
   });
+
+  it('loads the normalized business application audit timeline', () => {
+    service.getAdminTimeline(application.id).subscribe(response => {
+      expect(response.data[0].correlationId).toBe('business-audit-correlation');
+    });
+
+    const request = httpMock.expectOne(
+      `/api/v1/admin/business-applications/${application.id}/timeline`
+    );
+    expect(request.request.method).toBe('GET');
+    expect(request.request.withCredentials).toBeTrue();
+    request.flush({ data: [{ correlationId: 'business-audit-correlation' }] });
+  });
 });

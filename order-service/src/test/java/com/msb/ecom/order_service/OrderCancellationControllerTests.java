@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -72,6 +73,26 @@ class OrderCancellationControllerTests {
                 .andExpect(jsonPath("$.buyerId").doesNotExist())
                 .andExpect(jsonPath("$.paymentIntentId").doesNotExist())
                 .andExpect(jsonPath("$.businessIds").doesNotExist());
+    }
+
+    @Test
+    void emptyChunkedCommandRemainsBodyless() throws Exception {
+        Instant requestedAt = Instant.parse("2026-07-20T02:00:00Z");
+        when(service.request(
+                ORDER_ID, "\"0\"", "cancel-key-002", false, "chunked-correlation"))
+                .thenReturn(new OrderCancellationResponse(
+                        ORDER_ID, id(2), "CANCELLATION_REQUESTED", "PENDING", 1, requestedAt));
+
+        mockMvc.perform(post("/api/v1/orders/{orderId}/cancellation-requests", ORDER_ID)
+                        .with(jwt())
+                        .header("If-Match", "\"0\"")
+                        .header("Idempotency-Key", "cancel-key-002")
+                        .header("X-Correlation-Id", "chunked-correlation")
+                        .header(HttpHeaders.TRANSFER_ENCODING, "chunked"))
+                .andExpect(status().isOk());
+
+        verify(service).request(
+                ORDER_ID, "\"0\"", "cancel-key-002", false, "chunked-correlation");
     }
 
     @Test

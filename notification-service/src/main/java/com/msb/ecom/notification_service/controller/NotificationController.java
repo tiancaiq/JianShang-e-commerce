@@ -3,6 +3,7 @@ package com.msb.ecom.notification_service.controller;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.notification_service.dto.ApiDataResponse;
 import com.msb.ecom.notification_service.dto.NotificationPageResponse;
+import com.msb.ecom.notification_service.dto.NotificationCountResponse;
 import com.msb.ecom.notification_service.service.NotificationReadService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
@@ -39,6 +40,14 @@ public class NotificationController {
                 limit));
     }
 
+    @GetMapping("/unread-count")
+    public ApiDataResponse<NotificationCountResponse> unreadCount(
+            @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            HttpServletRequest request) {
+        return new ApiDataResponse<>(new NotificationCountResponse(service.unreadCount(
+                authorization, CorrelationIdFilter.current(request))));
+    }
+
     @PostMapping("/{notificationId}/read")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void markRead(
@@ -49,8 +58,8 @@ public class NotificationController {
                 authorization,
                 CorrelationIdFilter.current(request),
                 notificationId,
-                request.getContentLengthLong(),
-                request.getHeader(HttpHeaders.TRANSFER_ENCODING));
+                NotificationRequestBodyGuard.actualContentLength(request),
+                null);
     }
 
     @PostMapping("/read-all")
@@ -61,7 +70,7 @@ public class NotificationController {
         service.markAllRead(
                 authorization,
                 CorrelationIdFilter.current(request),
-                request.getContentLengthLong(),
-                request.getHeader(HttpHeaders.TRANSFER_ENCODING));
+                NotificationRequestBodyGuard.actualContentLength(request),
+                null);
     }
 }

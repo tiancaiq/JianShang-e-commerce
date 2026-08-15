@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,6 +58,7 @@ class CheckoutServiceTests {
     private final CartAssessmentService assessments = mock(CartAssessmentService.class);
     private final BuyerIdentityClient buyers = mock(BuyerIdentityClient.class);
     private final CheckoutCalculationService calculations = mock(CheckoutCalculationService.class);
+    private final ProductCommerceClient products = mock(ProductCommerceClient.class);
     private final InventoryReservationClient inventory = mock(InventoryReservationClient.class);
     private final CheckoutRepository repository = mock(CheckoutRepository.class);
     private final CheckoutUlidGenerator ids =
@@ -86,6 +88,7 @@ class CheckoutServiceTests {
                 assessments,
                 buyers,
                 calculations,
+                products,
                 inventory,
                 repository,
                 properties,
@@ -122,6 +125,76 @@ class CheckoutServiceTests {
         assertThat(replay.status()).isEqualTo("PENDING_PAYMENT");
         verify(carts, never()).get(any());
         verify(buyers, never()).resolveAddress(any(), any());
+        verify(buyers, never()).requireCapability(any(), any());
+    }
+
+    @Test
+    void buyingRestrictionFailsBeforeCartPersistenceOrInventoryReservation() {
+        doThrow(new CheckoutException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "USER_CAPABILITY_RESTRICTED",
+                "Buying is currently unavailable for this marketplace account."))
+                .when(buyers).requireCapability(BUYER_ID, "USER_BUYING");
+
+        assertThatThrownBy(() -> service.create(
+                "create-key",
+                new CreateCheckoutRequest(3L, ADDRESS_ID),
+                "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(403);
+                    assertThat(exception.code()).isEqualTo("USER_CAPABILITY_RESTRICTED");
+                });
+
+        verify(carts, never()).get(any());
+        verify(repository, never()).insert(any());
+        verify(inventory, never()).reserve(any(), any(), any());
+    }
+
+    @Test
+    void businessNewSalesRestrictionFailsBeforeCheckoutPersistenceAndInventoryReservation() {
+        CartAssessment assessment = assessment();
+        CheckoutAggregate reserving = checkout(CheckoutStatus.RESERVING);
+        when(carts.get(SUBJECT)).thenReturn(assessment.cart());
+        when(assessments.assess(assessment.cart())).thenReturn(assessment);
+        when(buyers.resolveAddress(SUBJECT, ADDRESS_ID)).thenReturn(address());
+        when(repository.idempotency(any(), eq("create-key"))).thenReturn(Optional.empty());
+        when(repository.findActiveByBuyer(BUYER_ID)).thenReturn(Optional.empty());
+        when(calculations.calculate(any(), eq(BUYER_ID), eq(assessment), any())).thenReturn(reserving);
+        doThrow(new CheckoutException(org.springframework.http.HttpStatus.FORBIDDEN,
+                "BUSINESS_CAPABILITY_RESTRICTED", "This business is not accepting new sales."))
+                .when(buyers).requireBusinessCapabilities(
+                        Set.of("01B00000000000000000000001"), "BUSINESS_NEW_SALES");
+
+        assertThatThrownBy(() -> service.create("create-key", new CreateCheckoutRequest(3L, ADDRESS_ID), "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(403);
+                    assertThat(exception.code()).isEqualTo("BUSINESS_CAPABILITY_RESTRICTED");
+                });
+        verify(repository, never()).insert(any());
+        verify(inventory, never()).reserve(any(), any(), any());
+    }
+
+    @Test
+    void listingRestrictionFailsAtTheReservationBoundary() {
+        CartAssessment assessment = assessment();
+        CheckoutAggregate reserving = checkout(CheckoutStatus.RESERVING);
+        when(carts.get(SUBJECT)).thenReturn(assessment.cart());
+        when(assessments.assess(assessment.cart())).thenReturn(assessment);
+        when(buyers.resolveAddress(SUBJECT, ADDRESS_ID)).thenReturn(address());
+        when(repository.idempotency(any(), eq("create-key"))).thenReturn(Optional.empty());
+        when(repository.findActiveByBuyer(BUYER_ID)).thenReturn(Optional.empty());
+        when(calculations.calculate(any(), eq(BUYER_ID), eq(assessment), any())).thenReturn(reserving);
+        doThrow(new CheckoutException(org.springframework.http.HttpStatus.FORBIDDEN,
+                "LISTING_PURCHASABILITY_RESTRICTED", "This item is unavailable for purchase."))
+                .when(products).requirePurchasable(Set.of("01L00000000000000000000001"));
+
+        assertThatThrownBy(() -> service.create("create-key", new CreateCheckoutRequest(3L, ADDRESS_ID), "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(403);
+                    assertThat(exception.code()).isEqualTo("LISTING_PURCHASABILITY_RESTRICTED");
+                });
+        verify(products).requirePurchasable(Set.of("01L00000000000000000000001"));
+        verify(inventory, never()).reserve(any(), any(), any());
     }
 
     @Test
@@ -149,6 +222,12 @@ class CheckoutServiceTests {
                 .isEqualTo("CHECKOUT_RESERVATION_PENDING");
 
         verify(repository).insert(reserving);
+        verify(repository).insertCartReconciliation(
+                CHECKOUT_ID,
+                SUBJECT,
+                assessment.cart().version(),
+                assessment.cart().items(),
+                NOW);
         verify(repository).insertIdempotency(
                 any(), any(), eq("create-key"), any(), eq("CREATE_CHECKOUT"),
                 eq(CHECKOUT_ID), eq(NOW), eq(NOW.plus(Duration.ofDays(7))));
@@ -313,6 +392,35 @@ class CheckoutServiceTests {
         verify(repository).markPending(CHECKOUT_ID, RESERVATION_ID, "ACTIVE", 1L, NOW);
         verify(repository).outbox(
                 any(), eq(CHECKOUT_ID), eq("checkout.created.v1"), any(), any(), any(), eq(NOW));
+    }
+
+    @Test
+    void repeatedCreateReconcilesAnActiveReservingCheckout() {
+        CartAssessment assessment = assessment();
+        CheckoutAggregate reserving = checkout(CheckoutStatus.RESERVING);
+        CheckoutAggregate pending = checkout(CheckoutStatus.PENDING_PAYMENT);
+        InventoryReservationClient.Reservation active = reservation(pending, "ACTIVE", true, 1L);
+        when(repository.idempotency(any(), eq("retry-with-new-key"))).thenReturn(Optional.empty());
+        when(carts.get(SUBJECT)).thenReturn(assessment.cart());
+        when(assessments.assess(assessment.cart())).thenReturn(assessment);
+        when(buyers.resolveAddress(SUBJECT, ADDRESS_ID)).thenReturn(address());
+        when(repository.findActiveByBuyer(BUYER_ID)).thenReturn(Optional.of(reserving));
+        when(inventory.reserve(CHECKOUT_ID, reserving.expiresAt(), List.of(
+                new InventoryReservationClient.Line("01L00000000000000000000001", 2))))
+                .thenReturn(active);
+        when(inventory.get(RESERVATION_ID)).thenReturn(active);
+        when(repository.lock(CHECKOUT_ID)).thenReturn(Optional.of(reserving));
+        when(repository.markPending(CHECKOUT_ID, RESERVATION_ID, "ACTIVE", 1L, NOW)).thenReturn(1);
+        when(repository.find(CHECKOUT_ID)).thenReturn(Optional.of(pending));
+
+        CheckoutResponse response = service.create(
+                "retry-with-new-key",
+                new CreateCheckoutRequest(3L, ADDRESS_ID),
+                "correlation");
+
+        assertThat(response.status()).isEqualTo("PENDING_PAYMENT");
+        verify(repository, never()).insert(any());
+        verify(calculations, never()).calculate(any(), any(), any(), any());
     }
 
     @Test

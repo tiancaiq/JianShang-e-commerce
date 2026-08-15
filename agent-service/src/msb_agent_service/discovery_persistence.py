@@ -609,7 +609,7 @@ class DiscoveryPersistenceRepository:
                         )
                     await cursor.execute(
                         """
-                        SELECT COUNT(*)
+                        SELECT COUNT(*) AS recommendation_count
                         FROM agent_discovery_recommendations
                         WHERE invocation_id = %s
                           AND session_id = %s
@@ -618,7 +618,7 @@ class DiscoveryPersistenceRepository:
                         """,
                         (latest["invocation_id"], session, actor, listing),
                     )
-                    if int((await cursor.fetchone())[0]) != 1:
+                    if int((await cursor.fetchone())["recommendation_count"]) != 1:
                         raise DiscoveryExclusionPersistenceError(
                             DiscoveryExclusionPersistenceErrorCode.EXCLUSION_NOT_AVAILABLE
                         )
@@ -636,14 +636,14 @@ class DiscoveryPersistenceRepository:
                     already_excluded = existing_exclusion is not None
                     await cursor.execute(
                         """
-                        SELECT COUNT(*)
+                        SELECT COUNT(*) AS exclusion_count
                         FROM agent_discovery_exclusions
                         WHERE session_id = %s
                           AND actor_user_id = %s
                         """,
                         (session, actor),
                     )
-                    excluded_count = int((await cursor.fetchone())[0])
+                    excluded_count = int((await cursor.fetchone())["exclusion_count"])
                     outcome = "ALREADY_EXCLUDED" if already_excluded else "EXCLUDED"
                     response_reason_code = (
                         None
@@ -798,11 +798,7 @@ class DiscoveryPersistenceRepository:
         actions = [
             {
                 "type": "DISCOVERY_RESULT",
-                "result": response.model_dump(
-                    mode="json",
-                    by_alias=True,
-                    exclude_none=True,
-                ),
+                "result": _canonical_turn_result(response),
             }
         ]
         sources_json = _json_array(sources, maximum_bytes=32_000)
@@ -1032,6 +1028,31 @@ def _session(row: dict[str, object]) -> DiscoverySession:
         if isinstance(raw_preferences, str)
         else raw_preferences
     )
+    return DiscoverySession(
+        session_id=str(row["session_id"]),
+        actor_user_id=str(row["actor_user_id"]),
+        status=AgentSessionStatus(str(row["status"])),
+        preference_state=DiscoveryPreferenceState.model_validate(preferences),
+        preference_version=int(row["preference_version"]),
+        clarification_turn_count=int(row["clarification_turn_count"]),
+        clarification_question_count=int(row["clarification_question_count"]),
+        created_at=_utc(row["created_at"]),
+        updated_at=_utc(row["updated_at"]),
+        last_activity_at=_utc(row["last_activity_at"]),
+        optimistic_version=int(row["optimistic_version"]),
+    )
+
+
+def _canonical_turn_result(
+    response: DiscoveryTurnResponse,
+) -> dict[str, object]:
+    """Persist the same complete strict result shape returned by the public API."""
+
+    return response.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=False,
+    )
 
 
 def _exclusion_request_hash(
@@ -1072,19 +1093,6 @@ def _exclusion_command_result(
         excluded_count=int(row["response_excluded_count"]),
         updated_at=_utc(row["response_updated_at"]),
     )
-    return DiscoverySession(
-        session_id=str(row["session_id"]),
-        actor_user_id=str(row["actor_user_id"]),
-        status=AgentSessionStatus(str(row["status"])),
-        preference_state=DiscoveryPreferenceState.model_validate(preferences),
-        preference_version=int(row["preference_version"]),
-        clarification_turn_count=int(row["clarification_turn_count"]),
-        clarification_question_count=int(row["clarification_question_count"]),
-        created_at=_utc(row["created_at"]),
-        updated_at=_utc(row["updated_at"]),
-        last_activity_at=_utc(row["last_activity_at"]),
-        optimistic_version=int(row["optimistic_version"]),
-    )
 
 
 def _fixed_id(value: str) -> str:
@@ -1115,19 +1123,66 @@ def _json_array(
 
 
 def _message(row: dict[str, object]) -> AgentMessage:
-    sources = row["sources_json"]
-    actions = row["actions_json"]
+    """Decode prior conversation context role-first so USER rows may be metadata-null."""
+
+    try:
+        role = AgentMessageRole(str(row["role"]))
+    except ValueError as error:
+        raise AgentPersistenceError(
+            AgentPersistenceErrorCode.INVALID_ARGUMENT
+        ) from error
+    sources = _message_metadata(row["sources_json"], role=role)
+    actions = _message_metadata(row["actions_json"], role=role)
+    if role == AgentMessageRole.USER:
+        if row["resolution_type"] is not None or sources or actions:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        resolution_type = None
+    else:
+        if row["resolution_type"] is None:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        try:
+            resolution_type = AgentResolutionType(str(row["resolution_type"]))
+        except ValueError as error:
+            raise AgentPersistenceError(
+                AgentPersistenceErrorCode.INVALID_ARGUMENT
+            ) from error
     return AgentMessage(
         message_id=str(row["message_id"]),
         session_id=str(row["session_id"]),
         actor_user_id=str(row["actor_user_id"]),
-        role=AgentMessageRole(str(row["role"])),
+        role=role,
         body=str(row["body"]),
-        resolution_type=AgentResolutionType(str(row["resolution_type"])),
-        sources=tuple(json.loads(sources) if isinstance(sources, str) else sources),
-        actions=tuple(json.loads(actions) if isinstance(actions, str) else actions),
+        resolution_type=resolution_type,
+        sources=sources,
+        actions=actions,
         created_at=_utc(row["created_at"]),
     )
+
+
+def _message_metadata(
+    value: object,
+    *,
+    role: AgentMessageRole,
+) -> tuple[dict[str, object], ...]:
+    if value is None:
+        if role == AgentMessageRole.USER:
+            return ()
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    try:
+        decoded = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError) as error:
+        raise AgentPersistenceError(
+            AgentPersistenceErrorCode.INVALID_ARGUMENT
+        ) from error
+    if (
+        not isinstance(decoded, list)
+        or any(not isinstance(item, dict) for item in decoded)
+    ):
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    normalized = tuple(dict(item) for item in decoded)
+    if role == AgentMessageRole.USER and normalized:
+        raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+    return normalized
 
 
 def _mysql_datetime(value: datetime) -> datetime:

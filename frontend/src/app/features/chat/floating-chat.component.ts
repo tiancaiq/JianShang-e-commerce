@@ -7,13 +7,24 @@ import { finalize } from 'rxjs';
 import { ChatListingSummary, ChatMessage, ConversationListItem, ConversationSummary } from '../../core/models/chat.model';
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
-import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
-import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-service-thread.component';
+import {
+  AGENT_CUSTOMER_SERVICE_ENABLED,
+  AGENT_DISCOVERY_ENABLED,
+  AGENT_MARKETPLACE_V2_ENABLED,
+} from '../agent/agent-customer-service.capability';
+import { AgentMarketplaceDiscoveryComponent } from '../agent/agent-marketplace-discovery.component';
+import { AgentMarketplaceV2PageComponent } from '../agent/agent-marketplace-v2-page.component';
 
 @Component({
   selector: 'app-floating-chat',
   standalone: true,
-  imports: [AgentCustomerServiceThreadComponent, DatePipe, FormsModule, RouterLink],
+  imports: [
+    AgentMarketplaceDiscoveryComponent,
+    AgentMarketplaceV2PageComponent,
+    DatePipe,
+    FormsModule,
+    RouterLink,
+  ],
   template: `
     @if (authService.isAuthenticated()) {
       <div class="floating-chat" [class.open]="open()">
@@ -39,7 +50,16 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
                     (ngModelChange)="conversationQuery.set($event)">
                 </label>
 
-                @if (aiAssistantEnabled) {
+                @if (agentEntryEnabled) {
+                  <div class="sidebar-action">
+                    <button
+                      type="button"
+                      class="new-chat-action"
+                      [class.active]="agentSelected()"
+                      (click)="showAgent()">
+                      New chat
+                    </button>
+                  </div>
                   <button
                     type="button"
                     class="conversation-row agent-row"
@@ -48,10 +68,12 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
                     <span class="avatar-initials agent-initials">AI</span>
                     <span class="conversation-copy">
                       <span class="row-title">
-                        <strong>Marketplace agent</strong>
+                        <strong>Marketplace assistant</strong>
                         <small>AI assistant</small>
                       </span>
-                      <span class="row-preview">Ask about a listing</span>
+                      <span class="row-preview">
+                        {{ agentV2Enabled ? 'Customer service and listing help' : 'Ask what you need' }}
+                      </span>
                     </span>
                   </button>
                 }
@@ -235,10 +257,14 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
                       </div>
                     </form>
                   }
-                } @else if (aiAssistantEnabled && agentSelected()) {
-                  <app-agent-customer-service-thread
-                    [compact]="true"
-                    (closeRequested)="close()" />
+                } @else if (agentEntryEnabled && agentSelected()) {
+                  <section class="agent-discovery-pane" aria-label="Marketplace assistant">
+                    @if (agentV2Enabled) {
+                      <app-agent-marketplace-v2-page [embedded]="true" [compact]="true" />
+                    } @else {
+                      <app-agent-marketplace-discovery />
+                    }
+                  </section>
                 } @else {
                   <div class="thread-placeholder">
                     <strong>Select a conversation</strong>
@@ -316,15 +342,15 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
       position: absolute;
       right: 0;
       bottom: 72px;
-      width: min(760px, calc(100vw - 2rem));
-      height: min(640px, calc(100vh - 8rem));
+      width: min(980px, calc(100vw - 2rem));
+      height: min(720px, calc(100vh - 8rem));
       display: flex;
       flex-direction: column;
       overflow: hidden;
       border: 1px solid rgba(198, 168, 214, 0.92);
-      border-radius: 8px;
-      background: #fff;
-      box-shadow: 0 24px 70px rgba(73, 42, 84, 0.28);
+      border-radius: 22px;
+      background: #fffafd;
+      box-shadow: 0 24px 70px rgba(73, 42, 84, 0.22);
     }
 
     .chat-panel-header {
@@ -369,7 +395,7 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
 
     .chat-split {
       display: grid;
-      grid-template-columns: minmax(232px, 270px) minmax(0, 1fr);
+      grid-template-columns: minmax(280px, 300px) minmax(0, 1fr);
       flex: 1 1 auto;
       min-height: 0;
       overflow: hidden;
@@ -424,6 +450,33 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
       padding: 0 0.65rem;
     }
 
+    .sidebar-action {
+      padding: 0.65rem 0.72rem;
+      border-bottom: 1px solid var(--market-line);
+    }
+
+    .new-chat-action {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid rgba(220, 79, 159, 0.42);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--market-accent-dark);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 950;
+      padding: 0 0.8rem;
+      text-align: center;
+    }
+
+    .new-chat-action:hover,
+    .new-chat-action.active {
+      background: linear-gradient(135deg, #ec4fa3, #9b67ec);
+      color: #fff;
+      box-shadow: 0 10px 20px rgba(190, 47, 118, 0.14);
+    }
+
     .search-box input:focus,
     .quantity-field input:focus,
     .composer textarea:focus {
@@ -438,14 +491,14 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
       grid-template-columns: 46px minmax(0, 1fr) 9px;
       gap: 0.62rem;
       align-items: center;
-      min-height: 82px;
+      min-height: 68px;
       border: 0;
       border-bottom: 1px solid var(--market-line);
       background: transparent;
       color: inherit;
       cursor: pointer;
       font: inherit;
-      padding: 0.68rem 0.72rem;
+      padding: 0.56rem 0.72rem;
       text-align: left;
     }
 
@@ -464,7 +517,7 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
 
     .agent-row {
       grid-template-columns: 46px minmax(0, 1fr);
-      min-height: 74px;
+      min-height: 64px;
       background: #fff7fc;
       opacity: 0.86;
     }
@@ -558,6 +611,20 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
       height: 100%;
       overflow: hidden;
       background: #fff;
+    }
+
+    .agent-discovery-pane {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .agent-discovery-pane {
+      gap: 0.75rem;
+      overflow: hidden;
+      padding: 0.75rem;
     }
 
     .thread-listing {
@@ -1054,7 +1121,13 @@ import { AgentCustomerServiceThreadComponent } from '../agent/agent-customer-ser
 })
 export class FloatingChatComponent {
   readonly defaultNotice = 'Payment and delivery are arranged directly by participants.';
-  readonly aiAssistantEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
+  readonly customerServiceEnabled = inject(AGENT_CUSTOMER_SERVICE_ENABLED);
+  readonly discoveryEnabled = inject(AGENT_DISCOVERY_ENABLED);
+  readonly agentV2Enabled = inject(AGENT_MARKETPLACE_V2_ENABLED);
+  readonly marketplaceDiscoveryEnabled = this.discoveryEnabled || this.customerServiceEnabled;
+  get agentEntryEnabled(): boolean {
+    return this.agentV2Enabled || this.marketplaceDiscoveryEnabled;
+  }
 
   readonly authService = inject(AuthService);
   private readonly chatService = inject(ChatService);
@@ -1131,9 +1204,9 @@ export class FloatingChatComponent {
     this.confirmationReviewOpen.set(false);
   }
 
-  /** Opens only the separate Agent thread; buyer/seller chat state is cleared, never reused. */
+  /** Opens the enabled assistant implementation without reusing buyer/seller chat state. */
   showAgent(): void {
-    if (!this.aiAssistantEnabled) {
+    if (!this.agentEntryEnabled) {
       return;
     }
     this.activeConversation.set(null);

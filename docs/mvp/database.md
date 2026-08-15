@@ -88,8 +88,12 @@ or verification flags.
 
 Seeded role names and descriptions.
 
-IND-01 seeds `BUYER` and `INDIVIDUAL_SELLER`. Business staff roles remain
-business-scoped and are not stored here.
+IND-01 seeds `BUYER` and `INDIVIDUAL_SELLER`. ADM-SEC-01 seeds
+`SUPER_ADMIN`, `TRUST_AND_SAFETY_ADMIN`, `BUSINESS_REVIEWER`,
+`LISTING_MODERATOR`, `SUPPORT_ADMIN`, `AUDITOR`, and the unassigned reserved
+`AI_ADMIN_AGENT`. ADM-USER-01/02 adds the least-privileged
+`USER_RESTRICTOR`; ADM-BUS-04/05 adds `BUSINESS_RESTRICTOR`. Business staff
+roles remain business-scoped and are not stored here.
 
 ### `user_roles`
 
@@ -99,10 +103,78 @@ business-scoped and are not stored here.
 | `role_id` | Role |
 | `granted_by` | Nullable for system grant |
 | `granted_at` | UTC |
+| `version` | Optimistic concurrency foundation for future assignment management |
+| `updated_at` | UTC modification time |
 
 Unique: `(user_id, role_id)`.
 
 Business staff roles are stored in business membership tables, not here.
+Keycloak owns authentication and the stable login subject, while these
+application rows are authoritative for effective admin roles. ADM-SEC-01
+copies every existing `PLATFORM_ADMIN` assignment to `SUPER_ADMIN`; the legacy
+role remains mapped to full permissions during compatibility rollout.
+
+### `admin_permissions`
+
+Auth Service registry of stable admin permission identifiers. Stores the
+identifier, description, whether the permission is reserved for a deferred
+workflow, and creation time. ADM-SEC-01 registers the dashboard, audit,
+business-application, listing-moderation, user, business, listing-enforcement,
+report, and role-management identifiers. Target-specific forward migrations
+activate the user, business, and listing-enforcement permissions when their
+runtime workflows become available. Report and role-management permissions
+remain reserved; a reserved row does not create or enable its workflow.
+
+### `admin_role_permissions`
+
+Application-owned many-to-many mapping from a role in `roles` to an entry in
+`admin_permissions`.
+
+| Column | Notes |
+|---|---|
+| `role_id` | Admin role; foreign key to `roles` |
+| `permission_id` | Stable permission; foreign key to `admin_permissions` |
+| `created_at` | UTC |
+
+Primary key: `(role_id, permission_id)`.
+
+`SUPER_ADMIN` and the legacy `PLATFORM_ADMIN` compatibility role map to every
+registered permission. Focused reviewer/moderator roles receive only their
+workflow capabilities, `USER_RESTRICTOR` receives user read/audit/restrict/
+reinstate without suspend, ban, or PII, `BUSINESS_RESTRICTOR` receives business
+read/audit/restrict/reinstate without suspend or ban, and `AUDITOR` is read-only.
+`AI_ADMIN_AGENT` intentionally
+has no permission mapping and no assignment. Role assignment UI/API and its
+future audit log are outside ADM-SEC-01.
+
+### Service-owned enforcement tables (`ADM-ENF-00`)
+
+Auth Service owns `enforcement_actions`, normalized
+`enforcement_action_scopes`, append-only `enforcement_events`, and durable
+`enforcement_command_idempotency` for `USER` and `BUSINESS` targets. The action
+captures target/action/version, effective/expiration/revocation state, reason
+and optional case/parent references, target decision version, trusted actor,
+source, correlation/request IDs, command key/fingerprint, and allow-listed JSON
+metadata. The polymorphic local User/Business target is validated and locked by
+the application service rather than represented by a generic foreign key.
+
+Product Service owns tables with the same local names and semantics for
+`LISTING`; its target ID has a same-schema listing foreign key. Scope and event
+foreign keys restrict deletion. Command idempotency is keyed by command type
+and idempotency key. Both schemas derive expiration at read time and add no
+scheduler or cascade. `ADM-USER-01/02`, `ADM-BUS-04/05`, and `ADM-LIST-06`
+evaluate their service-owned records at authoritative user, business, and
+listing mutation/read boundaries. Reserved login, messaging, and payout scopes
+still have no runtime effect. Full rules are in
+`docs/mvp/adm/admin-enforcement-model.md`.
+
+`V202608150000__add_user_administration_search_support.sql` adds
+`users.account_type` with the closed values `HUMAN`, `SERVICE`, and
+`AUTOMATION`. Existing and new rows default to `HUMAN`; admin enforcement
+rejects non-human targets without guessing from email or display name. The
+migration also adds `(created_at, id)` and `(updated_at, id)` indexes for stable
+server-side user-administration pagination. Existing user IDs, roles,
+memberships, and enforcement history are unchanged.
 
 ### Credential, session, verification, and recovery data
 
@@ -262,16 +334,20 @@ Unique: `(store_id, policy_type, version_number)`.
 
 ### `business_verification_events`
 
-Append-only provider and admin verification history.
+Append-only applicant submission, provider, system, and admin verification
+history. `ADM-AUD-01` extends existing rows in place through a forward
+migration; it does not rewrite or remove earlier history.
 
 Important columns:
 
 - provider event ID, unique when present
 - application ID
-- source `PROVIDER` or `ADMIN`
+- source `APPLICANT`, `PROVIDER`, `ADMIN`, or `SYSTEM`
 - event type, outcome, reason
 - payload hash for provider callbacks
-- actor user ID for admin decisions
+- actor user ID for applicant submissions and admin decisions
+- previous and new application state
+- correlation ID when available
 - created time
 
 ## 4. Catalog and Listing Schema
@@ -450,11 +526,14 @@ Important columns:
 - `reason`
 - `reviewer_user_id`
 - `listing_version`
+- nullable `moderation_case_id`
+- previous and new combined listing/moderation state
+- correlation ID when available
 - `created_at`
 
 Rows are immutable audit history for the basic MVP listing review flow.
-Moderation case assignment and evidence tables remain deferred to later admin
-moderation work.
+Legacy rows keep nullable case/state/correlation fields and remain readable
+through derived timeline mapping.
 
 ### `listing_status_history`
 
@@ -622,6 +701,14 @@ prevents duplicate increments when completion events are retried.
 
 Ownership is defined by V2-COM-00:
 
+The V2 commerce release-candidate gate adds a forward-only Order schema
+constraint in `V14__enforce_return_terminal_state_consistency.sql`. A received
+or completed business-group return must have `received_at` and an explicit
+inventory disposition; a completed return must also have a succeeded refund,
+refund identifier, positive refund amount, and completion timestamp. Earlier
+return states must not carry receipt or completion evidence. This hardens the
+existing state model without changing schema ownership or adding a new state.
+
 - `inventory-service` owns `inventory_items`, `inventory_movements`, and
   `inventory_reservations`.
 - `order-service` owns the Redis cart namespace plus checkout, order,
@@ -737,7 +824,7 @@ Immutable snapshot:
 
 - checkout
 - listing and business IDs
-- title, SKU, condition
+- immutable store name, title, SKU, condition
 - quantity
 - unit price
 - shipping, tax, discount allocations
@@ -757,12 +844,22 @@ Buyer-facing order header:
 
 Unique order number and checkout reference.
 
+### `checkout_cart_reconciliations`
+
+Order Service Flyway V7 stores one durable post-purchase cart command per
+checkout plus its original cart version and opaque Redis owner key.
+`checkout_cart_reconciliation_items` stores each listing ID and exact cart-line
+mutation identity. Work becomes eligible only when the checkout is
+`COMPLETED`; Redis reconciliation is atomic and independently retryable, so a
+cart outage never rolls back or duplicates a confirmed order. Untouched
+purchased lines are removed while lines changed after checkout began remain.
+
 ### `business_orders`
 
 One fulfillment group per business within an order:
 
 - order
-- business/store
+- business/store and immutable store name
 - seller-visible number
 - fulfillment status
 - cancellation status
@@ -808,6 +905,17 @@ The event aggregate and partition identity are the business-order ID. Payload
 is limited to event identity/version/time, business-order ID, parent order ID,
 business ID, `ACCEPTED`, and business-order version.
 
+Order Service Flyway V8 expands the authoritative group states to
+`PENDING_ACCEPTANCE|ACCEPTED|PROCESSING|SHIPPED|DELIVERED` and the existing
+append-only history constraint to the corresponding linear transitions.
+It does not update parent order, payment, inventory, or sibling groups.
+
+### `business_order_fulfillment_commands`
+
+V8 stores durable processing, manual-shipment, and local-demo delivery
+commands with canonical request hashes, completed result metadata, P7D expiry,
+and unique `(actor_user_id, business_id, operation, idempotency_key)`.
+
 ### `order_items`
 
 Immutable listing snapshot tied to `business_order_id`.
@@ -841,7 +949,7 @@ recovered after restart.
 
 `orders`, `business_orders`, `order_items`, `order_addresses`, and
 `order_status_history` copy the immutable checkout totals, business/store
-scope, item fields, policy version, and shipping address. Unique checkout and
+scope and store name, item fields, policy version, and shipping address. Unique checkout and
 payment-intent keys enforce one buyer order; unique `(order_id, business_id)`
 enforces one fulfillment group per business. Platform fee projection remains
 null until a later approved money-movement slice.
@@ -852,16 +960,16 @@ checkout `COMPLETED`, processed-event completion, and version-1
 
 ### `shipments`
 
-Business order, carrier, tracking number, status, shipped/delivered timestamps,
-and provider reference.
+V8 stores exactly one `LOCAL_DEMO_MANUAL` shipment per business order group,
+manual carrier/service/tracking, `SHIPPED|DELIVERED`, shipment version, and
+shipped/delivered/create/update timestamps. Unique `business_order_id`
+enforces the one-shipment boundary.
 
-### `shipment_items`
+### `shipment_status_history`
 
-Maps partial shipment quantities to order items.
-
-### `shipment_events`
-
-Append-only carrier status events with provider event ID.
+V8 stores append-only `NOT_CREATED -> SHIPPED -> DELIVERED` local-demo
+transitions with actor, correlation, causation, and unique shipment version.
+`shipment_items` and external carrier events remain deferred.
 
 ## 7. Payment Schema (V2)
 
@@ -907,6 +1015,16 @@ Forward-only payment-service migrations:
 
 Stores order/payment, amount, reason, status, provider reference, requester,
 approver where required, and idempotency key.
+
+### `payout_projections`
+
+### Post-delivery return tables (`V2-RET-01`)
+
+Order V13 owns `business_order_returns`, append-only return history, durable
+commands, and one stable demo return shipment. Unique business-order scope
+enforces one return per group. Inventory V5 owns one idempotent group-scoped
+return-restock record. Payment V7 owns one deterministic group refund and
+attempt history per return; cancellation refund records remain unchanged.
 
 ### `payout_projections`
 
@@ -965,6 +1083,23 @@ Stores:
 
 Listing state remains authoritative for publication and moderation outcome.
 
+### `moderation_case_events`
+
+`ADM-AUD-01` append-only history for listing review case lifecycle changes.
+The table remains owned by Product Service and stores:
+
+- moderation case ID and listing ID
+- event type: `CASE_CREATED`, `CASE_REOPENED`, `CASE_CLAIMED`,
+  `CASE_RELEASED`, or `CASE_RESOLVED`
+- authenticated admin actor ID when the event is a human action
+- previous/new case state
+- previous/new assigned admin user ID
+- optional reason and correlation ID
+- UTC occurrence timestamp
+
+Indexes support chronological reads by case and listing. The table does not
+centralize other services' events and has no Kafka dependency.
+
 ### `moderation_evidence`
 
 References snapshots or permitted evidence. Chat evidence access must be
@@ -1006,6 +1141,15 @@ allowlisted route, read state, and timestamps. There is no cross-service
 foreign key and no source envelope, email, address, payment, provider data,
 source hash, raw JSON, or consumer metadata in the UI/API projection.
 
+`V2-NOT-01D` adds `recipient_scope_type` and `recipient_scope_id` so this
+table isolates `USER` and `BUSINESS` streams, plus optional `business_id` and
+`business_order_id` deep-link projection fields. Durable unique
+`(recipient_scope_type, recipient_scope_id, source_event_id, type)` prevents
+duplicate user-visible projections while allowing one source event to notify
+a buyer and multiple businesses independently. Scope-created and scope-unread
+indexes support newest-first pages and count/read commands. The legacy
+`recipient_user_id` remains for NOT-01A/B compatibility.
+
 ### `notification_source_events`
 
 Durable `(consumer_name, source_event_id)` deduplication with source
@@ -1015,6 +1159,14 @@ metadata. Supported creation and notification projection commit atomically.
 Same-ID/same-hash replay is safe; same-ID/different-hash conflicts. Unsupported
 events and identifiable poison are terminally rejected. Purge is unavailable
 and disabled pending legal and operations approval.
+
+### `order_outbox_events` notification delivery cursor
+
+`V2-NOT-01D` adds Notification-specific attempt count, next-attempt time,
+published time, and bounded last-error code to Order Service's existing
+outbox. These columns do not change event creation or commerce state.
+Supported rows retry independently until Notification Service durably accepts
+them; consumer uniqueness makes an uncertain HTTP outcome safe to replay.
 
 ### `notification_preferences`
 
@@ -1405,3 +1557,12 @@ Create small migrations in this order:
 
 Each migration must be backward compatible with the application version that
 precedes it. Destructive cleanup is a separate, later migration.
+
+## ADM-BUS-04/05 storage note
+
+Auth Service continues to use the ADM-ENF-00 `enforcement_actions`, scope, event, and idempotency tables for `target_type = BUSINESS`; no ban boolean or duplicate enforcement table was added. `V202608150200__activate_business_administration.sql` adds stable business search indexes and activates the business permissions/least-privileged role. Product and Order add no enforcement storage and never query the identity schema.
+## ADM-LIST-06 listing enforcement use
+
+The existing Product-owned `enforcement_actions`, `enforcement_action_scopes`, `enforcement_events`, and `enforcement_command_idempotency` tables are authoritative for reversible listing enforcement. `target_type=LISTING` uses `LISTING_PUBLIC_VISIBILITY` and `LISTING_PURCHASABILITY`; no listing lifecycle column is rewritten. Existing target/effective-state and scope indexes support public anti-join filtering and bounded internal batch evaluation, so ADM-LIST-06 adds no Product schema migration.
+
+Auth migration `V202608150300__activate_listing_enforcement_permissions.sql` activates `admin.listing.suspend` and `admin.listing.reinstate` without altering existing role grants.

@@ -19,6 +19,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -50,6 +51,7 @@ class CartServiceTests {
                 "buyer@example.test",
                 "Buyer",
                 true));
+        when(repository.replay(any(), any(), any())).thenReturn(Optional.empty());
         service = new CartService(
                 actorProvider,
                 repository,
@@ -63,12 +65,12 @@ class CartServiceTests {
     void addUsesJwtSubjectAndStoresObservedCatalogPrice() {
         when(productClient.find(LISTING_ID)).thenReturn(Optional.of(product("ACTIVE")));
         when(inventoryClient.get(LISTING_ID)).thenReturn(availability(4));
-        when(repository.upsert(eq(USER_ID), any())).thenReturn(new CartDocument(
+        when(repository.upsert(eq(USER_ID), any(), eq(0L), eq("cart-add-001"), any())).thenReturn(new CartDocument(
                 1,
                 NOW.plusSeconds(3600),
                 List.of(new CartStoredItem(LISTING_ID, 2, new BigDecimal("12.50"), "USD", NOW))));
 
-        var response = service.add(LISTING_ID, 2);
+        var response = service.add(LISTING_ID, 2, "\"0\"", "cart-add-001");
 
         assertThat(response.totalQuantity()).isEqualTo(2);
         assertThat(response.items()).singleElement()
@@ -84,23 +86,28 @@ class CartServiceTests {
                     assertThat(total.currency()).isEqualTo("USD");
                     assertThat(total.amount()).isEqualByComparingTo("25.00");
                 });
-        verify(repository).upsert(eq(USER_ID), eq(new CartStoredItem(
-                LISTING_ID,
-                2,
-                new BigDecimal("12.50"),
-                "USD",
-                NOW)));
+        verify(repository).upsert(
+                eq(USER_ID),
+                eq(new CartStoredItem(
+                        LISTING_ID,
+                        2,
+                        new BigDecimal("12.50"),
+                        "USD",
+                        NOW)),
+                eq(0L),
+                eq("cart-add-001"),
+                any());
     }
 
     @Test
     void addRejectsNonActiveOrMissingBusinessListing() {
         when(productClient.find(LISTING_ID)).thenReturn(Optional.of(product("PAUSED")));
 
-        assertThatThrownBy(() -> service.add(LISTING_ID, 1))
+        assertThatThrownBy(() -> service.add(LISTING_ID, 1, "0", "cart-add-001"))
                 .isInstanceOf(CartException.class)
                 .extracting(exception -> ((CartException) exception).code())
                 .isEqualTo("CART_ITEM_NOT_ELIGIBLE");
-        verify(repository, never()).upsert(any(), any());
+        verify(repository, never()).upsert(any(), any(), anyLong(), any(), any());
     }
 
     @Test
@@ -108,11 +115,42 @@ class CartServiceTests {
         when(productClient.find(LISTING_ID)).thenReturn(Optional.of(product("ACTIVE")));
         when(inventoryClient.get(LISTING_ID)).thenReturn(availability(1));
 
-        assertThatThrownBy(() -> service.add(LISTING_ID, 2))
+        assertThatThrownBy(() -> service.add(LISTING_ID, 2, "0", "cart-add-001"))
                 .isInstanceOf(CartException.class)
                 .extracting(exception -> ((CartException) exception).code())
                 .isEqualTo("CART_INSUFFICIENT_STOCK");
-        verify(repository, never()).upsert(any(), any());
+        verify(repository, never()).upsert(any(), any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void mutationsRequireVersionAndIdempotencyKeyBeforeDependencyCalls() {
+        assertThatThrownBy(() -> service.add(LISTING_ID, 1, null, "cart-add-001"))
+                .isInstanceOf(CartException.class)
+                .extracting(exception -> ((CartException) exception).code())
+                .isEqualTo("CART_VERSION_REQUIRED");
+
+        assertThatThrownBy(() -> service.add(LISTING_ID, 1, "0", "short"))
+                .isInstanceOf(CartException.class)
+                .extracting(exception -> ((CartException) exception).code())
+                .isEqualTo("CART_IDEMPOTENCY_KEY_REQUIRED");
+
+        verify(productClient, never()).find(any());
+        verify(repository, never()).upsert(any(), any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void idempotentReplayReturnsStoredCartBeforeValidationAndMutation() {
+        when(repository.replay(eq(USER_ID), eq("cart-add-001"), any())).thenReturn(Optional.of(new CartDocument(
+                1,
+                NOW.plusSeconds(3600),
+                List.of(new CartStoredItem(LISTING_ID, 2, new BigDecimal("12.50"), "USD", NOW)))));
+
+        var response = service.add(LISTING_ID, 2, "0", "cart-add-001");
+
+        assertThat(response.version()).isEqualTo(1);
+        assertThat(response.totalQuantity()).isEqualTo(2);
+        verify(inventoryClient, never()).get(any());
+        verify(repository, never()).upsert(any(), any(), anyLong(), any(), any());
     }
 
     @Test

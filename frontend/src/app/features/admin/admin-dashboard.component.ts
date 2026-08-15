@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AdminDashboardSummary } from '../../core/models/admin.model';
+import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
 import { AdminService } from '../../core/services/admin.service';
 
 @Component({
@@ -22,18 +23,34 @@ import { AdminService } from '../../core/services/admin.service';
         <div class="state-panel error">{{ errorMsg() }}</div>
       } @else if (summary(); as data) {
         <div class="metric-grid" aria-label="Admin work summary">
-          <a class="metric" routerLink="/admin/business-applications">
-            <span>Business applications</span>
-            <strong>{{ data.pendingBusinessApplications }}</strong>
-          </a>
-          <a class="metric" routerLink="/admin/listings/moderation">
-            <span>Listing reviews</span>
-            <strong>{{ data.pendingListingReviews }}</strong>
-          </a>
-          <a class="metric" routerLink="/admin/listings/moderation">
-            <span>Assigned to me</span>
-            <strong>{{ data.assignedToMeListingReviews }}</strong>
-          </a>
+          @if (adminService.hasPermission(permissions.USER_READ)) {
+            <a class="metric" routerLink="/admin/users">
+              <span>User administration</span>
+              <strong>Open</strong>
+            </a>
+          }
+          @if (adminService.hasPermission(permissions.BUSINESS_READ)) {
+            <a class="metric" routerLink="/admin/businesses">
+              <span>Business administration</span>
+              <strong>Open</strong>
+            </a>
+          }
+          @if (adminService.hasPermission(permissions.BUSINESS_APPLICATION_READ)) {
+            <a class="metric" routerLink="/admin/business-applications">
+              <span>Business applications</span>
+              <strong>{{ data.pendingBusinessApplications }}</strong>
+            </a>
+          }
+          @if (adminService.hasPermission(permissions.LISTING_MODERATION_READ)) {
+            <a class="metric" routerLink="/admin/listings/moderation">
+              <span>Listing reviews</span>
+              <strong>{{ data.pendingListingReviews }}</strong>
+            </a>
+            <a class="metric" routerLink="/admin/listings/moderation">
+              <span>Assigned to me</span>
+              <strong>{{ data.assignedToMeListingReviews }}</strong>
+            </a>
+          }
         </div>
       }
     </section>
@@ -113,7 +130,8 @@ import { AdminService } from '../../core/services/admin.service';
   `],
 })
 export class AdminDashboardComponent implements OnInit {
-  private readonly adminService = inject(AdminService);
+  readonly adminService = inject(AdminService);
+  readonly permissions = ADMIN_PERMISSIONS;
 
   readonly loading = signal(true);
   readonly errorMsg = signal('');

@@ -139,6 +139,14 @@ public class ListingMediaRepository {
                               and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                           )
                           and mo.upload_status = 'UPLOADED'
+                          and not exists (
+                            select 1 from enforcement_actions ea
+                            join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                            where ea.target_type = 'LISTING' and ea.target_id = l.id
+                              and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                              and ea.effective_at <= utc_timestamp(6)
+                              and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                          )
                         order by li.display_order
                         """,
                 (rs, rowNum) -> new PublicListingImageResponse(
@@ -172,6 +180,14 @@ public class ListingMediaRepository {
                               and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
                           )
                           and mo.upload_status = 'UPLOADED'
+                          and not exists (
+                            select 1 from enforcement_actions ea
+                            join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                            where ea.target_type = 'LISTING' and ea.target_id = l.id
+                              and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                              and ea.effective_at <= utc_timestamp(6)
+                              and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                          )
                         """,
                 (rs, rowNum) -> mediaResponse(rs),
                 imageId);

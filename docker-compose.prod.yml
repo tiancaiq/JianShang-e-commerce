@@ -123,6 +123,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${IDENTITY_DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-mysql}}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
+      PRODUCT_SERVICE_URL: http://product-service:8091
       USER_AVATAR_STORAGE: ${USER_AVATAR_STORAGE:-${LISTING_MEDIA_STORAGE:-local-demo}}
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
       LISTING_MEDIA_SIGNED_URL_TTL: ${LISTING_MEDIA_SIGNED_URL_TTL:-PT15M}
@@ -206,6 +207,7 @@ services:
       dockerfile: Dockerfile
       args:
         FRONTEND_BUILD_CONFIGURATION: ${FRONTEND_BUILD_CONFIGURATION:-production}
+        GATEWAY_FEATURE_AGENT_DISCOVERY: ${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}
     container_name: frontend
     ports:
       - "4200:4200"

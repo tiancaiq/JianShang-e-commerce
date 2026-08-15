@@ -106,6 +106,9 @@ jobs:
               "mutationsAreAtomicVersionedAndExpiring",
               "concurrentMutationsAreAtomicVersionedAndIsolated",
               "sameListingRetryIsDeterministicAndVersioned",
+              "sameIdempotencyKeyIsIsolatedByBuyer",
+              "failedStaleVersionRequestCanRetryWithoutPoisonedIdempotencyState",
+              "cartAndCompletedMutationExpireTogether",
           }
           missing = sorted(required - methods)
           if missing:
@@ -129,6 +132,9 @@ jobs:
           echo "- CheckoutCalculationServiceTests#localDemoBuildsIndependentSnapshotsForSameCurrencyMultiBusinessCart"
           echo "- RedisCartRepositoryTests#concurrentMutationsAreAtomicVersionedAndIsolated"
           echo "- RedisCartRepositoryTests#sameListingRetryIsDeterministicAndVersioned"
+          echo "- RedisCartRepositoryTests#sameIdempotencyKeyIsIsolatedByBuyer"
+          echo "- RedisCartRepositoryTests#failedStaleVersionRequestCanRetryWithoutPoisonedIdempotencyState"
+          echo "- RedisCartRepositoryTests#cartAndCompletedMutationExpireTogether"
           chmod +x ./mvnw
           ./mvnw -B -pl order-service -am \
             "-Dtest=RedisCartRepositoryTests,CartServiceTests,CartValidationServiceTests,CartControllerTests,CartAssessmentServiceWiringTests,CheckoutCalculationServiceTests#localDemoBuildsIndependentSnapshotsForSameCurrencyMultiBusinessCart" \
@@ -154,6 +160,9 @@ jobs:
               "mutationsAreAtomicVersionedAndExpiring",
               "concurrentMutationsAreAtomicVersionedAndIsolated",
               "sameListingRetryIsDeterministicAndVersioned",
+              "sameIdempotencyKeyIsIsolatedByBuyer",
+              "failedStaleVersionRequestCanRetryWithoutPoisonedIdempotencyState",
+              "cartAndCompletedMutationExpireTogether",
           }
           seen_classes = set()
           seen_methods = set()
@@ -310,10 +319,11 @@ jobs:
       - name: Run architecture checks
         run: python tools/architecture_checks.py
 
-      - name: Check default-off cart and checkout gates
+      - name: Check production cart and default-off checkout gates
         run: |
           set -euo pipefail
-          grep -RIn "cart: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts
+          grep -n "cart: true" frontend/src/environments/environment.ts
+          grep -n "cart: false" frontend/src/environments/environment.development.ts
           grep -RIn "buyerCheckout: false" frontend/src/environments/environment.ts frontend/src/environments/environment.development.ts
           grep -RIn "msb.gateway.features.cart=\${GATEWAY_FEATURE_CART:false}" api-gateway/src/main/resources/application.properties
           grep -RIn "msb.gateway.features.checkout=\${GATEWAY_FEATURE_CHECKOUT:false}" api-gateway/src/main/resources/application.properties

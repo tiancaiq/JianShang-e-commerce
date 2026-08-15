@@ -32,6 +32,8 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
 @Service
@@ -45,6 +47,7 @@ public class CheckoutService {
     private final CartAssessmentService assessmentService;
     private final BuyerIdentityClient buyerIdentityClient;
     private final CheckoutCalculationService calculationService;
+    private final ProductCommerceClient productClient;
     private final InventoryReservationClient inventoryClient;
     private final CheckoutRepository repository;
     private final CheckoutProperties properties;
@@ -61,6 +64,7 @@ public class CheckoutService {
             CartAssessmentService assessmentService,
             BuyerIdentityClient buyerIdentityClient,
             CheckoutCalculationService calculationService,
+            ProductCommerceClient productClient,
             InventoryReservationClient inventoryClient,
             CheckoutRepository repository,
             CheckoutProperties properties,
@@ -74,6 +78,7 @@ public class CheckoutService {
                 assessmentService,
                 buyerIdentityClient,
                 calculationService,
+                productClient,
                 inventoryClient,
                 repository,
                 properties,
@@ -98,11 +103,31 @@ public class CheckoutService {
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
             Clock clock) {
+        this(actorProvider, cartRepository, assessmentService, buyerIdentityClient, calculationService, null,
+                inventoryClient, repository, properties, ids, metrics, objectMapper, transactionManager, clock);
+    }
+
+    CheckoutService(
+            CurrentActorProvider actorProvider,
+            CartRepository cartRepository,
+            CartAssessmentService assessmentService,
+            BuyerIdentityClient buyerIdentityClient,
+            CheckoutCalculationService calculationService,
+            ProductCommerceClient productClient,
+            InventoryReservationClient inventoryClient,
+            CheckoutRepository repository,
+            CheckoutProperties properties,
+            CheckoutUlidGenerator ids,
+            CheckoutMetrics metrics,
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager,
+            Clock clock) {
         this.actorProvider = actorProvider;
         this.cartRepository = cartRepository;
         this.assessmentService = assessmentService;
         this.buyerIdentityClient = buyerIdentityClient;
         this.calculationService = calculationService;
+        this.productClient = productClient;
         this.inventoryClient = inventoryClient;
         this.repository = repository;
         this.properties = properties;
@@ -131,6 +156,7 @@ public class CheckoutService {
         if (replay != null) {
             return replay;
         }
+        buyerIdentityClient.requireCapability(buyerId, "USER_BUYING");
         CartDocument cart = cartRepository.get(subject);
         if (cart.items().isEmpty()) {
             throw conflict("CHECKOUT_CART_EMPTY", "Your cart is empty.");
@@ -150,6 +176,10 @@ public class CheckoutService {
         }
         CheckoutAggregate active = repository.findActiveByBuyer(buyerId).orElse(null);
         if (active != null) {
+            if (active.status() == CheckoutStatus.RESERVING) {
+                metrics.command("CREATE", "RESERVATION_RECONCILE");
+                return reserve(active, null, null, correlationId);
+            }
             metrics.command("CREATE", "ALREADY_ACTIVE");
             throw new CheckoutException(
                     HttpStatus.CONFLICT,
@@ -172,9 +202,19 @@ public class CheckoutService {
                     "Checkout totals could not be calculated.");
         }
 
+        Set<String> businessIds = checkout.items().stream().map(CheckoutAggregate.Item::businessId)
+                .collect(Collectors.toUnmodifiableSet());
+        buyerIdentityClient.requireBusinessCapabilities(businessIds, "BUSINESS_NEW_SALES");
+
         try {
             transactions.executeWithoutResult(status -> {
                 repository.insert(checkout);
+                repository.insertCartReconciliation(
+                        checkout.id(),
+                        subject,
+                        checkout.cartVersion(),
+                        assessment.cart().items(),
+                        checkout.createdAt());
                 repository.insertIdempotency(
                         ids.next(),
                         scope,
@@ -296,6 +336,10 @@ public class CheckoutService {
                 continue;
             }
             try {
+                if (productClient != null) {
+                    productClient.requirePurchasable(checkout.items().stream()
+                            .map(CheckoutAggregate.Item::listingId).collect(Collectors.toUnmodifiableSet()));
+                }
                 completeReservation(checkout, inventoryClient.reserve(
                         checkout.id(),
                         checkout.expiresAt(),
@@ -354,6 +398,10 @@ public class CheckoutService {
             String key,
             String correlationId) {
         try {
+            if (productClient != null) {
+                productClient.requirePurchasable(checkout.items().stream()
+                        .map(CheckoutAggregate.Item::listingId).collect(Collectors.toUnmodifiableSet()));
+            }
             InventoryReservationClient.Reservation reservation = inventoryClient.reserve(
                     checkout.id(),
                     checkout.expiresAt(),
@@ -493,6 +541,9 @@ public class CheckoutService {
                 || !checkout.expiresAt().equals(reservation.expiresAt())
                 || !expected.equals(actual)) {
             metrics.invariant();
+            log.warn("Inventory reservation invariant mismatch checkoutId={} observedCheckoutId={} purpose={} expectedExpiresAt={} observedExpiresAt={} expectedItems={} observedItems={}",
+                    checkout.id(), reservation.checkoutId(), reservation.purpose(), checkout.expiresAt(),
+                    reservation.expiresAt(), expected, actual);
             throw new CheckoutException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "CHECKOUT_RESERVATION_PENDING",
@@ -622,6 +673,7 @@ public class CheckoutService {
                         item.listingId(),
                         item.businessId(),
                         item.storeId(),
+                        item.storeName(),
                         item.catalogVersion(),
                         item.title(),
                         item.sku(),

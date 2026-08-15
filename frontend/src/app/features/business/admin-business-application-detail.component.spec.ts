@@ -6,12 +6,14 @@ import { BusinessApplication } from '../../core/models/business-application.mode
 import { BusinessApplicationService } from '../../core/services/business-application.service';
 import { ToastService } from '../../core/services/toast.service';
 import { AdminBusinessApplicationDetailComponent } from './admin-business-application-detail.component';
+import { AdminService } from '../../core/services/admin.service';
 
 describe('AdminBusinessApplicationDetailComponent', () => {
   let fixture: ComponentFixture<AdminBusinessApplicationDetailComponent>;
   let component: AdminBusinessApplicationDetailComponent;
   let businessApplicationService: jasmine.SpyObj<BusinessApplicationService>;
   let toastService: jasmine.SpyObj<ToastService>;
+  let adminService: jasmine.SpyObj<AdminService>;
 
   const application: BusinessApplication = {
     id: '01JY0000000000000000000001',
@@ -39,10 +41,29 @@ describe('AdminBusinessApplicationDetailComponent', () => {
   beforeEach(async () => {
     businessApplicationService = jasmine.createSpyObj<BusinessApplicationService>(
       'BusinessApplicationService',
-      ['getAdminApplication', 'decide']
+      ['getAdminApplication', 'getAdminTimeline', 'decide']
     );
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
+    adminService = jasmine.createSpyObj<AdminService>('AdminService', ['hasPermission']);
+    adminService.hasPermission.and.returnValue(true);
     businessApplicationService.getAdminApplication.and.returnValue(of({ data: application }));
+    businessApplicationService.getAdminTimeline.and.returnValue(of({ data: [{
+      eventId: '01EV0000000000000000000001',
+      occurredAt: '2026-06-16T12:00:00Z',
+      eventType: 'BUSINESS_APPLICATION_SUBMITTED',
+      actorType: 'MARKETPLACE_USER',
+      actorId: application.applicantUserId,
+      actorDisplay: 'Application Owner',
+      source: 'SYSTEM',
+      targetType: 'BUSINESS_APPLICATION',
+      targetId: application.id,
+      moderationCaseId: null,
+      previousState: 'DRAFT',
+      newState: 'PENDING_VERIFICATION',
+      reason: null,
+      correlationId: 'business-submit-correlation',
+      metadata: {},
+    }] }));
     businessApplicationService.decide.and.returnValue(of({
       data: {
         ...application,
@@ -51,6 +72,10 @@ describe('AdminBusinessApplicationDetailComponent', () => {
         version: 2,
       },
     }));
+    businessApplicationService.getAdminApplication.and.returnValues(
+      of({ data: application }),
+      of({ data: { ...application, status: 'APPROVED', version: 2 } })
+    );
 
     await TestBed.configureTestingModule({
       imports: [AdminBusinessApplicationDetailComponent],
@@ -62,6 +87,7 @@ describe('AdminBusinessApplicationDetailComponent', () => {
         },
         { provide: BusinessApplicationService, useValue: businessApplicationService },
         { provide: ToastService, useValue: toastService },
+        { provide: AdminService, useValue: adminService },
       ],
     }).compileComponents();
 
@@ -79,6 +105,20 @@ describe('AdminBusinessApplicationDetailComponent', () => {
     expect(text).toContain('Irvine, CA');
     expect(text).toContain('PENDING_VERIFICATION');
     expect(text).toContain('Version 1');
+    expect(text).toContain('Business application submitted');
+    expect(text).toContain('Application Owner');
+    expect(text).toContain('business-submit-correlation');
+    const submittedTime = fixture.nativeElement.querySelector(`time[datetime="${application.submittedAt}"]`) as HTMLTimeElement;
+    expect(submittedTime).toBeTruthy();
+    expect(submittedTime.title).toBe(application.submittedAt!);
+    expect(submittedTime.textContent).not.toContain('T12:00:00Z');
+  });
+
+  it('does not present decision controls without decide permission', () => {
+    adminService.hasPermission.and.returnValue(false);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="decision-submit"]')).toBeNull();
   });
 
   it('shows an error state when the detail cannot be loaded', () => {
@@ -116,6 +156,8 @@ describe('AdminBusinessApplicationDetailComponent', () => {
     expect(component.decisionErrorMsg()).toBe('Decision reason is required.');
     const reasonField = fixture.nativeElement.querySelector('[data-testid="decision-reason"]') as HTMLTextAreaElement;
     expect(reasonField.getAttribute('aria-invalid')).toBe('true');
+    expect(reasonField.getAttribute('aria-describedby')).toBe('decision-reason-error');
+    expect(fixture.nativeElement.querySelector('#decision-reason-error')?.getAttribute('role')).toBe('alert');
     expect(fixture.nativeElement.textContent).toContain('Decision reason is required.');
   });
 

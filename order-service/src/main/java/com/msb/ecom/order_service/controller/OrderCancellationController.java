@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
+
 @RestController
 @RequestMapping("/api/v1/orders/{orderId}/cancellation-requests")
 public class OrderCancellationController {
@@ -28,9 +30,8 @@ public class OrderCancellationController {
             @PathVariable String orderId,
             @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpServletRequest request) {
-        boolean bodyPresent = request.getContentLengthLong() > 0
-                || request.getHeader(HttpHeaders.TRANSFER_ENCODING) != null;
+            HttpServletRequest request) throws IOException {
+        boolean bodyPresent = request.getInputStream().read() != -1;
         OrderCancellationResponse response = service.request(
                 orderId,
                 ifMatch,

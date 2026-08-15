@@ -323,3 +323,106 @@ export interface AdminListingModerationCaseDetail {
   listing: ListingDraft;
   decisions: ListingModerationDecisionResponse[];
 }
+
+export type ListingEnforcementActionType = 'RESTRICT' | 'SUSPEND';
+export type ListingEnforcementScope = 'LISTING_PUBLIC_VISIBILITY' | 'LISTING_PURCHASABILITY';
+
+export interface ListingEffectiveRestriction {
+  scope: ListingEnforcementScope;
+  actionType: ListingEnforcementActionType;
+  enforcementActionId: string;
+}
+
+export interface ListingEnforcementAction {
+  enforcementActionId: string;
+  actionType: ListingEnforcementActionType;
+  scopes: ListingEnforcementScope[];
+  lifecycleState: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+  effectiveAt: string;
+  expiresAt: string | null;
+  version: number;
+  createdAt: string;
+  revokedAt: string | null;
+  reasonCode: string;
+  reason: string;
+  actorId: string;
+  actorDisplayName: string;
+  caseId: string | null;
+}
+
+export interface AdminListingEnforcementDetail {
+  listingId: string;
+  listingStatus: string;
+  moderationStatus: string;
+  listingVersion: number;
+  publicVisibilityAllowed: boolean;
+  purchasabilityAllowed: boolean;
+  strongestActiveAction: ListingEnforcementActionType | null;
+  effectiveRestrictions: ListingEffectiveRestriction[];
+  activeEnforcementActions: ListingEnforcementAction[];
+  historicalEnforcementActions: ListingEnforcementAction[];
+  availableAdminCapabilities: {
+    canRead: boolean;
+    canSuspend: boolean;
+    canReinstate: boolean;
+    removedByAdmin: boolean;
+    readOnlyReason: string | null;
+    operationalScopes: ListingEnforcementScope[];
+  };
+}
+
+export interface ListingEnforcementCreateRequest {
+  actionType: ListingEnforcementActionType;
+  scopes: ListingEnforcementScope[];
+  reasonCode: string;
+  reason: string;
+  effectiveAt: string | null;
+  expiresAt: string | null;
+  expectedListingVersion: number;
+  idempotencyKey: string | null;
+  safeMetadata: Record<string, string>;
+}
+
+export interface ListingEnforcementRevokeRequest {
+  expectedEnforcementVersion: number;
+  reasonCode: string;
+  reason: string;
+  idempotencyKey: string | null;
+  safeMetadata: Record<string, string>;
+}
+
+export interface ListingEnforcementResult {
+  enforcementActionId: string | null;
+  targetId: string;
+  actionType: ListingEnforcementActionType;
+  scopes: ListingEnforcementScope[];
+  lifecycleState: string;
+  effectiveRestrictions: ListingEffectiveRestriction[];
+  dryRun: boolean;
+}
+
+export interface ListingEnforcementPreview {
+  proposedAction: ListingEnforcementResult;
+  overlappingActions: ListingEnforcementAction[];
+  effectiveRestrictionsAfter: ListingEffectiveRestriction[];
+  predictedPublicVisibility: boolean;
+  predictedPurchasability: boolean;
+  targetVersionCurrent: boolean;
+  impactSummary: string[];
+  warnings: string[];
+}
+
+export interface ListingEnforcementTimelineEntry {
+  eventId: string;
+  occurredAt: string;
+  eventType: string;
+  actorId: string | null;
+  actorDisplayName: string | null;
+  enforcementActionId: string | null;
+  actionType: ListingEnforcementActionType | null;
+  scopes: ListingEnforcementScope[];
+  reasonCode: string | null;
+  reason: string | null;
+  previousState: string | null;
+  newState: string | null;
+}

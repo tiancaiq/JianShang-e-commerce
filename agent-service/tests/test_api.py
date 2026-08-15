@@ -45,6 +45,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
                 "marketplaceDiscoveryApi": "DISABLED",
+                "discoveryDocumentEmbedding": "DISABLED",
             },
             response.json(),
         )
@@ -66,6 +67,7 @@ class HealthApiTest(unittest.IsolatedAsyncioTestCase):
                 "agentPersistence": "DISABLED",
                 "customerServiceApi": "DISABLED",
                 "marketplaceDiscoveryApi": "DISABLED",
+                "discoveryDocumentEmbedding": "DISABLED",
             },
             response.json(),
         )

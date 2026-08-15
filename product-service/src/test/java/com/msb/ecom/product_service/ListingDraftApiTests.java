@@ -3,8 +3,11 @@ package com.msb.ecom.product_service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.model.UserCapabilityRestrictedException;
+import com.msb.ecom.product_service.model.BusinessCapabilityRestrictedException;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.service.AuthServiceClient;
+import com.msb.ecom.product_service.security.AdminPermission;
 import com.msb.ecom.product_service.storage.ListingMediaStorage;
 import com.msb.ecom.product_service.storage.StorageObjectAccessDeniedException;
 import com.msb.ecom.product_service.storage.StorageObjectNotFoundException;
@@ -26,6 +29,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -87,6 +91,8 @@ class ListingDraftApiTests {
 
     @BeforeEach
     void configureMediaStorage() {
+        when(authServiceClient.requireCurrentUser(anyString()))
+                .thenReturn(new AuthServiceClient.CurrentUser(USER_ID, "ACTIVE"));
         when(listingMediaStorage.createUploadTarget(anyString(), anyString(), anyLong()))
                 .thenAnswer(invocation -> new StorageUploadTarget(
                         "listing-media-test",
@@ -177,6 +183,27 @@ class ListingDraftApiTests {
                 .andExpect(jsonPath("$.quantity", equalTo(3)))
                 .andExpect(jsonPath("$.negotiable", equalTo(false)))
                 .andExpect(jsonPath("$.status", equalTo("DRAFT")));
+    }
+
+    @Test
+    void sellingRestrictionBlocksIndividualDraftWithoutChangingListingState() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        doThrow(new UserCapabilityRestrictedException(
+                "USER_SELLING", "SUSPEND", null, "ENF-00000001"))
+                .when(authServiceClient).requireUserCapability(USER_ID, "USER_SELLING");
+        Integer before = jdbcTemplate.queryForObject("select count(*) from listings", Integer.class);
+
+        mockMvc.perform(post("/api/v1/listings")
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(individualRequest(4)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("USER_CAPABILITY_RESTRICTED")));
+
+        Integer after = jdbcTemplate.queryForObject("select count(*) from listings", Integer.class);
+        org.assertj.core.api.Assertions.assertThat(after).isEqualTo(before);
     }
 
     @Test
@@ -340,6 +367,26 @@ class ListingDraftApiTests {
                         .content(businessRequest()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
+    void businessListingCreationRestrictionReturnsSafeForbiddenBeforeDraftInsert() throws Exception {
+        allowBusinessStoreContext(BUSINESS_ID, STORE_ID);
+        int before = countBusinessItems(BUSINESS_ID);
+        doThrow(new BusinessCapabilityRestrictedException(
+                "BUSINESS_LISTING_CREATION", "RESTRICT", null, "ENF-00000001"))
+                .when(authServiceClient).requireBusinessCapability(BUSINESS_ID, "BUSINESS_LISTING_CREATION");
+
+        mockMvc.perform(post("/api/v1/businesses/{businessId}/store/items", BUSINESS_ID)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("business-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(businessRequest("BUS-RESTRICTED-CREATE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("BUSINESS_CAPABILITY_RESTRICTED")))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field", equalTo("scope")))
+                .andExpect(jsonPath("$.error.fieldErrors[0].code", equalTo("BUSINESS_LISTING_CREATION")));
+
+        assertThat(countBusinessItems(BUSINESS_ID)).isEqualTo(before);
     }
 
     @Test
@@ -1589,6 +1636,44 @@ class ListingDraftApiTests {
     }
 
     @Test
+    void listingModeratorCanReadClaimAndReleaseListingModerationCase() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        String caseId = caseIdForListing(listingId);
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        "01A00000000000000000000001",
+                        "PLATFORM_ADMIN",
+                        List.of("LISTING_MODERATOR"),
+                        List.of(
+                                AdminPermission.LISTING_MODERATION_READ.id(),
+                                AdminPermission.LISTING_MODERATION_CLAIM.id()),
+                        "ACTIVE"));
+        when(authServiceClient.lookupAdminIdentityLabels(eq("moderator-token"), anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(List.of(), List.of()));
+
+        mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("moderator-token"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("moderator-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseStatus", equalTo("CLAIMED")));
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/release", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("moderator-token")))
+                        .header("If-Match", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseStatus", equalTo("OPEN")))
+                .andExpect(jsonPath("$.assignedAdminUserId").doesNotExist());
+
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("OPEN");
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "assigned_admin_user_id")).isNull();
+    }
+
+    @Test
     void platformAdminCanReadListingModerationCaseDetail() throws Exception {
         when(authServiceClient.requireActiveIndividualSeller(anyString()))
                 .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
@@ -1635,7 +1720,18 @@ class ListingDraftApiTests {
         String caseId = caseIdForListing(listingId);
         when(authServiceClient.requirePlatformAdmin(anyString()))
                 .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
-                        "01A00000000000000000000001", "PLATFORM_ADMIN"));
+                        "01A00000000000000000000001",
+                        "PLATFORM_ADMIN",
+                        List.of("LISTING_MODERATOR"),
+                        List.of(
+                                AdminPermission.DASHBOARD_READ.id(),
+                                AdminPermission.AUDIT_READ.id(),
+                                AdminPermission.LISTING_MODERATION_READ.id(),
+                                AdminPermission.LISTING_MODERATION_CLAIM.id(),
+                                AdminPermission.LISTING_MODERATION_RESOLVE.id(),
+                                AdminPermission.LISTING_EDIT.id(),
+                                AdminPermission.LISTING_REMOVE.id()),
+                        "ACTIVE"));
         when(authServiceClient.lookupAdminIdentityLabels(eq("admin-token"), anySet(), anySet()))
                 .thenReturn(new AuthServiceClient.AdminIdentityLabels(
                         List.of(
@@ -1675,6 +1771,193 @@ class ListingDraftApiTests {
                 Integer.class,
                 listingId);
         org.assertj.core.api.Assertions.assertThat(decisions).isEqualTo(1);
+        String decisionCaseId = jdbcTemplate.queryForObject(
+                "select moderation_case_id from listing_moderation_decisions where listing_id = ? and decision = 'APPROVE'",
+                String.class,
+                listingId);
+        org.assertj.core.api.Assertions.assertThat(decisionCaseId).isEqualTo(caseId);
+        Integer resolvedEvents = jdbcTemplate.queryForObject(
+                "select count(*) from moderation_case_events where moderation_case_id = ? and event_type = 'CASE_RESOLVED'",
+                Integer.class,
+                caseId);
+        org.assertj.core.api.Assertions.assertThat(resolvedEvents).isEqualTo(1);
+        Integer activeKnowledgeVersions = jdbcTemplate.queryForObject(
+                "select count(*) from listing_knowledge_versions where listing_id = ? and source_version = 2 and lifecycle = 'ACTIVE'",
+                Integer.class,
+                listingId);
+        org.assertj.core.api.Assertions.assertThat(activeKnowledgeVersions).isEqualTo(1);
+        Integer activationOutboxEvents = jdbcTemplate.queryForObject(
+                "select count(*) from outbox_events where aggregate_id = ? and event_type = 'listing.activated'",
+                Integer.class,
+                listingId);
+        org.assertj.core.api.Assertions.assertThat(activationOutboxEvents).isEqualTo(1);
+    }
+
+    @Test
+    void platformAdminCanReadOrderedListingModerationAuditTimeline() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        String caseId = caseIdForListing(listingId);
+        String adminId = "01A00000000000000000000001";
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(adminId, "PLATFORM_ADMIN"));
+        when(authServiceClient.lookupAdminIdentityLabels(eq("admin-token"), anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(
+                        List.of(
+                                new AuthServiceClient.UserIdentityLabel(USER_ID, "Alex Seller", null),
+                                new AuthServiceClient.UserIdentityLabel(adminId, "Morgan Admin", null)),
+                        List.of()));
+
+        Timestamp caseCreatedAt = jdbcTemplate.queryForObject(
+                "select created_at from moderation_cases where id = ?",
+                Timestamp.class,
+                caseId);
+        jdbcTemplate.update("""
+                        insert into listing_moderation_decisions (
+                            id, listing_id, moderation_case_id, decision, reason, reviewer_user_id,
+                            listing_version, previous_state, new_state, correlation_id, created_at
+                        ) values (?, ?, null, 'APPROVE', ?, ?, 0, null, null, null, ?)
+                        """,
+                "01LEGACYDECISION0000000001",
+                listingId,
+                "Decision from a previous legacy review",
+                adminId,
+                Timestamp.from(caseCreatedAt.toInstant().minusSeconds(7200)));
+
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "0")
+                        .header("X-Correlation-Id", "claim-correlation"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/release", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "1")
+                        .header("X-Correlation-Id", "release-correlation"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "2")
+                        .header("X-Correlation-Id", "reclaim-correlation"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/resolve", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
+                        .header("If-Match", "3")
+                        .header("X-Correlation-Id", "resolve-correlation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "decision": "APPROVE",
+                                  "reason": "Audit timeline approval"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}/timeline", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(6)))
+                .andExpect(jsonPath("$[0].eventType", equalTo("CASE_CREATED")))
+                .andExpect(jsonPath("$[1].eventType", equalTo("CASE_CLAIMED")))
+                .andExpect(jsonPath("$[1].actorDisplay", equalTo("Morgan Admin")))
+                .andExpect(jsonPath("$[1].correlationId", equalTo("claim-correlation")))
+                .andExpect(jsonPath("$[2].eventType", equalTo("CASE_RELEASED")))
+                .andExpect(jsonPath("$[2].correlationId", equalTo("release-correlation")))
+                .andExpect(jsonPath("$[3].eventType", equalTo("CASE_CLAIMED")))
+                .andExpect(jsonPath("$[4].eventType", equalTo("LISTING_MODERATION_RESOLVED")))
+                .andExpect(jsonPath("$[4].reason", equalTo("Audit timeline approval")))
+                .andExpect(jsonPath("$[4].correlationId", equalTo("resolve-correlation")))
+                .andExpect(jsonPath("$[5].eventType", equalTo("CASE_RESOLVED")))
+                .andExpect(jsonPath("$[5].correlationId", equalTo("resolve-correlation")));
+    }
+
+    @Test
+    void nonAdminCannotReadListingModerationAuditTimeline() throws Exception {
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenThrow(new ListingAuthorizationException("Platform admin access is required."));
+
+        mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}/timeline",
+                        "01MC0000000000000000000001")
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("seller-token"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+    }
+
+    @Test
+    void auditorCanReadListingAuditButCannotClaimCase() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        String caseId = caseIdForListing(listingId);
+        String auditorId = "01A00000000000000000000009";
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        auditorId,
+                        "PLATFORM_ADMIN",
+                        List.of("AUDITOR"),
+                        List.of(AdminPermission.LISTING_MODERATION_READ.id(), AdminPermission.AUDIT_READ.id()),
+                        "ACTIVE"));
+        when(authServiceClient.lookupAdminIdentityLabels(eq("auditor-token"), anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(List.of(), List.of()));
+
+        mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("auditor-token"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.moderationCase.id", equalTo(caseId)));
+        mockMvc.perform(get("/api/v1/admin/moderation/listing-cases/{caseId}/timeline", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("auditor-token"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("auditor-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("OPEN");
+    }
+
+    @Test
+    void missingResolvePermissionReturns403WithoutDecisionMutation() throws Exception {
+        when(authServiceClient.requireActiveIndividualSeller(anyString()))
+                .thenReturn(new AuthServiceClient.IndividualSellerAuthorization(
+                        USER_ID, "Irvine", "CA", "ACTIVE"));
+        String listingId = createSubmittedIndividualListing();
+        String caseId = caseIdForListing(listingId);
+        String adminId = "01A00000000000000000000008";
+        when(authServiceClient.requirePlatformAdmin(anyString()))
+                .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
+                        adminId,
+                        "PLATFORM_ADMIN",
+                        List.of("LIMITED_TEST_ADMIN"),
+                        List.of(
+                                AdminPermission.LISTING_MODERATION_READ.id(),
+                                AdminPermission.LISTING_MODERATION_CLAIM.id()),
+                        "ACTIVE"));
+        when(authServiceClient.lookupAdminIdentityLabels(eq("limited-token"), anySet(), anySet()))
+                .thenReturn(new AuthServiceClient.AdminIdentityLabels(List.of(), List.of()));
+
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/claim", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("limited-token")))
+                        .header("If-Match", "0"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/admin/moderation/listing-cases/{caseId}/resolve", caseId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("limited-token")))
+                        .header("If-Match", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision":"APPROVE","reason":"This must not be applied"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("LISTING_FORBIDDEN")));
+
+        org.assertj.core.api.Assertions.assertThat(caseValue(listingId, "status")).isEqualTo("CLAIMED");
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from listing_moderation_decisions where listing_id = ?",
+                Integer.class,
+                listingId)).isZero();
     }
 
     @Test
@@ -2020,7 +2303,18 @@ class ListingDraftApiTests {
                         BUSINESS_ID, USER_ID, "OWNER", "ACTIVE", List.of("LISTING_DRAFT_CREATE")));
         when(authServiceClient.requirePlatformAdmin(anyString()))
                 .thenReturn(new AuthServiceClient.PlatformAdminAuthorization(
-                        "01A00000000000000000000001", "PLATFORM_ADMIN"));
+                        "01A00000000000000000000001",
+                        "PLATFORM_ADMIN",
+                        List.of("LISTING_MODERATOR"),
+                        List.of(
+                                AdminPermission.DASHBOARD_READ.id(),
+                                AdminPermission.AUDIT_READ.id(),
+                                AdminPermission.LISTING_MODERATION_READ.id(),
+                                AdminPermission.LISTING_MODERATION_CLAIM.id(),
+                                AdminPermission.LISTING_MODERATION_RESOLVE.id(),
+                                AdminPermission.LISTING_EDIT.id(),
+                                AdminPermission.LISTING_REMOVE.id()),
+                        "ACTIVE"));
 
         mockMvc.perform(post("/api/v1/admin/listings/{listingId}/remove", listingId)
                         .with(jwt().jwt(jwt -> jwt.tokenValue("admin-token")))
@@ -2671,6 +2965,33 @@ class ListingDraftApiTests {
                         .with(jwt().jwt(jwt -> jwt.tokenValue("individual-token"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.id == '%s')].status".formatted(listingId), hasItem("CLOSED")));
+    }
+
+    @Test
+    void chatTradeCompletionFailsBeforeListingMutationWhenIndividualSellerIsRestricted() throws Exception {
+        String listingId = createApprovedIndividualListing();
+        doThrow(new UserCapabilityRestrictedException(
+                "USER_SELLING", "SUSPEND", null, "ENF-SELLER-01"))
+                .when(authServiceClient).requireUserCapability(USER_ID, "USER_SELLING");
+
+        mockMvc.perform(post("/api/v1/internal/chat/listings/{listingId}/complete-trade", listingId)
+                        .with(jwt().jwt(jwt -> jwt.tokenValue("buyer-token")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "conversationId": "01C00000000000000000000001",
+                                  "sellerUserId": "%s",
+                                  "buyerUserId": "01U00000000000000000000022",
+                                  "quantitySold": 1
+                                }
+                                """.formatted(USER_ID)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code", equalTo("USER_CAPABILITY_RESTRICTED")))
+                .andExpect(jsonPath("$.error.fieldErrors[?(@.field == 'scope')].code",
+                        hasItem("USER_SELLING")));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from listings where id = ?", String.class, listingId)).isEqualTo("ACTIVE");
     }
 
     @Test

@@ -6,9 +6,12 @@
     "start": "ng serve",
     "build": "ng build",
     "build:demo-cart": "ng build --configuration demo-cart",
+    "build:demo-checkout": "ng build --configuration demo-checkout",
+    "build:demo-admin-search-maintenance": "ng build --configuration demo-admin-search-maintenance",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed",
     "test:ai-build-config": "node --test config/ai-build-config.test.mjs",
+    "test:discovery-proxy": "node --test config/discovery-stream-proxy.test.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "serve:ssr:frontend": "node dist/frontend/server/server.mjs"

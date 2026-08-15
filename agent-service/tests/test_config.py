@@ -5,14 +5,183 @@ from unittest.mock import patch
 from msb_agent_service.config import (
     AgentApiSettings,
     AgentPersistenceSettings,
+    DiscoveryEmbeddingSettings,
     KnowledgeIndexSettings,
     KnowledgeIngestionSettings,
     ListingProposalApiSettings,
+    MarketplaceAgentV2Settings,
     Settings,
 )
 
 
 class SettingsTest(unittest.TestCase):
+    def test_marketplace_agent_v2_result_shape_thresholds_are_defaulted_and_bounded(
+        self,
+    ) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual(5, settings.marketplace_agent_v2.direct_result_max)
+        self.assertEqual(10, settings.marketplace_agent_v2.clarification_result_min)
+        self.assertEqual(4, settings.marketplace_agent_v2.max_clarification_options)
+        self.assertEqual(5, settings.marketplace_agent_v2.default_discovery_top_k)
+        self.assertEqual(8, settings.marketplace_agent_v2.max_discovery_top_k)
+
+        with self.assertRaisesRegex(ValueError, "clarification threshold"):
+            MarketplaceAgentV2Settings(
+                direct_result_max=5,
+                clarification_result_min=5,
+            ).validate(persistence_enabled=False, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "top-K"):
+            MarketplaceAgentV2Settings(
+                default_discovery_top_k=6,
+                max_discovery_top_k=5,
+            ).validate(persistence_enabled=False, provider_configured=False)
+
+    def test_discovery_hybrid_and_query_embedding_are_default_off(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+
+        self.assertFalse(settings.discovery_api.hybrid_retrieval_enabled)
+        self.assertFalse(settings.discovery_api.query_embedding_enabled)
+        self.assertEqual(10.0, settings.discovery_api.model_call_timeout_seconds)
+
+    def test_discovery_model_call_timeout_is_explicit_and_bounded(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"AGENT_DISCOVERY_MODEL_CALL_TIMEOUT_SECONDS": "9.5"},
+            clear=True,
+        ):
+            settings = Settings.from_env()
+
+        self.assertEqual(9.5, settings.discovery_api.model_call_timeout_seconds)
+
+        with patch.dict(
+            os.environ,
+            {"AGENT_DISCOVERY_MODEL_CALL_TIMEOUT_SECONDS": "10.1"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "AGENT_DISCOVERY_MODEL_CALL_TIMEOUT_SECONDS",
+            ):
+                Settings.from_env()
+
+    def test_discovery_hybrid_requires_separate_query_embedding_gate(self) -> None:
+        environment = {
+            "OPENAI_API_KEY": "offline-placeholder",
+            "AGENT_MYSQL_PASSWORD": "database-placeholder",
+            "AGENT_PERSISTENCE_ENABLED": "true",
+            "AGENT_DISCOVERY_API_ENABLED": "true",
+            "AGENT_DISCOVERY_ORCHESTRATION_ENABLED": "true",
+            "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED": "true",
+            "AGENT_DISCOVERY_PROVIDER_ENABLED": "true",
+            "AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED": "true",
+            "AUTH_SERVICE_URL": "http://auth-service:8085",
+            "AGENT_PRODUCT_SERVICE_URL": "http://product-service:8091",
+            "AGENT_PRODUCT_SERVICE_TOKEN": "product-placeholder",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(
+                ValueError,
+                "AGENT_DISCOVERY_QUERY_EMBEDDING_ENABLED",
+            ):
+                Settings.from_env()
+
+    def test_discovery_embedding_worker_is_independently_default_off(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+
+        self.assertFalse(settings.discovery_embedding.intake_enabled)
+        self.assertFalse(settings.discovery_embedding.worker_enabled)
+        self.assertFalse(settings.discovery_embedding.provider_enabled)
+        self.assertFalse(settings.discovery_embedding.recovery_enabled)
+        self.assertFalse(settings.discovery_embedding.kill_switch_enabled)
+        self.assertEqual(
+            "listing-discovery-embedding-request-v1",
+            settings.discovery_embedding.kafka_topic,
+        )
+
+    def test_discovery_embedding_rejects_partial_or_wrong_topic_enablement(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "Product 04A event contract"):
+            DiscoveryEmbeddingSettings(kafka_topic="listing-knowledge-v1").validate(
+                mysql_password_configured=False,
+                product_source_configured=False,
+                provider_configured=False,
+            )
+
+        with patch.dict(
+            os.environ,
+            {"AGENT_DISCOVERY_EMBEDDING_INTAKE_ENABLED": "true"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "AGENT_MYSQL_PASSWORD"):
+                Settings.from_env()
+
+        environment = {
+            "AGENT_DISCOVERY_EMBEDDING_WORKER_ENABLED": "true",
+            "AGENT_MYSQL_PASSWORD": "database-secret",
+            "AGENT_PRODUCT_SERVICE_URL": "http://product-service:8091",
+            "AGENT_PRODUCT_SERVICE_TOKEN": "source-secret",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(
+                ValueError,
+                "AGENT_DISCOVERY_EMBEDDING_PROVIDER_ENABLED",
+            ):
+                Settings.from_env()
+
+        with patch.dict(
+            os.environ,
+            {"AGENT_DISCOVERY_EMBEDDING_RECOVERY_ENABLED": "true"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "AGENT_MYSQL_PASSWORD"):
+                Settings.from_env()
+
+    def test_discovery_embedding_recovery_requires_only_agent_database(
+        self,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AGENT_MYSQL_PASSWORD": "database-secret",
+                "AGENT_DISCOVERY_EMBEDDING_RECOVERY_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            settings = Settings.from_env()
+
+        self.assertTrue(settings.discovery_embedding.recovery_enabled)
+        self.assertFalse(settings.discovery_embedding.intake_enabled)
+        self.assertFalse(settings.discovery_embedding.worker_enabled)
+        self.assertNotIn("database-secret", repr(settings))
+
+    def test_discovery_embedding_enabled_configuration_is_redacted(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "provider-secret",
+                "AGENT_MYSQL_PASSWORD": "database-secret",
+                "AGENT_PRODUCT_SERVICE_URL": "http://product-service:8091",
+                "AGENT_PRODUCT_SERVICE_TOKEN": "source-secret",
+                "AGENT_DISCOVERY_EMBEDDING_INTAKE_ENABLED": "true",
+                "AGENT_DISCOVERY_EMBEDDING_WORKER_ENABLED": "true",
+                "AGENT_DISCOVERY_EMBEDDING_PROVIDER_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            settings = Settings.from_env()
+
+        self.assertTrue(settings.discovery_embedding.intake_enabled)
+        self.assertTrue(settings.discovery_embedding.worker_enabled)
+        self.assertNotIn("provider-secret", repr(settings))
+        self.assertNotIn("database-secret", repr(settings))
+        self.assertNotIn("source-secret", repr(settings))
+
     def test_customer_service_api_is_disabled_by_default(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings.from_env()

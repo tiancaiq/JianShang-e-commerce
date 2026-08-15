@@ -1,4 +1,5 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { take } from 'rxjs';
 import { AuthService, LoginClient } from '../../core/services/auth.service';
@@ -8,33 +9,78 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [BrandMascotComponent, ToastContainerComponent],
+  imports: [BrandMascotComponent, FormsModule, ToastContainerComponent],
   template: `
     <div class="login-page bg-noise" [class.seller-login]="client() === 'seller-portal'" [class.admin-login]="client() === 'admin-portal'">
-      <section class="login-shell">
-        <app-brand-mascot variant="login" alt="MSB marketplace mascot on the login page" />
-        <div class="login-panel">
-          <div class="login-brand">
-            <span class="brand-mark" aria-hidden="true">M</span>
-            <p class="portal-label">{{ portalLabel() }}</p>
-            <h1 class="brand-title">{{ portalTitle() }}</h1>
-            <p class="brand-subtitle">{{ portalSubtitle() }}</p>
+      @if (isMarketplaceClient()) {
+        <section class="general-login-shell" aria-labelledby="general-login-title">
+          <a class="marketplace-home" href="/marketplace">MSBCommerce</a>
+          <div class="general-login-heading">
+            <h1 id="general-login-title">{{ authMode() === 'login' ? 'Sign in' : 'Create account' }}</h1>
+            <p>{{ authMode() === 'login' ? 'Use your marketplace account to continue.' : 'Create your marketplace account.' }}</p>
           </div>
-
           @if (signedOut()) {
             <p class="signed-out">Signed out successfully</p>
           }
 
-          <button type="button" class="submit-btn" (click)="handleLogin()">
-            Continue to sign in
-          </button>
-          @if (canCreateAccount()) {
-            <button type="button" class="secondary-btn" (click)="handleRegister()">
-              Create account
-            </button>
+          <div class="auth-tabs" role="tablist" aria-label="Account action">
+            <button type="button" role="tab" [attr.aria-selected]="authMode() === 'login'" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')">Sign in</button>
+            <button type="button" role="tab" [attr.aria-selected]="authMode() === 'register'" [class.active]="authMode() === 'register'" (click)="setAuthMode('register')">Create account</button>
+          </div>
+
+          @if (authError()) {
+            <p class="auth-error" role="alert">{{ authError() }}</p>
           }
-        </div>
-      </section>
+
+          <form class="auth-form" (ngSubmit)="submitNativeAuth()">
+            @if (authMode() === 'register') {
+              <label>
+                Display name
+                <input name="displayName" autocomplete="name" [(ngModel)]="authDisplayName" [disabled]="authBusy()" required />
+              </label>
+            }
+            <label>
+              Email
+              <input name="email" type="email" autocomplete="email" [(ngModel)]="authEmail" [disabled]="authBusy()" required />
+            </label>
+            <label>
+              Password
+              <input
+                name="password"
+                type="password"
+                [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
+                [(ngModel)]="authPassword"
+                [disabled]="authBusy()"
+                required
+              />
+            </label>
+            <button type="submit" class="submit-btn" [disabled]="authBusy()">
+              {{ authMode() === 'login' ? 'Sign in' : 'Create account' }}
+            </button>
+          </form>
+          <p class="auth-footnote">Credentials are securely verified by the identity service.</p>
+        </section>
+      } @else {
+        <section class="login-shell">
+          <app-brand-mascot variant="login" alt="MSB portal sign in" />
+          <div class="login-panel">
+            <div class="login-brand">
+              <span class="brand-mark" aria-hidden="true">M</span>
+              <p class="portal-label">{{ portalLabel() }}</p>
+              <h1 class="brand-title">{{ portalTitle() }}</h1>
+              <p class="brand-subtitle">{{ portalSubtitle() }}</p>
+            </div>
+
+            @if (signedOut()) {
+              <p class="signed-out">Signed out successfully</p>
+            }
+
+            <button type="button" class="submit-btn" (click)="handleLogin()">
+              Continue to sign in
+            </button>
+          </div>
+        </section>
+      }
       <app-toast-container />
     </div>
   `,
@@ -49,6 +95,115 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
         linear-gradient(180deg, #fff7fb 0%, #f8f0ff 100%);
       position: relative;
       padding: 1.5rem;
+    }
+
+    .general-login-shell {
+      width: min(100%, 430px);
+      padding: 2rem;
+      border: 1px solid #dce1e8;
+      border-top: 4px solid #d84d7f;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 48px rgba(31, 41, 55, 0.14);
+    }
+
+    .marketplace-home {
+      display: inline-flex;
+      margin-bottom: 2rem;
+      color: #46364f;
+      font-family: var(--font-display);
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    .general-login-heading {
+      margin-bottom: 1.5rem;
+    }
+
+    .general-login-heading h1 {
+      margin: 0 0 0.4rem;
+      color: #241b2a;
+      font-size: 1.75rem;
+      letter-spacing: 0;
+    }
+
+    .general-login-heading p,
+    .auth-footnote {
+      margin: 0;
+      color: #667085;
+      font-size: 0.9rem;
+    }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-bottom: 1.25rem;
+      border: 1px solid #dce1e8;
+      border-radius: 6px;
+      background: #f7f8fa;
+      overflow: hidden;
+    }
+
+    .auth-tabs button {
+      min-height: 2.75rem;
+      border: 0;
+      background: transparent;
+      color: #667085;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .auth-tabs button.active {
+      background: #fff;
+      color: #a72f67;
+      box-shadow: inset 0 -2px #d84d7f;
+    }
+
+    .auth-form {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .auth-form label {
+      display: grid;
+      gap: 0.4rem;
+      color: #344054;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .auth-form input {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 2.8rem;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid #cfd5de;
+      border-radius: 6px;
+      background: #fff;
+      color: #1f2937;
+      font: inherit;
+      font-weight: 500;
+    }
+
+    .auth-form input:focus {
+      border-color: #d84d7f;
+      outline: 3px solid rgba(216, 77, 127, 0.14);
+    }
+
+    .auth-error {
+      margin: 0 0 1rem;
+      padding: 0.75rem;
+      border: 1px solid #f3b7c8;
+      border-radius: 6px;
+      background: #fff2f5;
+      color: #9f234f;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .auth-footnote {
+      margin-top: 1rem;
+      text-align: center;
     }
 
     .login-shell {
@@ -188,27 +343,10 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
       transform: translateY(-1px);
     }
 
-    .secondary-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      margin-top: 0.75rem;
-      padding: 0.75rem;
-      background: #fff8fc;
-      color: #be3a83;
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: 0.9375rem;
-      border: 1px solid #ead3f0;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-
-    .secondary-btn:hover {
-      border-color: #f472b6;
-      color: #8b6fe8;
+    .submit-btn:disabled {
+      cursor: wait;
+      opacity: 0.65;
+      transform: none;
     }
 
     @media (max-width: 760px) {
@@ -223,6 +361,13 @@ export class LoginComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
+  authMode = signal<'login' | 'register'>('login');
+  authBusy = signal(false);
+  authError = signal<string | null>(null);
+  authEmail = '';
+  authPassword = '';
+  authDisplayName = '';
+
   constructor() {
     this.authService.ensureSession()
       .pipe(take(1))
@@ -234,39 +379,50 @@ export class LoginComponent {
   }
 
   handleLogin(): void {
-    const returnUrl = this.returnUrl();
-    if (!this.isMarketplaceClient()) {
-      this.authService.login(this.client(), returnUrl);
+    this.authService.login(this.client(), this.returnUrl());
+  }
+
+  setAuthMode(mode: 'login' | 'register'): void {
+    if (this.authBusy()) {
+      return;
+    }
+    this.authMode.set(mode);
+    this.authError.set(null);
+  }
+
+  submitNativeAuth(): void {
+    const email = this.authEmail.trim();
+    const password = this.authPassword;
+    const displayName = this.authDisplayName.trim();
+    if (!email || !password || (this.authMode() === 'register' && !displayName)) {
+      this.authError.set('Enter the required account details to continue.');
       return;
     }
 
-    this.authService.loginWithPopup(this.client(), returnUrl)
-      .pipe(take(1))
-      .subscribe(state => {
+    this.authBusy.set(true);
+    this.authError.set(null);
+    const authFlow = this.authMode() === 'login'
+      ? this.authService.nativeLogin({ email, password })
+      : this.authService.nativeRegister({ email, password, displayName });
+    const unauthenticatedMessage = this.authMode() === 'login'
+      ? 'Email or password is incorrect.'
+      : 'Account could not be created. Try again.';
+
+    authFlow.pipe(take(1)).subscribe({
+      next: state => {
+        this.authBusy.set(false);
         if (state.authenticated) {
-          this.router.navigateByUrl(returnUrl);
+          this.authPassword = '';
+          void this.router.navigateByUrl(this.returnUrl());
+          return;
         }
-      });
-  }
-
-  handleRegister(): void {
-    const returnUrl = this.returnUrl();
-    if (!this.isMarketplaceClient()) {
-      this.authService.register(this.client(), returnUrl);
-      return;
-    }
-
-    this.authService.registerWithPopup(this.client(), returnUrl)
-      .pipe(take(1))
-      .subscribe(state => {
-        if (state.authenticated) {
-          this.router.navigateByUrl(returnUrl);
-        }
-      });
-  }
-
-  canCreateAccount(): boolean {
-    return this.isMarketplaceClient();
+        this.authError.set(unauthenticatedMessage);
+      },
+      error: error => {
+        this.authBusy.set(false);
+        this.authError.set(this.nativeAuthErrorMessage(error));
+      },
+    });
   }
 
   signedOut(): boolean {
@@ -297,7 +453,7 @@ export class LoginComponent {
         : 'Sign in or create your MSB account';
   }
 
-  private isMarketplaceClient(): boolean {
+  isMarketplaceClient(): boolean {
     return this.client() === 'marketplace';
   }
 
@@ -312,8 +468,27 @@ export class LoginComponent {
   private returnUrl(): string {
     const candidate = this.route.snapshot.queryParamMap.get('returnUrl');
     if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//') || candidate.includes('\\')) {
-      return '/';
+      return this.defaultReturnUrl();
     }
     return candidate;
+  }
+
+  private defaultReturnUrl(): string {
+    return this.client() === 'admin-portal'
+      ? '/admin/dashboard'
+      : this.client() === 'seller-portal'
+        ? '/seller/dashboard'
+        : '/';
+  }
+
+  private nativeAuthErrorMessage(error: unknown): string {
+    const payload = (error as { error?: unknown })?.error;
+    if (typeof payload === 'object' && payload !== null && 'message' in payload) {
+      const message = (payload as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) {
+        return message;
+      }
+    }
+    return 'Account sign-in could not finish. Try again.';
   }
 }

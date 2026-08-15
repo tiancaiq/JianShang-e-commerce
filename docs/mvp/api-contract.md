@@ -809,6 +809,149 @@ Rules:
   `business_verification_events`.
 - Invalid signatures return `403 FORBIDDEN`.
 
+### Effective admin session (`ADM-SEC-01`)
+
+```text
+GET /admin/me
+```
+
+The gateway exposes this as `GET /api/v1/admin/me`. Keycloak authentication
+establishes the subject; Auth Service resolves that subject to the
+application-owned user, active account state, persisted admin roles, and
+effective role permissions.
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "userId": "01JY...",
+    "role": "PLATFORM_ADMIN",
+    "roles": ["SUPER_ADMIN"],
+    "permissions": [
+      "admin.dashboard.read",
+      "admin.audit.read",
+      "admin.business.application.read",
+      "admin.business.application.decide",
+      "admin.listing.moderation.read",
+      "admin.listing.moderation.claim",
+      "admin.listing.moderation.resolve",
+      "admin.listing.edit",
+      "admin.listing.remove"
+    ],
+    "accountState": "ACTIVE"
+  }
+}
+```
+
+`role` is retained as the legacy compatibility discriminator. New clients use
+the ordered `roles` and `permissions` collections. The response never includes
+identity-provider tokens or arbitrary claims. Missing admin assignment or an
+inactive account returns `403`; command endpoints independently enforce their
+required permission and derive the actor from the authenticated principal.
+
+Current endpoint permission mapping:
+
+| Permission | Existing operations |
+|---|---|
+| `admin.dashboard.read` | Dashboard summary |
+| `admin.audit.read` | Business/listing workflow timelines and identity labels |
+| `admin.business.application.read` | Business application queue and detail |
+| `admin.business.application.decide` | Business application decision |
+| `admin.listing.moderation.read` | Listing moderation queue and case/detail reads |
+| `admin.listing.moderation.claim` | Listing case claim and release |
+| `admin.listing.moderation.resolve` | Listing case resolution and compatible direct decision |
+| `admin.listing.edit` | Active approved listing edit |
+| `admin.listing.remove` | Active listing removal |
+| `admin.user.read` | User administration search and detail |
+| `admin.user.restrict` | Restrict selected operational user capabilities |
+| `admin.user.suspend` | Suspend selected operational user capabilities |
+| `admin.user.ban` | Apply the user marketplace-ban policy profile |
+| `admin.user.reinstate` | Revoke one user enforcement action |
+| `admin.user.pii.read` | Read full user email and use email search |
+| `admin.business.read` | Active and historical business administration reads |
+| `admin.business.restrict` | Restrict selected operational business capabilities |
+| `admin.business.suspend` | Suspend selected operational business capabilities |
+| `admin.business.ban` | Apply the business marketplace-ban policy profile |
+| `admin.business.reinstate` | Revoke one business enforcement action |
+| `admin.listing.suspend` | Restrict or suspend listing capabilities |
+| `admin.listing.reinstate` | Revoke one listing enforcement action |
+
+Frontend permission checks control navigation and action presentation only;
+the backend permission check remains authoritative. Listing ownership,
+case-assignment, resolved-state, and `If-Match` rules still apply after the
+permission check.
+
+### Internal enforcement contracts (`ADM-ENF-00`)
+
+Auth Service provides package/application-service create, revoke, evaluate,
+and timeline contracts for `USER` and `BUSINESS`; Product Service provides the
+equivalent contracts for `LISTING`. Create includes explicit scopes, reason,
+optional case/times, expected target version, idempotency key, allow-listed
+metadata, and `dryRun`. Revoke includes action ID, expected action version,
+reason, idempotency key, metadata, and `dryRun`. Results include lifecycle,
+version, times, scopes, effective restrictions, correlation ID, and the dry-run
+marker. Actor/source/request identity is trusted server context, never client
+input.
+
+ADM-ENF-00 itself deliberately introduced no
+`/api/v1/admin/.../enforcements` mutation endpoint. The completed user,
+business, and listing target verticals now expose the routes documented below
+because each also implements the corresponding reversible runtime behavior.
+The same idempotency key plus canonical payload replays the original result; a
+changed payload is a `409` conflict. Stale target/action versions are `409` and
+are not retried. The canonical contract is
+`docs/mvp/adm/admin-enforcement-model.md`.
+
+### Admin user control (`ADM-USER-01/02`)
+
+```text
+GET  /api/v1/admin/users
+GET  /api/v1/admin/users/{userId}
+GET  /api/v1/admin/users/{userId}/timeline
+POST /api/v1/admin/users/{userId}/enforcements/dry-run
+POST /api/v1/admin/users/{userId}/enforcements
+POST /api/v1/admin/users/{userId}/enforcements/{enforcementId}/revoke/dry-run
+POST /api/v1/admin/users/{userId}/enforcements/{enforcementId}/revoke
+GET  /api/v1/users/me/marketplace-capabilities
+```
+
+Search supports `q`, `enforcementState`, operational `scope`, `createdFrom`,
+`createdTo`, `page`, bounded `size`, and an allow-listed stable `sort`. It
+requires `admin.user.read`. Without `admin.user.pii.read`, responses contain a
+server-generated masked email and a query containing `@` is rejected; the
+frontend never receives a full email to hide.
+
+Detail keeps authentication, account type, seller state, business membership,
+platform-admin state, and marketplace enforcement separate. The timeline
+requires `admin.audit.read`. Create action permission is selected by action
+type (`admin.user.restrict`, `.suspend`, or `.ban`); revocation requires
+`admin.user.reinstate`. Dry-run requests omit an idempotency key and do not
+write. Confirmed requests require the expected target/action version and a
+stable idempotency key. `BAN` is a marketplace ban whose stored scopes are
+server-expanded to `USER_BUYING` plus `USER_SELLING`.
+
+The safe current-user response reports buying and selling availability plus
+only the applicable action, effective/expiration times, and support reference.
+It does not expose actor, reason, case, request/correlation internals, metadata,
+or another user's action.
+
+The internal decision contract is not Gateway-routed:
+
+```text
+POST /api/v1/internal/users/capabilities/evaluate
+X-Internal-Service-Token: <configured service token>
+
+{"userId":"01...","scopes":["USER_BUYING","USER_SELLING"]}
+```
+
+Its response contains one allow/deny decision per requested operational scope
+with effective action, action ID, effective/expiration times, and a safe
+support reference. It contains no PII or enforcement reason. Consumers forward
+the correlation ID, treat an explicit denial as
+`403 USER_CAPABILITY_RESTRICTED`, and treat an unavailable or malformed
+decision as `503 ENFORCEMENT_DECISION_UNAVAILABLE`.
+
 ### Admin business application queue (`ADM-BUS-01`)
 
 ```text
@@ -823,7 +966,7 @@ status=PENDING_VERIFICATION|UNDER_REVIEW
 
 Rules:
 
-- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- Requires `admin.business.application.read`.
 - When `status` is omitted, returns applications in `PENDING_VERIFICATION`
   and `UNDER_REVIEW`.
 - Results are ordered by oldest `submittedAt` first.
@@ -853,11 +996,13 @@ Response `200`:
 
 ```text
 GET /admin/business-applications/{id}
+GET /admin/business-applications/{id}/timeline
 ```
 
 Rules:
 
-- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- Both endpoints require `admin.business.application.read`; the timeline also
+  requires `admin.audit.read`.
 - Does not require applicant ownership.
 - Returns the full business application review record visible to platform
   staff, including status, version, submission time, reviewer metadata,
@@ -890,6 +1035,41 @@ Response `200`:
 }
 ```
 
+The timeline endpoint verifies the required read/audit permissions and the
+application exists, and returns oldest-first append-only submission, provider,
+and admin decision events. Historical rows created before submission events
+were persisted receive a derived submission entry without rewriting history.
+
+Business and listing timeline endpoints share this normalized entry shape:
+
+```json
+{
+  "data": [
+    {
+      "eventId": "01JY...",
+      "occurredAt": "2026-08-12T10:00:00Z",
+      "eventType": "BUSINESS_APPLICATION_DECISION",
+      "actorType": "PLATFORM_ADMIN",
+      "actorId": "01JY...",
+      "actorDisplay": "Avery Stone",
+      "source": "HUMAN_ADMIN",
+      "targetType": "BUSINESS_APPLICATION",
+      "targetId": "01JY...",
+      "moderationCaseId": null,
+      "previousState": "UNDER_REVIEW",
+      "newState": "APPROVED",
+      "reason": "Business information verified",
+      "correlationId": "01JY...",
+      "metadata": { "outcome": "APPROVED" }
+    }
+  ]
+}
+```
+
+Unavailable legacy fields are `null`; `metadata` contains only safe,
+workflow-specific scalar values. Actor identity is derived from the
+authenticated backend principal and is never accepted from the request.
+
 ### Admin decision (`BUS-04`)
 
 ```text
@@ -905,7 +1085,7 @@ Request:
 
 Rules:
 
-- Requires authenticated platform admin role `PLATFORM_ADMIN`.
+- Requires `admin.business.application.decide`.
 - Requires `If-Match` with the current business application `version`.
 - `reason` is required for every decision.
 - The application must be `PENDING_VERIFICATION` or `UNDER_REVIEW`.
@@ -1196,6 +1376,7 @@ read and mutation.
 GET  /admin/listings/moderation
 GET  /admin/moderation/listing-cases?filter=open|unassigned|assigned_to_me|resolved
 GET  /admin/moderation/listing-cases/{caseId}
+GET  /admin/moderation/listing-cases/{caseId}/timeline
 POST /admin/moderation/listing-cases/{caseId}/claim
 POST /admin/moderation/listing-cases/{caseId}/release
 POST /admin/moderation/listing-cases/{caseId}/resolve
@@ -1207,11 +1388,12 @@ POST /admin/listings/{listingId}/decision
 
 LIST-06 implements the basic decision path without case claiming. ADM-LIST-03
 is the admin MVP queue workflow and should be used by the admin site for
-review detail and resolution. Both decision paths require authenticated
-platform admin role `PLATFORM_ADMIN`.
+review detail and resolution. Both decision paths require
+`admin.listing.moderation.resolve`.
 
 Queue response returns submitted listings where `status=PENDING_REVIEW` and
-`moderationStatus=PENDING`.
+`moderationStatus=PENDING`. Queue, case detail, admin listing detail, and admin
+media reads require `admin.listing.moderation.read`.
 
 ADM-LIST-02 adds the case-backed admin queue. `GET
 /admin/moderation/listing-cases` returns `LISTING_REVIEW` cases joined with
@@ -1240,7 +1422,8 @@ title, submitted-by user ID, seller user/business ID, assigned admin user ID,
 and SKU. Display-name search is deferred until auth-service owns a stable
 identity search contract.
 
-Claim and release commands require `If-Match` with the current case version.
+Claim and release commands require `admin.listing.moderation.claim` and
+`If-Match` with the current case version.
 Claim succeeds only for open unassigned cases and assigns the current admin.
 Release succeeds only for claimed cases assigned to the current admin. Stale
 versions or invalid assignment state return
@@ -1252,11 +1435,21 @@ the current listing draft including attached image metadata, and listing
 moderation decision history. `POST
 /admin/moderation/listing-cases/{caseId}/resolve` requires `If-Match` with the
 current case version and the same decision request body as the listing decision
-endpoint. The case must be claimed by the current admin. Resolution applies the
+endpoint. It requires `admin.listing.moderation.resolve`, and the case must be
+claimed by the current admin. Resolution applies the
 listing decision and closes the case in one transaction. Invalid assignment,
 stale case version, non-claimed case state, or already-resolved case state
 returns `409 MODERATION_CASE_VERSION_CONFLICT`. The admin detail UI treats
 unclaimed, stale, non-pending, and resolved cases as read-only review context.
+Cases claimed by a different admin are also rendered read-only before any
+command is attempted. The timeline endpoint requires
+`admin.listing.moderation.read` and `admin.audit.read` and
+returns oldest-first case creation/reopen, claim, release, resolution, listing
+decision, active edit, and active removal entries using the normalized timeline
+shape defined by the business application timeline. Claim/release/resolve actor
+IDs come only from the authenticated backend principal. Missing legacy case
+creation or current assignment events are represented by derived entries
+without modifying historical rows.
 
 ADM-LIST-04 adds active listing admin maintenance. `GET
 /admin/listings/{listingId}` returns the current listing draft-shaped response
@@ -1269,7 +1462,8 @@ visibility and requires `If-Match` plus a required `reason`.
 Removal sets listing status `REMOVED_BY_ADMIN`; it is not a physical delete.
 Both commands append moderation history decisions `ADMIN_EDIT` or
 `ADMIN_REMOVE`. Non-active listings return `400 LISTING_INVALID_REQUEST`; stale
-listing versions return `409 LISTING_VERSION_CONFLICT`.
+listing versions return `409 LISTING_VERSION_CONFLICT`. Edit requires
+`admin.listing.edit`; removal requires `admin.listing.remove`.
 
 Decision command requires `If-Match` with the current listing version.
 
@@ -1531,6 +1725,34 @@ POST /admin/search/listings/rebuild
 
 This rebuilds the derived listing-search projection from MySQL and requires a
 platform admin session. It does not create or modify listings.
+
+The legacy BM25 rebuild remains unchanged. The separately gated Product-owned
+V2 workflow uses these platform-admin-only routes:
+
+```text
+POST /admin/search/listings/vector-rebuilds
+GET  /admin/search/listings/vector-rebuilds/{runId}
+POST /admin/search/listings/vector-rebuilds/{runId}/catch-up
+POST /admin/search/listings/vector-rebuilds/{runId}/promote
+POST /admin/search/listings/vector-rebuilds/{runId}/recover
+```
+
+Commands have no request body and never accept an index, alias, schema,
+OpenSearch query, count, URL, state, vector, or operator identity. Product
+derives the authenticated platform admin from the existing Auth boundary.
+Responses use schema `MARKETPLACE_LISTING_VECTOR_REBUILD_STATUS_V2` and expose
+only the canonical run ID, fixed durable state/outcome/error code, bounded
+counts/timestamps, the fixed V2 schema identity, safe candidate/previous
+generation roles, and the Product-derived boolean command snapshots
+`canCatchUp`, `canPromote`, and `canRecover`. `canPromote` is true only when
+the durable run and exact aliases are promotable and Product currently finds
+zero unresolved projection work; `catchUpWorkCount` is not a remaining-lag
+signal. Commands re-evaluate these rules, and promotion repeats them under the
+exclusive database fence before alias mutation. Physical index names, listing
+IDs/content, hashes, vectors, credentials, and OpenSearch bodies are excluded.
+Command and status gates are false by default. Every authenticated command
+outcome appends one protected,
+immutable Product audit row.
 
 Public listing cards may expose listing ID, seller type, safe owner display
 label, category display data, title, condition, price, public location,
@@ -2061,7 +2283,10 @@ POST /checkouts/{checkoutId}/cancel
 ```
 
 Create request references cart and address ID. Response contains authoritative
-snapshots, totals, expiry, and reservation state.
+snapshots, totals, expiry, and reservation state. Each item includes the
+immutable nullable `storeName` captured with its `storeId`; clients use the
+name when present and a neutral `Store` fallback rather than displaying the
+opaque ID as a heading.
 
 The approved local-demo implementation uses `ZERO_LOCAL_DEMO_V1` tax,
 `FREE_LOCAL_DEMO_V1` shipping, immutable platform policy
@@ -2166,6 +2391,13 @@ already validated while creating the payment intent. The event handler then:
   processed-event completion, the unchanged version-1 `order.confirmed` outbox
   row, and a notification-compatible version-2 row.
 
+Checkout creation also persists one Order-owned cart-reconciliation command.
+After checkout reaches `COMPLETED`, an independent retry worker atomically
+removes only purchased Redis lines whose mutation identity still matches the
+checkout snapshot. A wholly unchanged cart is removed by its exact cart
+version; buyer changes made after checkout began are preserved. Redis failure
+does not change payment or order outcome.
+
 `V2-NOT-01A` adds a second, backward-compatible internal
 `order.confirmed` version-2 outbox event. Version 1 remains unchanged and is
 unsupported by Notification Service. The version-2 payload retains the
@@ -2219,6 +2451,7 @@ The list response is:
         {
           "businessOrderId": "01...",
           "businessId": "01...",
+          "storeName": "Demo Store",
           "status": "PENDING_ACCEPTANCE",
           "totalAmount": 25.0000,
           "currency": "USD"
@@ -2251,6 +2484,7 @@ persisted buyer-facing `storeId` and `items`:
       "businessOrderId": "01...",
       "businessId": "01...",
       "storeId": "01...",
+      "storeName": "Demo Store",
       "status": "PENDING_ACCEPTANCE",
       "totalAmount": 25.0000,
       "currency": "USD",
@@ -2325,12 +2559,18 @@ pagination. `status` is optional and accepts exactly:
 ```text
 PENDING_ACCEPTANCE
 ACCEPTED
-PARTIALLY_SHIPPED
+PROCESSING
 SHIPPED
 DELIVERED
-CANCELLATION_PENDING
 CANCELLED
 ```
+
+`CANCELLED` is the seller-facing terminal queue filter and matches stored
+`business_orders.cancellation_status = 'CANCELLED'`. The other values match
+stored fulfillment status and exclude finally cancelled groups. Response
+`status` remains the stored fulfillment status so fulfillment history is not
+rewritten; seller clients render `Cancelled` as the primary operational status
+whenever `cancellationStatus` is `CANCELLED`.
 
 Queue items contain only business order ID and seller-visible number,
 business/store IDs, stored fulfillment and cancellation statuses, buyer order
@@ -2345,10 +2585,12 @@ price/currency, quantity, line total, and policy version), and the minimum
 immutable shipping snapshot (`recipientName`, phone, address lines, city,
 region, postal code, and country code).
 
+Detail also returns the business-group optimistic `version`, safe status
+timeline (`status`, `occurredAt`), and optional single manual shipment snapshot.
 Neither response exposes buyer identity or email, address-book source
 identifiers, payment intent/provider/event data, hashes, leases, idempotency
-records, outbox/history internals, sibling business groups, shipments, or an
-invented aggregate version. Malformed IDs, status, cursor, and limit return
+records, outbox/history actor internals, or sibling business groups. Malformed
+IDs, status, cursor, and limit return
 their bounded `BUSINESS_ORDER_*_INVALID` errors. Auth or Order dependency
 failure returns `503 BUSINESS_ORDERS_DEPENDENCY_UNAVAILABLE`.
 
@@ -2375,14 +2617,15 @@ Retry requires `FINANCE_ADMIN` or a narrower configured permission.
 
 ```text
 POST /businesses/{businessId}/orders/{businessOrderId}/accept
+POST /businesses/{businessId}/orders/{businessOrderId}/processing
 POST /businesses/{businessId}/orders/{businessOrderId}/shipments
-POST /businesses/{businessId}/shipments/{shipmentId}/mark-shipped
-GET  /orders/{orderId}/shipments
-POST /webhooks/shipping
+POST /businesses/{businessId}/orders/{businessOrderId}/delivery-demo
 ```
 
-Shipment create request includes carrier, tracking number, and item quantities.
-State-changing commands require idempotency.
+The bounded shipment request includes manual carrier/service display names,
+tracking number, and shipped time for the whole group. State-changing commands
+require idempotency and optimistic `If-Match`. Multiple/partial shipments,
+carrier APIs/webhooks, and labels remain deferred.
 
 `V2-SHP-01A` defines the first command as authenticated and independently
 default disabled through `business-orders.acceptance-enabled=false`. Disabled
@@ -2543,6 +2786,43 @@ notification center is also false by default; when enabled it calls only the
 three NOT-01B routes, renders only `ORDER_CONFIRMED_V1`, allowlists `/account`,
 and fails closed for unsafe routes, corrupt args, or internal fields.
 
+`V2-NOT-01D` expands the same default-off boundary with a count route and
+business-scoped seller routes:
+
+```text
+GET   /api/v1/notifications/unread-count
+GET   /api/v1/businesses/{businessId}/notifications?cursor=&limit=
+GET   /api/v1/businesses/{businessId}/notifications/unread-count
+POST  /api/v1/businesses/{businessId}/notifications/{notificationId}/read
+POST  /api/v1/businesses/{businessId}/notifications/read-all
+```
+
+Unread-count responses are `{"data":{"unreadCount":N}}` and always come
+from Notification-owned SQL. Buyer calls resolve the active user through the
+existing Auth bearer-relay contract. Business calls additionally resolve the
+current membership through Auth and require active `ORDER_VIEW` or
+`ORDER_FULFILL` permission. The requested business ID is the SQL recipient
+scope; client-supplied user, role, or membership headers are never trusted.
+Missing and cross-scope notification IDs return the same safe
+`404 NOTIFICATION_NOT_FOUND` response.
+
+Supported presentation types are `BUYER_ORDER_CONFIRMED`,
+`BUYER_ORDER_CANCELLED`, `BUYER_REFUND_COMPLETED`, `BUYER_ORDER_ACCEPTED`,
+`BUYER_ORDER_PROCESSING`, `BUYER_ORDER_SHIPPED`, `BUYER_ORDER_DELIVERED`,
+`SELLER_NEW_ORDER`, and `SELLER_ORDER_CANCELLED`. Buyer safe routes are exactly
+`/account/orders/{orderId}`; seller safe routes are exactly
+`/seller/orders/{businessOrderId}`. Presentation arguments contain only the
+required canonical order IDs and optional bounded store display name. The
+Order detail endpoints perform their normal authorization after navigation.
+
+The default-off internal `POST /api/v1/internal/notification-events` accepts
+only the service-token-authenticated, versioned commerce projection contract.
+It returns `202` for newly created and identical replayed sources, `409` for a
+same-event-ID hash conflict, `422` for nonretryable invalid mappings, `503` for
+retryable persistence failure, and hidden `404` while disabled. It is not a
+gateway/browser route. Order's scheduled outbox adapter is the only runtime
+caller in this slice.
+
 These preference routes remain deferred:
 
 ```text
@@ -2552,24 +2832,15 @@ PATCH /notification-preferences
 
 ## 14. Administration and Support
 
-MVP admin includes business application review and listing moderation only.
-User/business suspensions, reports, support cases, chat evidence review,
-payment/order/finance operations, advanced trust/disputes, and AI moderation
-assistance are admin roadmap scope but deferred until later release slices.
-The first planned report admin view is ADM-REP-01 user-reported listings, which
-depends on report submission and report persistence being implemented first.
+The original MVP admin boundary includes business application review and
+listing moderation. The completed enforcement release train additionally
+implements the target-specific user, business, and listing routes documented
+in this contract. Reports, investigation/support cases, appeals, chat evidence
+review, payment/order/finance operations, payout enforcement, advanced
+trust/disputes, and AI moderation assistance remain deferred. The next planned
+admin milestone is `ADM-REP-00/01/02`; this cleanup does not implement it.
 
 ```text
-GET  /admin/users
-GET  /admin/users/{userId}
-POST /admin/users/{userId}/suspensions
-POST /admin/users/{userId}/restore
-
-GET  /admin/businesses
-GET  /admin/businesses/{businessId}
-POST /admin/businesses/{businessId}/suspensions
-POST /admin/businesses/{businessId}/restore
-
 GET  /admin/reports
 POST /admin/reports/{reportId}/claim
 POST /admin/reports/{reportId}/resolve
@@ -2581,7 +2852,10 @@ POST /admin/support-cases/{caseId}/responses
 GET  /admin/audit-logs
 ```
 
-Admin list endpoints require bounded filters and cursor pagination.
+Admin list endpoints require bounded filters and server-side pagination. The
+current user and business administration APIs use bounded `page`/`size`
+pagination; future unbounded collections should use the approved cursor
+contract unless their target slice explicitly specifies otherwise.
 Future listing-report admin reads should filter `GET /admin/reports` to listing
 subjects rather than mixing user reports into the listing submission moderation
 queue.
@@ -2605,6 +2879,13 @@ their product slice.
 while the schema-validated Kafka task is running. The overall response may
 remain `503 NOT_READY` when provider configuration is absent even though
 durable intake is ready; this does not stop ingestion or make a provider call.
+
+`AI-DISC-SEARCH-STAB-P1-14` extends the same readiness response with
+`discoveryDocumentEmbedding=DISABLED|READY|UNAVAILABLE|DEFERRED`. The field
+describes only the default-off Agent discovery-document embedding intake and
+worker lifecycle. Disabled and kill-switched states do not create Product,
+Kafka, provider, persistence, or network work; enabled readiness does not
+claim event-drain, V2 promotion, hybrid-search rollout, or browser evidence.
 
 `AI-RAG-02D` adds no HTTP route. Its local/deployment operator CLI accepts
 only exact run/job IDs, a bounded operator identity, and the fixed listing
@@ -2684,6 +2965,91 @@ Only title, approved description, decimal price/currency, and public
 city/region may appear in an active source. Seller identity, contact data,
 exact address or coordinates, media, moderation evidence, internal notes,
 payment/delivery preferences, storage fields, and credentials are forbidden.
+
+### Internal Product discovery embedding source (`AI-DISC-SEARCH-P0-04A`)
+
+Product Service exposes one independently default-disabled, request-bound
+source route:
+
+```text
+GET /api/v1/internal/agent/discovery/embedding-requests/{requestId}/source
+```
+
+`requestId` is a canonical 26-character uppercase ULID and is resolved to a
+durable Product-owned embedding request. The route requires
+`X-Agent-Internal-Service-Token`, using the existing constant-time comparison.
+Gate precedence is feature disabled, internal authentication, request
+validation, then Product lookup. The source is returned only while the exact
+stored listing version and document/input hashes still match the current
+active, approved public individual listing. Product never substitutes a newer
+listing version.
+
+Successful response:
+
+```json
+{
+  "schemaVersion": "MARKETPLACE_LISTING_EMBEDDING_SOURCE_V1",
+  "requestId": "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+  "listingId": "01ARZ3NDEKTSV4RRFFQ69G5FAD",
+  "listingVersion": 7,
+  "documentSchemaVersion": "MARKETPLACE_LISTING_DISCOVERY_V2",
+  "documentHash": "lowercase-sha256",
+  "embeddingInputSchemaVersion": "MARKETPLACE_LISTING_EMBEDDING_TEXT_V1",
+  "embeddingInputHash": "lowercase-sha256",
+  "normalizerVersion": "NFKC_WHITESPACE_V1",
+  "redactorVersion": "PUBLIC_CONTACT_REDACTION_V1",
+  "language": "und",
+  "embeddingIdentity": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "embeddingText": "TITLE\n...\nCATEGORY\n...\n...\nDESCRIPTION\n..."
+}
+```
+
+The text contains only normalized/redacted title, category name/slug, and
+description. `publicCity` and `publicRegion` remain the canonical Product
+location field names but are not included in embedding text. Seller/contact,
+price, condition, availability, location, images, moderation, storage,
+transaction, vector, provider-response, and credential fields are forbidden.
+
+Stable errors are `404 FEATURE_DISABLED`,
+`403 AGENT_INTERNAL_AUTHENTICATION_REQUIRED`, `400 INVALID_REQUEST`,
+`404 LISTING_DISCOVERY_EMBEDDING_SOURCE_NOT_FOUND`, and
+`503 LISTING_DISCOVERY_EMBEDDING_UNAVAILABLE`. Missing, stale, changed-hash,
+deleted, and ineligible requests are intentionally non-enumerating.
+
+### Product existing-listing embedding-request backfill (`AI-DISC-SEARCH-P0-09`)
+
+Product exposes a separate default-disabled platform-admin boundary:
+
+```text
+POST /api/v1/admin/search/listings/embedding-request-backfills
+GET  /api/v1/admin/search/listings/embedding-request-backfills/{runId}
+POST /api/v1/admin/search/listings/embedding-request-backfills/{runId}/resume
+```
+
+Commands accept no body. Product derives the finite listing-ID watermark,
+cursor, page bounds, 04A request identity, event topic, and actor. The run ID
+is a canonical 26-character Crockford ULID. Authentication and existing
+platform-admin authorization precede feature gates and lookup.
+
+The strict response schema
+`MARKETPLACE_LISTING_EMBEDDING_REQUEST_BACKFILL_STATUS_V1` contains only run
+ID, command outcome, fixed state, page/created/already-present/skipped/failure
+counts, fixed safe error code, and timestamps. It never returns watermark,
+cursor, listing/request/event IDs, hashes, listing content, vector, provider
+data, or credentials.
+
+Stable errors are `404 FEATURE_DISABLED`,
+`401 AUTHENTICATION_REQUIRED`, `403 LISTING_FORBIDDEN`,
+`404 LISTING_EMBEDDING_BACKFILL_NOT_FOUND`,
+`409 LISTING_EMBEDDING_BACKFILL_ACTIVE`,
+`409 LISTING_EMBEDDING_BACKFILL_BUSY`,
+`409 LISTING_EMBEDDING_BACKFILL_BOUND_EXCEEDED`,
+`400 LISTING_INVALID_REQUEST`, and
+`503 LISTING_EMBEDDING_BACKFILL_UNAVAILABLE`.
 
 ### Internal owned-draft listing media tool (`AI-LIST-01C`)
 
@@ -2939,6 +3305,608 @@ Tool rules:
 - Draft tools return proposals and never persist automatically.
 - Every tool call records session, actor, arguments hash, result status,
   latency, token usage, and correlation ID.
+
+### Marketplace Discovery streaming messages (`AI-DISC-UX-P1-03`)
+
+#### Parallel Marketplace Agent V2 (`AI-DISC-AGENT-V2-PLAN-01`)
+
+The legacy `/api/v1/agent/discovery/**` routes remain operational. The parallel
+V2 surface is independently default-off and uses:
+
+```text
+POST /api/v1/agent/marketplace-v2/sessions
+GET  /api/v1/agent/marketplace-v2/sessions/{sessionId}/messages
+POST /api/v1/agent/marketplace-v2/sessions/{sessionId}/messages
+POST /api/v1/agent/marketplace-v2/sessions/{sessionId}/messages/stream
+POST /api/v1/agent/marketplace-v2/sessions/{sessionId}/messages/{clientMessageId}/stop
+POST /api/v1/agent/marketplace-v2/sessions/{sessionId}/messages/{userMessageId}/response-retry/stream
+```
+
+V2 uses `MARKETPLACE_AGENT_V2` sessions and accepts one natural terminal model
+response or one strict tool proposal per decision. The tools are
+`check_availability`, `search_listings`, `get_listing`, and the no-I/O control
+proposal `request_confirmation`. The additional no-I/O
+`collect_listing_information` control starts structured seller field
+collection but cannot create or publish a listing. The backend validates
+schema, actor/session scope, known-listing context, duplicates, cancellation,
+and the global maximum of five decisions. RAG, order, account, seller
+draft/publication, and handoff integrations are not registered.
+
+`AI-DISC-AGENT-V2-SELLER-CONTEXT-03` stores an additive private session state:
+
+```json
+{
+  "activeWorkflow": {
+    "type": "CREATE_LISTING",
+    "status": "COLLECTING_INFORMATION",
+    "collectedFields": {
+      "itemType": {"status": "PROVIDED", "value": "book", "reason": null},
+      "title": {"status": "MISSING", "value": null, "reason": null}
+    },
+    "itemTypeEligibility": "SUPPORTED"
+  },
+  "pendingInteraction": {
+    "type": "ANSWER_FIELD",
+    "workflowType": "CREATE_LISTING",
+    "field": "TITLE",
+    "question": "What title would you like to use for the listing?",
+    "acceptsReplacement": false,
+    "status": "WAITING"
+  }
+}
+```
+
+A committed answer to a `WAITING` seller field is consumed exactly once before
+scope classification and never becomes an inventory query. The public message
+still uses the generic assistant DTO; its optional `pendingInteraction` adds
+nullable `workflowType`, `field`, and `question` properties. Confirmation
+interactions retain their existing action/arguments contract. Explicit similar
+listing or pricing requests may use Product search while preserving the seller
+workflow. There is no create-draft or publish-listing tool and no migration.
+
+`AI-DISC-AGENT-V2-PENDING-FIELD-04` makes the private field-state shape
+explicit. Field status is `MISSING|PROVIDED|REJECTED|DEFERRED|NEEDS_HELP`.
+`PROVIDED` contains a validated value; `REJECTED` contains the refused value
+plus the allowlisted reason `UNSUPPORTED_CATEGORY`. Legacy string fields deserialize as
+`PROVIDED`. Pending replies are resolved privately as
+`VALUE_PROVIDED|UNKNOWN|DEFER|REQUEST_HELP|CANCEL_WORKFLOW|CORRECTION|REPLACE_FIELD_VALUE|UNRELATED_OR_NEW_INTENT`
+before scope classification. Unknown/help replies retain the waiting field;
+defer advances without a literal value; cancellation closes it; unrelated
+turns do not consume it.
+
+`AI-DISC-AGENT-V2-WORKFLOW-CONTINUITY-05` makes unsupported item type a field
+rejection rather than a terminal workflow. The active `CREATE_LISTING` workflow
+remains `COLLECTING_INFORMATION`, and its private persisted `ANSWER_FIELD`
+interaction sets `acceptsReplacement: true`. Contextual replacement
+replies are resolved exactly once before scope/model/tool routing; they cannot
+run Product, embedding, or RAG work. `collect_listing_information` accepts an
+optional bounded `itemType`, and the backend also preserves an explicit item
+type from the initiating seller sentence after the model selected that tool.
+Older stored `UNSUPPORTED` workflow JSON is upgraded under the same row lock on
+the next replacement reply. The marker is passed only in model context and is
+omitted from the public assistant DTO. No database migration or SSE event type
+changes.
+
+The generic assistant message contract is:
+
+```json
+{
+  "role": "ASSISTANT",
+  "content": "Customer-facing text",
+  "attachments": [],
+  "refinement": null,
+  "pendingInteraction": null,
+  "citations": [],
+  "toolActivity": [],
+  "inputTokens": 0,
+  "outputTokens": 0
+}
+```
+
+Listing attachments contain only revalidated public Product facts. The strict
+`MARKETPLACE_AGENT_V2_STREAM_EVENT_V1` SSE types are `message_started`,
+`activity`, `tool_completed`, `text_delta`, `attachments`, `error`, and `done`.
+Only terminal `response.output_text.delta` content is forwarded. Provider
+reasoning/lifecycle events, prompts, raw tool arguments, vectors, scores, and
+private observations are neither streamed nor persisted.
+
+Each `LISTING` attachment includes nullable `thumbnailUrl`. When present it is
+the first ordered approved Product image and must match
+`/api/v1/public/listing-media/{imageId}`; clients must not accept arbitrary
+external image origins. A missing or failed image renders a non-authoritative
+placeholder and does not invalidate the listing attachment. The image path is
+persisted with the attachment so completed history restores the same card once.
+
+`AI-DISC-AGENT-V2-TERMINAL-COVERAGE-04` clarifies that a terminal V2 SSE
+`error` is response-retryable only after the committed USER invocation has a
+guarded `PARTIAL` assistant row. Clients reconcile history immediately and
+render that assistant plus `Retry response`; they never repost the USER turn.
+If the five-decision budget ends after a successful `search_listings`
+observation, the `done` response contains a deterministic grounded summary and
+the already validated attachments in the same turn rather than asking the user
+to continue.
+
+`AI-DISC-AGENT-V2-GUARDED-RECOVERY-05` adds no wire fields. Explicit requests
+for hidden instructions/internal reasoning/private seller contact and explicit
+medical cure or treatment requests complete as normal canonical refusal
+messages with no model call, tool call, attachments, or Retry response. An
+unsupported contextual comparison may be replaced only with text composed from
+the active recommendation set's validated public facts; it cannot trigger a
+broad search or introduce a listing. An unsupported response to obvious
+keyboard-noise input becomes one no-tool clarification. Generic validation
+failures retain the guarded retryable failure contract but must not claim that
+a marketplace service was unavailable.
+
+`AI-DISC-AGENT-V2-ORDINAL-PRESENTATION-06` keeps the first and second ordinal
+labels bound to the active recommendation order. Customer text must not contain
+serialized condition values such as `LIKE_NEW`, relevance fields such as
+`match: RELATED`, or a confirmation question asking to display cards already
+attached to the response. The existing attachment order remains authoritative;
+there are no new wire fields.
+
+`AI-DISC-AGENT-V2-MESSAGES-CUTOVER-07` changes only frontend route/component
+ownership. In a `marketplaceAgentV2` build, the Marketplace assistant entry in
+`/account/messages` uses the existing `/api/v1/agent/marketplace-v2` session,
+history, streaming, Stop, and response-Retry contracts. Buyer/seller messaging
+continues to use Chat Service. Legacy assistant URLs redirect to
+`/account/messages`; the separate authenticated V2 evaluation URL remains.
+
+`AI-DISC-AGENT-V2-FLOATING-CUTOVER-08` applies the same frontend-only ownership
+rule to the authenticated floating Marketplace assistant. Its compact V2
+surface uses the existing V2 API contracts and does not route assistant turns
+through Chat Service. Human buyer/seller conversations in that panel remain
+unchanged, and flag-off builds retain the legacy Discovery fallback.
+
+`AI-DISC-AGENT-V2-SCOPE-GATE-01` adds no public V2 request, response, history,
+or SSE field. After durable USER acceptance, V2 records an internal strict
+scope category and either continues into ReAct, answers conversationally with
+tools blocked, applies the existing safety refusal, or completes a clear
+out-of-scope request with one ordinary assistant message. Out-of-scope streams
+contain `message_started`, terminal `text_delta`, and `done` only; they contain
+no activity, tool-completion, attachment, citation, or refinement event.
+Low-cardinality scope metadata may be retained in private assistant actions,
+but is ignored by the public history decoder and never rendered.
+
+`AI-DISC-AGENT-V2-SCOPE-GROUNDING-02` extends that private action with
+`requiredGrounding=NONE|LISTING_DATA|KNOWLEDGE_RAG|PRIVATE_TOOL`. The public
+request, response, history, and SSE schemas are unchanged. Unsupported direct
+factual prose is rejected before exposure and returned to the controlled loop
+as `GROUNDING_REQUIRED`. Successful listing answers retain private evidence
+actions containing source type, source identity, version/hash, and retrieval
+time; those fields are not included in customer text or frontend DTOs.
+Knowledge-policy and actor-private questions safely abstain when their real
+runtime tool is absent. They are never answered from general model knowledge or
+routed through Product search.
+
+The Stop result is one of `NOT_COMMITTED`, `STOPPED`, `COMPLETED`, or
+`TERMINAL`. `STOPPED` means the USER row committed and a retryable `PARTIAL`
+assistant is authoritative, including the zero-text case. Response Retry
+accepts only the original `clientMessageId`, reuses the committed USER and
+invocation identity, and never inserts another USER row. Failed history entries
+include a bounded `responseRetryUserMessageId`; this also covers an orphaned
+final USER row from a previously interrupted response.
+
+`search_listings` observations distinguish `CATEGORY_UNAVAILABLE`,
+`FILTERS_TOO_STRICT`, and `SEARCH_UNAVAILABLE`. Listing attachments are allowed
+only from validated relevant matches, with exact matches ordered before related
+alternatives; unavailable and failed outcomes have none.
+`check_availability` performs only Product's authoritative broad-category count
+probe and never creates attachments. An identical normalized proposal executes
+at most once in one turn; a changed query or filter may execute after backend
+validation. Stored observations inform the next model decision without becoming
+a deterministic cross-turn routing gate. The exact `never mind` cancellation
+response has decision count zero; all model-driven turns remain within the
+five-decision ceiling.
+
+`AI-DISC-AGENT-V2-INVENTORY-FACETS-02` makes broad-search clarification
+result-aware. Results-first Agent V2 requests the additive internal Product
+response version `MARKETPLACE_HYBRID_SEARCH_RESPONSE_V3`; omitted
+response-version requests continue to return V1 and explicit V2 requests keep
+their deployed facet-only shape. V3 adds this server-owned object:
+
+```json
+{
+  "discovery": {
+    "normalizedCategory": "chair",
+    "totalMatches": 25,
+    "relevantMatchCount": 20,
+    "exactMatchCount": 12,
+    "relatedMatchCount": 8,
+    "retrievalConfidence": "HIGH",
+    "reason": "RESULTS_AVAILABLE",
+    "facets": {
+      "subtype": [{"value":"Dining Chair","count":12}],
+      "condition": [],
+      "priceBand": [],
+      "location": []
+    }
+  }
+}
+```
+
+Each facet list is bounded to 12 at the Product boundary; Agent retains at
+most four values per facet in its private structured observation.
+`totalMatches` counts bounded current filter-matching candidates;
+`relevantMatchCount` counts candidates that also pass Product's product-concept
+and accessory rejection rules. `exactMatchCount` and `relatedMatchCount`
+classify that bounded relevant set; full multi-concept matches sort first and
+fused rank breaks ties. Confidence is derived from bounded ratios and
+lexical-branch evidence without exposing raw scores. Useful Product-revalidated
+results remain visible even when internal confidence is low. The terminal model
+sees customer-safe counts but not card facts, listing IDs, facets, or confidence
+metadata. The nullable `refinement {question, options[]}` uses customer-oriented
+`MATCH_SCOPE`, `MAXIMUM_PRICE`, `CONDITION`, or `LOCATION` actions; legacy
+subtype and price-band options remain readable. New responses set `question`
+to null: the backend supplies action metadata only and never appends prose to
+the model answer. The UI renders at most one follow-up area after attachments,
+and selecting a non-confirming suggestion fills the composer without
+sending. Observation/refinement metadata is restored from bounded V2 actions
+JSON.
+
+`AI-DISC-AGENT-V2-CONTEXTUAL-RESPONSE-01` adds an optional strict pending
+interaction to the generic message and V2 session JSON:
+
+```json
+{
+  "id": "01...",
+  "type": "CONFIRM_ACTION",
+  "action": "RUN_REFINED_SEARCH",
+  "arguments": {},
+  "status": "WAITING",
+  "createdAt": "2026-07-30T00:00:00Z"
+}
+```
+
+Only a `WAITING` interaction binds `yes` or `no`. Consumption is atomic and
+single-use; repeated confirmation cannot execute the action again. Ordinary
+listing display, comparison, and ordinal questions do not create confirmation
+state. The latest result-bearing assistant message is the active ordered
+recommendation set, while earlier cards remain immutable history.
+
+`AI-DISC-AGENT-V2-RESULTS-FIRST-CONTINUITY-03A` adds an internal-only
+`contextualRefinement {facet,value,activeQuery,searchQuery}` to a V2 model
+decision when the current short reply exactly equals a subtype in the latest
+successful Product search observation, or its revalidated attachments' public
+category when Product V4 omits subtype facets. It is not a browser or persistence DTO.
+The provider must propose `search_listings` with `searchQuery`; backend policy
+rejects terminal prose or a mismatched query and returns only the existing safe
+`GROUNDING_TOOL_REQUIRED` observation within the five-decision budget. SSE
+continues to expose only truthful tool activity, terminal text, attachments,
+and completion. For a `CATEGORY` refinement, `searchQuery` remains the active
+product query and the internal strict tool proposal must also carry the selected
+`categoryName`. The Agent filters only Product-revalidated listing facts by that
+public category name; it never appends a broad taxonomy value such as `General`
+to the free-text query. An empty filtered slice is `FILTERS_TOO_STRICT`, not
+proof of `CATEGORY_UNAVAILABLE`. This tool argument is not added to browser or
+history DTOs.
+
+`AI-DISC-AGENT-V2-RESULTS-FIRST-CONTINUITY-03B` does not add a wire field.
+Within one invocation, the backend permits at most one executed
+`search_listings` action; after its `SUCCEEDED|FAILED` observation, the next
+provider decision receives no tool registry and must produce terminal prose.
+The policy independently rejects any second search proposal as
+`DUPLICATE_TOOL_CALL`. A grounded selection follow-up such as `the second one`
+or `show me a cheaper one` may copy exactly the selected attachment from the
+latest ordered active recommendation set onto the new assistant message. That
+attachment keeps its existing internal listing identity for follow-up routing,
+while customer prose and SSE continue to exclude IDs. Comparison-only turns
+that do not select a card retain the existing no-duplicate-attachment behavior.
+Individual listings link to a listing page for buyer-seller coordination; V2
+must not describe that surface as a purchase, checkout, or order page.
+
+`AI-DISC-AGENT-V2-ACTION-EVIDENCE-02` requires every customer-facing action
+claim to match an allowlisted successful tool observation. A prose-only yes/no
+question is invalid unless the response carries a persisted `WAITING`
+interaction. V2 does not claim to open galleries, retrieve extra photos or
+private seller instructions, contact sellers, or start purchases; it directs
+customers to the existing listing attachment/page instead. Unsupported
+terminal content fails with the existing retryable V2 failure contract, so a
+committed user message still restores with `Retry response` rather than an
+accepted fabricated action.
+
+`AI-DISC-AGENT-V2-MULTICONCEPT-RERANK-05` adds the opt-in internal Product
+response `MARKETPLACE_HYBRID_SEARCH_RESPONSE_V4`; V1-V3 remain shape
+compatible. V4 performs Product-owned concept compatibility filtering and
+constrained deterministic reranking after hybrid candidate retrieval and
+authoritative MySQL revalidation. Each returned result adds:
+
+```json
+{
+  "conceptMatch": {
+    "relevance": "HIGH",
+    "completeConceptMatch": true,
+    "productTypeCompatible": true,
+    "matchedConcepts": ["key storage", "pouch or case"]
+  }
+}
+```
+
+V4 `discovery` also adds bounded `rerankContext {coreConcepts,
+candidateProductTypes,excludedBroadTypes}` and `rejectedCandidateCount`.
+Returned results contain only `HIGH|MEDIUM` matches, `HIGH` precedes `MEDIUM`,
+and `exactMatchCount + relatedMatchCount == relevantMatchCount`.
+`rejectedCandidateCount + relevantMatchCount == totalMatches`. Product returns
+no numeric scores, vectors, private listing fields, or model deliberation.
+Agent maps `HIGH` to attachment `matchQuality=EXACT` and `MEDIUM` to
+`matchQuality=RELATED`, then revalidates each selected listing through the
+existing detail API. `matchQuality` is nullable/omittable so earlier stored V2
+history remains valid.
+
+`AI-DISC-CS-P1-06` uses one model-first loop capped at five decisions. A
+decision is either bounded natural assistant content or exactly one proposed
+tool call. The runtime registry is the full tool allowlist:
+`CHECK_AVAILABILITY`, `SEARCH_INDIVIDUAL`, and `GET_LISTING`. No direct-response,
+knowledge, account, order, seller, or handoff pseudo-tool is advertised. The
+provider uses optional tool choice; backend policy validates schemas, actor
+scope, capability, cancellation, duplicates, and the remaining step budget.
+Rejected calls become a low-cardinality structured observation for the next
+model decision and are never silently replaced.
+
+Natural terminal content is streamed from the same Responses API decision via
+`response.output_text.delta`; it is accumulated, validated, persisted once,
+and must exactly match the completed/history message. Reasoning events, raw
+tool arguments, prompts, vectors, scores, IDs, and provider errors are never
+streamed. A decision containing both user-facing text and a tool call fails
+closed. The legacy `DISCOVERY_RESULT` public and persistence DTO remains a
+forward-compatible envelope for ordinary messages and optional recommendation
+attachments; ordinary answers have no recommendation cards or discovery badge.
+
+After durable USER acceptance, any terminal generation failure persists a
+guarded `HANDOFF` assistant and retains `FAILED` invocation semantics. History
+may also return `responseFailure` plus `responseRetry` on a legacy USER entry
+when its owned invocation is `FAILED` but has no assistant link. The recovery
+command uses that committed USER/invocation identity, is bounded by the
+existing retry count, and must not create another USER message. Failure copy
+never exposes provider/Product details; no automatic retry is permitted.
+
+Preference state may additionally contain `activeGoal`, `activeCategory`,
+`workflowStatus`, up to five `referencedListings`, and up to five
+`lastToolActions`. It may also contain up to five `recentObservations` with an
+allowlisted tool, normalized non-sensitive query label, bounded filter
+categories, observation timestamp, result category, and freshness. Each
+action-memory entry contains only the allowlisted action
+name, concrete tool name, and low-cardinality result category. No arguments,
+listing facts, provider payload, reasoning, vector, score, or error detail is
+stored there. Legacy preference objects without these fields remain valid.
+
+`AI-DISC-CS-P1-05` adds an internal Product-owned availability contract:
+
+```text
+GET /api/v1/internal/agent/marketplace/listings/availability?category={broadCategory}&limit=1
+X-Agent-Internal-Service-Token: <service credential>
+```
+
+The request accepts no actor, budget, location, condition, brand, specification,
+vector, ranking, or paging fields. Its exact response is
+`MARKETPLACE_AVAILABILITY_PROBE_V1` with `mode=AVAILABILITY_PROBE`,
+`searchExecuted`, normalized `category`, `totalActiveCategoryInventory`,
+`relatedCategoryMatches` (zero when unsupported), `failureReason`, and
+`retryable`. Product service authentication is checked before catalog work.
+This probe does not call OpenSearch or an embedding provider and cannot produce
+recommendations.
+
+Discovery turn results may add `searchOutcome` with mode
+`AVAILABILITY_PROBE|FULL_DISCOVERY_SEARCH`, explicit reason
+`CATEGORY_UNAVAILABLE|FILTERS_TOO_STRICT|TEMPORARY_SEARCH_FAILURE|SEARCH_UNAVAILABLE|RESULTS_AVAILABLE`,
+the authoritative total when known, an exact-match count when known, and only
+bounded applied/relaxable filter categories. Preference state additively carries
+`status`, `requestedCategory`, `categoryAvailability`,
+`categoryInventoryCount`, `clarificationsAsked`, and `lastSearchOutcome`.
+Legacy results without these fields remain readable. `CHECKING_AVAILABILITY`
+with label `Checking current availability` is an additional strict activity
+stage and is emitted only while the Product probe runs.
+
+`AI-DISC-CS-P1-04` treats this session surface as a Marketplace customer-service
+conversation. New assistant results include an `intent` from:
+
+```text
+GENERAL_CONVERSATION | MARKETPLACE_DISCOVERY | LISTING_QUESTION |
+CUSTOMER_SUPPORT | SELLER_SUPPORT | CLARIFICATION | HANDOFF | REFUSED
+```
+
+New customer-service outcomes are:
+
+```text
+ANSWER | CLARIFY | SEARCH | ACTION_REQUIRED | HANDOFF | REFUSED
+```
+
+The strict decoder also accepts stored discovery outcomes `ASK_CLARIFY`,
+`RECOMMEND`, `COMPARE`, `DETAIL`, `NO_RESULTS`, and `REFUSE`. Absence of
+`intent` is accepted only for backward-compatible stored responses; newly
+generated turns set it. `ANSWER` and `ACTION_REQUIRED` persist as `ANSWERED`,
+`CLARIFY` as `CLARIFY`, and `REFUSED` as `REFUSED`; discovery-specific
+recommendation resolutions remain unchanged. Only `MARKETPLACE_DISCOVERY` may
+invoke hybrid search/query embedding. `LISTING_QUESTION` may invoke current
+listing verification only against the latest validated recommendation set.
+
+The stream still begins with durable `MESSAGE_ACCEPTED`. Other activity frames
+are optional and describe actual work: `SEARCHING` is emitted at the Product
+search boundary and `CHECKING` at listing revalidation. Clients must render only
+received stages and must not infer omitted search activity. Empty validated
+`recommendations`/`metadata` events remain part of the strict terminal stream
+shape for non-discovery answers, but the UI renders no cards or provenance.
+
+The existing synchronous Discovery message command remains available. The
+additive authenticated streaming form is:
+
+```text
+POST /api/v1/agent/discovery/sessions/{sessionId}/messages/stream
+Accept: text/event-stream
+Content-Type: application/json
+```
+
+It accepts the exact existing Discovery message body:
+
+```json
+{
+  "clientMessageId": "01C00000000000000000000001",
+  "expectedPreferenceVersion": 3,
+  "body": "Find a used bicycle near Irvine"
+}
+```
+
+The existing Discovery capability/generation gate runs before actor resolution
+or service work. The BFF session supplies authentication and CSRF; browser
+`Authorization` and identity headers are forbidden. The Agent response uses
+exact `Content-Type: text/event-stream` without parameters. No padding or
+opening comment is emitted. The BFF handles only the two Discovery SSE POST
+forms with a dedicated authenticated streaming relay: it forwards an
+allowlisted header set, strips browser identity/cookie headers, flushes upstream
+bytes unchanged on the originating authenticated servlet request, and enforces
+the unchanged 35-second Discovery ceiling. It does not use a servlet async
+completion redispatch, so a framework error envelope cannot be appended during
+stream completion. After
+the SSE response starts, timeout or disconnect closes the response and never
+appends a JSON fallback. Normal Discovery JSON routes remain on the existing
+Gateway wildcard/circuit-breaker path.
+Every sequenced SSE frame has one
+`event` line and one single-line JSON `data` line. Payloads use exact fields,
+`schemaVersion=MARKETPLACE_DISCOVERY_STREAM_EVENT_V2`, and a sequence beginning
+at 1 and increasing by exactly one:
+
+Standards-valid comment-only SSE blocks may be ignored by clients and carry no
+sequence or application payload. Agent does not emit an opening padding comment;
+unsupported SSE fields and malformed event blocks fail closed.
+
+```text
+event: activity
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":1,"type":"activity","stage":"MESSAGE_ACCEPTED","label":"Request accepted"}
+
+event: text_delta
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":6,"type":"text_delta","delta":"These current listings match"}
+
+event: recommendations
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":7,"type":"recommendations","items":[...validated recommendations...]}
+
+event: metadata
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":8,"type":"metadata","citations":[],"provenance":[...validated provenance...]}
+
+event: done
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":9,"type":"done","messageId":"01A...","response":{...exact existing SendDiscoveryMessageResponse...}}
+```
+
+Progress stages are `MESSAGE_ACCEPTED`, `UNDERSTANDING`,
+`CHECKING_AVAILABILITY`, `SEARCHING`, `CHECKING`, and `COMPOSING`. Acceptance occurs only after durable begin/user
+persistence. Stages describe application work, never model reasoning. Private
+planning and allowlisted Product tool calls finish before a separate tool-free
+final-answer provider stream begins. Reasoning and planning events are ignored.
+The Agent waits for an explicit response-generator delivery acknowledgement
+after each real activity or canonical text-delta enqueue. The producer cannot
+advance into the next private phase until the prior frame has been handed to
+ASGI; this adds neither a timer nor a synthetic milestone.
+After
+the final provider call, concatenated `text_delta` values equal the exact
+validated and stored `response.result.message`. `recommendations` and `metadata`
+contain only backend-validated facts and are emitted after persistence. Exact
+completed replay performs no Product/provider work.
+
+The browser may receive multiple SSE records in one transport read. It appends
+each parsed `text_delta` immediately to one assistant message without timers,
+animation frames, artificial cadence, or whole-answer replay. Cards and
+provenance wait for their validated events. Failure, cancellation, and
+disconnect preserve visible partial text and never trigger an automatic send.
+Cancellation before `MESSAGE_ACCEPTED` retains the composer draft and creates
+no stopped assistant only when the authoritative stop command reports that the
+USER turn was not committed. Cancellation after durable acceptance persists a
+retryable `PARTIAL`/`HANDOFF` assistant even when zero answer characters were
+produced; the zero-text public message is
+`Response stopped before the answer began.` and history exposes the same
+response-only retry descriptor without duplicating the USER row.
+
+Explicit cancellation uses:
+
+```text
+POST /api/v1/agent/discovery/sessions/{sessionId}/messages/{clientMessageId}/stop
+```
+
+The authenticated, generation-gated command returns only `sessionId`,
+`clientMessageId`, and an `outcome` of `NOT_COMMITTED`, `STOPPED`, `COMPLETED`,
+or `TERMINAL`. It cancels the matching active Agent task when present and
+reconciles persistence by the original client-message identity. It never
+inserts or reposts a USER message.
+If explicit task cancellation has already produced the exact allowlisted
+`DISCOVERY_ORCHESTRATOR_RUN_FAILED_GRAPH_CANCEL` state without an assistant,
+the Stop command atomically reconciles that invocation to
+`DISCOVERY_FINAL_ANSWER_STREAM_CANCELLED` and attaches the guarded zero-text
+`PARTIAL` assistant. This replacement is not available to any other failed
+state. An authoritative `STOPPED` response is followed by history
+reconciliation using the same `clientMessageId`, so the pending USER
+presentation is replaced by the single stored USER row.
+Message bodies and final answer text accept newline and tab while rejecting all
+other ASCII control characters. The same rule applies to live completion and
+stored history validation. A guarded interrupted assistant is represented by
+`resolutionType=PARTIAL` with `result.outcome=HANDOFF`; this exact pair remains
+strictly retryable and does not fabricate recommendations. Successful `done`
+may collapse the reached activity trail into a short application-owned summary.
+
+A post-header failure terminates with exactly:
+
+```text
+event: error
+data: {"schemaVersion":"MARKETPLACE_DISCOVERY_STREAM_EVENT_V2","sequence":2,"type":"error","code":"AGENT_DISCOVERY_FINAL_STREAM_INTERRUPTED","message":"The answer stream was interrupted. You can retry this response.","retryable":true}
+```
+
+No event may contain chain-of-thought, prompt internals, vectors, raw tool
+arguments, listing IDs outside the completed typed response, provider details,
+or scores. Unknown/malformed/non-monotonic events, invalid UTF-8, disconnect
+without `done`/`error`, and delta/completion mismatch fail closed. The
+client never automatically retries or falls back to the JSON POST after an
+uncertain stream; it preserves the exact `clientMessageId` for explicit history
+reconciliation.
+
+The UI renders canonical answer text literally with preserved newlines and no
+Markdown/HTML interpretation. USD cards display the authoritative decimal with
+exactly two fraction digits. Typed listing follow-up/compare context uses the
+validated public title rather than a rank ordinal; it does not alter listing
+authorization or Product revalidation.
+
+#### Discovery response-only retry (`AI-DISC-UX-P1-03A`)
+
+For any terminal post-commit generation failure, Agent Service retains the safe
+`error` SSE event and also persists a guarded `HANDOFF` assistant message with
+no questions, recommendations, sources, or fabricated listing facts. Specific
+allowlisted failures may retain more precise safe copy. `GET .../messages` adds
+exact nullable fields to every history item:
+`responseFailure` contains the safe structured HANDOFF only for a legacy failed
+USER row without its stored assistant; `responseRetry` contains only
+`invocationId` and `userMessageId` when an explicit retry is currently allowed.
+All ordinary history items return both fields as `null`.
+
+The deliberate response-only command is:
+
+```text
+POST /api/v1/agent/discovery/sessions/{sessionId}/messages/{userMessageId}/response-retry/stream
+Accept: text/event-stream
+Content-Type: application/json
+```
+
+```json
+{"expectedPreferenceVersion": 3}
+```
+
+The body never accepts message text or `clientMessageId`. Agent Service checks
+the actor, open session, current preference version, FAILED state, presence of
+a stable terminal failure code, and configured retry ceiling, then resolves and
+reuses the committed USER body and invocation
+`clientMessageId`. The existing
+atomic idempotency transition enforces one in-flight generation and creates no
+new USER, tool-audit, or recommendation row. It streams the same strict event
+schema as the ordinary message stream. There is no automatic retry after any
+disconnect or uncertain result.
+
+The query embedding step performs at most one timeout retry, with both attempts
+clipped to the same whole-turn deadline. Product lexical-only degradation is
+not enabled by this slice; Product hybrid search and per-listing revalidation
+remain required. Product-and-budget requests do not require location before
+SEARCH_INDIVIDUAL; city/county remains an optional filter.
+
+Malformed or missing provider final structure is resolved only from
+application-owned evidence. A proven zero-result search completes as
+`NO_RESULTS` without retry. Fresh Product detail results are deterministically
+selected and must pass the ordinary final guard before cards or provenance are
+persisted. If neither outcome can be proven, the request fails with
+`DISCOVERY_ORCHESTRATOR_RUN_FAILED_STRUCTURED_RESPONSE_PARSE_RESPONSE_SCHEMA`
+and history exposes the existing bounded `responseRetry` action.
 
 ### Listing customer-service sessions (`AI-RAG-00`, `AI-05`)
 
@@ -3208,3 +4176,57 @@ Version-1 payload is reference-only:
 
 Source bodies, category snapshots, admin identity, and credentials never
 appear in the event.
+
+## Post-delivery business-group returns (V2-RET-01)
+
+```text
+GET  /api/v1/orders/{orderId}/groups/{businessOrderId}/return
+POST /api/v1/orders/{orderId}/groups/{businessOrderId}/returns
+GET  /api/v1/businesses/{businessId}/orders/{businessOrderId}/return
+POST /api/v1/businesses/{businessId}/orders/{businessOrderId}/returns/{returnId}/authorize
+POST /api/v1/businesses/{businessId}/orders/{businessOrderId}/returns/{returnId}/receive
+```
+
+Mutations require `If-Match` and `Idempotency-Key`. Buyer creation accepts one
+allowlisted reason and an optional 500-character comment. Seller receipt accepts
+only `RESTOCK_SELLABLE` or `DO_NOT_RESTOCK`. Missing and cross-scope resources
+are non-enumerating. Browser requests never contain refund amount, currency,
+payment intent, provider identifiers, business membership, inventory movement,
+or outbox metadata. Responses expose only policy, bounded state/timeline, demo
+shipment disclosure, and safe refund projection.
+
+## ADM-BUS-04/05 API addition
+
+External admin endpoints (Auth Service through the gateway):
+
+- `GET /api/v1/admin/businesses`
+- `GET /api/v1/admin/businesses/{businessId}`
+- `GET /api/v1/admin/businesses/{businessId}/timeline`
+- `POST /api/v1/admin/businesses/{businessId}/enforcements/dry-run`
+- `POST /api/v1/admin/businesses/{businessId}/enforcements`
+- `POST /api/v1/admin/businesses/{businessId}/enforcements/{enforcementId}/revoke/dry-run`
+- `POST /api/v1/admin/businesses/{businessId}/enforcements/{enforcementId}/revoke`
+- `GET /api/v1/businesses/{businessId}/marketplace-capabilities`
+
+Internal authenticated endpoints:
+
+- `POST /api/v1/internal/businesses/capabilities/evaluate`
+- `POST /api/v1/internal/businesses/capabilities/evaluate-batch`
+- `POST /api/v1/internal/admin/businesses/listing-summaries`
+
+Protected business mutations return `403 BUSINESS_CAPABILITY_RESTRICTED` for an authoritative denial and `503 ENFORCEMENT_DECISION_UNAVAILABLE` if no decision can be obtained. Full semantics are in `docs/mvp/adm/admin-business-control.md`.
+### Reversible listing enforcement (`ADM-LIST-06`)
+
+```text
+GET  /api/v1/admin/listings/{listingId}/enforcements
+GET  /api/v1/admin/listings/{listingId}/enforcements/timeline
+POST /api/v1/admin/listings/{listingId}/enforcements/dry-run
+POST /api/v1/admin/listings/{listingId}/enforcements
+POST /api/v1/admin/listings/{listingId}/enforcements/{enforcementId}/revoke/dry-run
+POST /api/v1/admin/listings/{listingId}/enforcements/{enforcementId}/revoke
+POST /api/v1/internal/listings/capabilities/evaluate-batch
+```
+
+Admin reads require `admin.listing.moderation.read`; action creation requires `admin.listing.suspend`; revocation requires `admin.listing.reinstate`; timeline reads also require `admin.audit.read`. Create and revoke commits require idempotency keys and expected versions. Dry runs do not persist. The route listing ID is authoritative and an action from another listing returns `404`. Stale versions and duplicate active actions return `409`. Temporary enforcement on `REMOVED_BY_ADMIN` or another non-active listing returns `400`.
+
+Listing actions are `RESTRICT` or `SUSPEND`; listing `BAN` is invalid. `SUSPEND` deterministically expands to both listing scopes. The internal endpoint accepts 1–50 listing IDs and one or both listing scopes, requires `X-Internal-Service-Token`, and returns one explicit allowed/restricted decision per requested listing and scope without PII or staff reasons.

@@ -12,9 +12,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Component
 public class RestPaymentIntentClient implements PaymentIntentClient {
+
+    private static final Logger log = LoggerFactory.getLogger(RestPaymentIntentClient.class);
 
     private static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
 
@@ -65,6 +69,58 @@ public class RestPaymentIntentClient implements PaymentIntentClient {
             return response;
         } catch (HttpStatusCodeException exception) {
             throw mapped(exception);
+        } catch (CheckoutException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            log.warn(
+                    "Payment intent call failed category={} causeCategory={} reason={} causeReason={}",
+                    exception.getClass().getSimpleName(),
+                    exception.getCause() == null
+                            ? "NONE"
+                            : exception.getCause().getClass().getSimpleName(),
+                    safeReason(exception.getMessage()),
+                    safeReason(deepestCauseMessage(exception)));
+            throw unavailable();
+        }
+    }
+
+    @Override
+    public DemoCompletion completeDemo(
+            String paymentIntentId,
+            String buyerId,
+            String actionReference,
+            String correlationId) {
+        try {
+            DemoCompletion response = client.post()
+                    .uri("/api/v1/internal/payment-intents/{paymentIntentId}/complete-demo", paymentIntentId)
+                    .header(INTERNAL_TOKEN_HEADER, internalServiceToken)
+                    .header(CorrelationId.HEADER_NAME, correlationId)
+                    .body(new CompleteDemoRequest(buyerId, actionReference))
+                    .retrieve()
+                    .body(DemoCompletion.class);
+            if (response == null) {
+                throw unavailable();
+            }
+            return response;
+        } catch (HttpStatusCodeException exception) {
+            String code = errorCode(exception);
+            if (exception.getStatusCode().value() == 409
+                    && ("PAYMENT_INTENT_EXPIRED".equals(code)
+                    || "PAYMENT_INTENT_TERMINAL".equals(code)
+                    || "DEMO_PAYMENT_ACTION_INVALID".equals(code))) {
+                throw new CheckoutException(
+                        HttpStatus.CONFLICT,
+                        code,
+                        "Demo payment cannot be completed.");
+            }
+            if (exception.getStatusCode().value() == 404
+                    && "DEMO_PAYMENT_COMPLETION_DISABLED".equals(code)) {
+                throw new CheckoutException(
+                        HttpStatus.NOT_FOUND,
+                        "CHECKOUT_PAYMENT_NOT_AVAILABLE",
+                        "Payment is not available.");
+            }
+            throw unavailable();
         } catch (CheckoutException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -120,11 +176,30 @@ public class RestPaymentIntentClient implements PaymentIntentClient {
                 "Payment is temporarily unavailable.");
     }
 
+    private String safeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "UNSPECIFIED";
+        }
+        String sanitized = reason.replaceAll("[\\r\\n\\t]", " ");
+        return sanitized.substring(0, Math.min(sanitized.length(), 240));
+    }
+
+    private String deepestCauseMessage(Throwable failure) {
+        Throwable current = failure;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current.getMessage();
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ErrorEnvelope(ErrorBody error) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ErrorBody(String code) {
+    }
+
+    private record CompleteDemoRequest(String buyerId, String actionReference) {
     }
 }

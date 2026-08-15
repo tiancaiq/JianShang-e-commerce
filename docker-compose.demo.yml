@@ -78,6 +78,7 @@ services:
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       BUSINESS_VERIFICATION_WEBHOOK_SECRET: ${BUSINESS_VERIFICATION_WEBHOOK_SECRET:-demo-change-me-business-webhook}
+      PRODUCT_SERVICE_URL: http://product-service:8091
       USER_AVATAR_STORAGE: ${USER_AVATAR_STORAGE:-${LISTING_MEDIA_STORAGE:-local-demo}}
       LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
       LISTING_MEDIA_SIGNED_URL_TTL: ${LISTING_MEDIA_SIGNED_URL_TTL:-PT15M}
@@ -113,6 +114,12 @@ services:
       LISTING_KNOWLEDGE_EVENT_TOPIC: ${LISTING_KNOWLEDGE_EVENT_TOPIC:-listing-knowledge-v1}
       CATEGORY_GUIDANCE_EVENT_TOPIC: ${CATEGORY_GUIDANCE_EVENT_TOPIC:-category-guidance-v1}
       AGENT_INTERNAL_SERVICE_TOKEN: ${AGENT_INTERNAL_SERVICE_TOKEN:-local-agent-service-token}
+      LISTING_SEARCH_ENGINE: ${LISTING_SEARCH_ENGINE:-mysql}
+      OPENSEARCH_URL: http://agent-opensearch:9200
+      OPENSEARCH_LISTING_INDEX: ${OPENSEARCH_LISTING_INDEX:-marketplace-listings}
+      OPENSEARCH_LISTING_PHYSICAL_INDEX: ${OPENSEARCH_LISTING_PHYSICAL_INDEX:-marketplace-listings-v1}
+      OPENSEARCH_INITIALIZE_INDEX: ${OPENSEARCH_INITIALIZE_INDEX:-true}
+      LISTING_SEARCH_HYBRID_ENABLED: ${LISTING_SEARCH_HYBRID_ENABLED:-false}
       KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs}
       AUTH_SERVICE_URL: http://auth-service:8085
@@ -160,6 +167,13 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD-SHELL", "cub zk-ready localhost 2181 30"]
+      interval: 5s
+      timeout: 35s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
 
   broker:
     image: confluentinc/cp-kafka:7.5.0
@@ -169,7 +183,8 @@ services:
     ports:
       - "127.0.0.1:${KAFKA_PORT:-9092}:9092"
     depends_on:
-      - agent-zookeeper
+      agent-zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: "agent-zookeeper:2181"
@@ -178,6 +193,13 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "cub kafka-ready -b localhost:29092 1 30"]
+      interval: 5s
+      timeout: 35s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
 
   agent-opensearch:
     image: opensearchproject/opensearch:2.15.0
@@ -241,6 +263,7 @@ services:
     environment:
       PORT: 8086
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       AGENT_KNOWLEDGE_ENABLED: ${AGENT_KNOWLEDGE_ENABLED:-false}
       AGENT_OPENSEARCH_URL: http://agent-opensearch:9200
       AGENT_OPENSEARCH_VERIFY_CERTS: "false"
@@ -260,6 +283,18 @@ services:
       AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED: ${AGENT_CUSTOMER_SERVICE_ORCHESTRATION_ENABLED:-false}
       AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED: ${AGENT_CUSTOMER_SERVICE_RETRIEVAL_ENABLED:-false}
       AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED: ${AGENT_CUSTOMER_SERVICE_PROVIDER_ENABLED:-false}
+      AGENT_DISCOVERY_API_ENABLED: ${AGENT_DISCOVERY_API_ENABLED:-false}
+      AGENT_DISCOVERY_KILL_SWITCH_ENABLED: ${AGENT_DISCOVERY_KILL_SWITCH_ENABLED:-false}
+      AGENT_DISCOVERY_ORCHESTRATION_ENABLED: ${AGENT_DISCOVERY_ORCHESTRATION_ENABLED:-false}
+      AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED: ${AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED:-false}
+      AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED: ${AGENT_DISCOVERY_HYBRID_RETRIEVAL_ENABLED:-false}
+      AGENT_DISCOVERY_PROVIDER_ENABLED: ${AGENT_DISCOVERY_PROVIDER_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_API_ENABLED: ${AGENT_MARKETPLACE_V2_API_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED: ${AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_PROVIDER_ENABLED: ${AGENT_MARKETPLACE_V2_PROVIDER_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED: ${AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED: ${AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED: ${AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED:-false}
       AUTH_SERVICE_URL: http://auth-service:8085
       AGENT_MESSAGE_RETENTION_DAYS: ${AGENT_MESSAGE_RETENTION_DAYS:-90}
       AGENT_AUDIT_RETENTION_DAYS: ${AGENT_AUDIT_RETENTION_DAYS:-365}
@@ -282,6 +317,8 @@ services:
       agent-migrations:
         condition: service_completed_successfully
       agent-opensearch:
+        condition: service_healthy
+      broker:
         condition: service_healthy
     restart: unless-stopped
 
@@ -322,10 +359,12 @@ services:
       CHAT_SERVICE_URL: http://chat-service:8092
       AUTH_SERVICE_URL: http://auth-service:8085
       AGENT_SERVICE_URL: http://agent-service:8086
-      ORDER_SERVICE_URL: http://order-service-disabled:8081
+      ORDER_SERVICE_URL: ${ORDER_SERVICE_URL:-http://order-service-disabled:8081}
       INVENTORY_SERVICE_URL: http://inventory-service-disabled:8082
       PAYMENT_SERVICE_URL: http://payment-service-disabled:8084
       GATEWAY_FEATURE_AGENT: ${GATEWAY_FEATURE_AGENT:-false}
+      GATEWAY_FEATURE_AGENT_DISCOVERY: ${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}
+      GATEWAY_FEATURE_CART: ${GATEWAY_FEATURE_CART:-false}
       KEYCLOAK_BROWSER_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
       KEYCLOAK_BACKCHANNEL_BASE_URI: ${KEYCLOAK_BACKCHANNEL_BASE_URI:-http://keycloak:8080}
       KEYCLOAK_BACKCHANNEL_ISSUER_URI: ${KEYCLOAK_BACKCHANNEL_ISSUER_URI:-http://keycloak:8080/realms/msb-local}
@@ -355,6 +394,7 @@ services:
       dockerfile: Dockerfile
       args:
         FRONTEND_BUILD_CONFIGURATION: ${FRONTEND_BUILD_CONFIGURATION:-production}
+        GATEWAY_FEATURE_AGENT_DISCOVERY: ${GATEWAY_FEATURE_AGENT_DISCOVERY:-false}
     container_name: msb-demo-frontend
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-4200}:4200"

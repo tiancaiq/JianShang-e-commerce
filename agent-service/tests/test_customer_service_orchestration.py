@@ -109,12 +109,13 @@ def listing(source_version: str = "12") -> ListingContext:
 
 def passage(
     text: str = "The bicycle description says it has a recently replaced chain.",
+    source_version: str = "12",
 ) -> KnowledgePassage:
     return KnowledgePassage(
         chunkId="chunk-1",
         sourceType="LISTING",
         sourceId=LISTING,
-        sourceVersion="12",
+        sourceVersion=source_version,
         contentHash="a" * 64,
         listingId=LISTING,
         visibility="PUBLIC",

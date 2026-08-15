@@ -28,6 +28,7 @@ public class PaymentOutboxRepository {
                         FROM payment_outbox_events
                         WHERE published_at IS NULL
                           AND terminal_failure_at IS NULL
+                          AND event_type IN ('payment.succeeded', 'payment.failed')
                           AND next_attempt_at <= ?
                           AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
                         ORDER BY created_at, id
@@ -45,6 +46,7 @@ public class PaymentOutboxRepository {
                             WHERE id = ?
                               AND published_at IS NULL
                               AND terminal_failure_at IS NULL
+                              AND event_type IN ('payment.succeeded', 'payment.failed')
                             """,
                     claimToken,
                     Timestamp.from(now),

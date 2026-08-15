@@ -39,3 +39,22 @@ It keeps listing customer-service subjects mandatory, permits only discovery
 sessions to be subjectless, enforces one open discovery session per actor, and
 stores detail-revalidated recommendation snapshots without cross-service
 foreign keys.
+
+`V9__create_discovery_embedding_jobs.sql` adds the separate default-off
+`AI-DISC-SEARCH-P0-04B` queue for Product-owned public discovery documents. It
+stores only reference identities, hashes, state, lease/retry metadata, and safe
+error codes. It never stores source text, vectors, provider responses, prompts,
+actors, or credentials, and it does not share the Agent RAG knowledge tables.
+
+`V16__allow_discovery_availability_tool_audit.sql` forward-expands the existing
+tool-name check constraint for the Product-owned `CHECK_AVAILABILITY` audit.
+It changes no rows and preserves every previously allowlisted tool name.
+
+`V17__create_parallel_marketplace_agent_v2_boundary.sql` adds the isolated
+`MARKETPLACE_AGENT_V2` session type and one-open-session-per-actor marker, then
+allowlists only `search_listings` and `get_listing` for V2 tool audits. Existing
+discovery and listing customer-service session/message semantics are preserved.
+
+`V18__allow_marketplace_agent_v2_availability_tool_audit.sql` forward-expands
+the shared tool-name check for V2's Product-owned `check_availability` audit.
+It changes no rows and retains every previously allowlisted tool name.
