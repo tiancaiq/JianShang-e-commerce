@@ -17,7 +17,7 @@
 
 MSB Commerce is a full-stack marketplace and commerce platform built to explore how a system can support two different transaction models without conflating them: peer-to-peer listings, where buyers and individual sellers arrange payment and delivery themselves, and business-store commerce, where the platform owns cart, inventory, checkout, payment, and order workflows.
 
-The repository is an engineering portfolio project. It demonstrates service boundaries, identity and tenant isolation, transactional data modeling, asynchronous workflows, secure media handling, and a guarded AI-agent architecture across a Java/Spring backend, Angular frontend, and Python/FastAPI agent service. The marketplace, seller, chat, moderation, and administrator-enforcement milestones are implemented. The bounded V2 local/demo commerce lifecycle has passed its release-candidate gate; external provider rollout and AI capabilities remain explicitly gated.
+The repository is an engineering portfolio project. It demonstrates service boundaries, identity and tenant isolation, transactional data modeling, asynchronous workflows, secure media handling, and a guarded AI-agent architecture across a Java/Spring backend, Angular frontend, and Python/FastAPI agent service. The marketplace, seller, chat, bounded V2 commerce, and complete administrator-operations platform are implemented. The admin platform and local/demo commerce lifecycle have passed their release-candidate gates; external provider rollout and AI capabilities remain explicitly gated.
 
 The authoritative product and technical contracts live in [`docs/mvp`](docs/mvp/), with V2 commerce plans in [`docs/v2/commerce`](docs/v2/commerce/).
 
@@ -44,7 +44,7 @@ The project is deliberately broader than an online catalog. It is a working envi
 | Capability | Status |
 | --- | --- |
 | Marketplace MVP | Implemented and verified |
-| Admin moderation and enforcement | Milestones complete |
+| Admin operations platform | Release-candidate audit passed; 17 modules complete with no open P0/P1 defects |
 | Bounded V2 local/demo commerce | Release-candidate gate passed |
 | AI agent capabilities | Source-complete and default-off pending rollout evidence |
 | External commerce integrations | Deferred until provider and operational decisions are approved |
@@ -104,6 +104,7 @@ Additional authenticated seller, admin, commerce, and AI-assistant screenshots a
 - **Transactional design:** MySQL schemas use forward-only Flyway migrations, optimistic locking, immutable history, idempotency records, transactional outboxes, and consumer deduplication where workflows cross service boundaries.
 - **Event-driven integration:** Kafka contracts and transactional outbox patterns decouple durable domain changes from downstream processing while keeping authoritative state in the owning service.
 - **Media storage:** A small `common-storage` adapter supports S3-compatible object storage. Product-owned rules validate listing media and avatars without leaking storage keys through public contracts.
+- **Admin operations:** The permission-scoped admin portal covers dashboard insights, users, business applications, businesses, listing moderation, reports, investigation cases, appeals, orders, disputes, payments, refunds, support, catalog governance, system operations, governance approvals, and analytics. Sensitive commands use previews, optimistic concurrency, idempotency, immutable audit evidence, and least-privilege controls.
 - **AI agent architecture:** The isolated FastAPI service includes OpenAI provider adapters, OpenSearch RAG, LangChain-based ReAct discovery, strict allowlisted tools, actor-scoped persistence, citations, seller handoff, prompt-injection defenses, and deterministic offline release gates. AI actions remain default-off and cannot bypass application authorization or human confirmation.
 - **Testing depth:** The repository contains Java unit and integration tests, Testcontainers-backed MySQL/Redis/OpenSearch coverage, authorization and tenant-isolation tests, migration tests, Angular component/service tests, Playwright browser tests, Python unit/integration tests, and architecture guardrails.
 - **CI/CD and containers:** GitHub Actions validate backend, frontend, Agent, migrations, secrets, dependencies, and feature-specific release gates. Docker Compose models local infrastructure, full-stack containers, demo profiles, and optional AI dependencies.
@@ -126,6 +127,23 @@ Additional authenticated seller, admin, commerce, and AI-assistant screenshots a
 
 Feature status is intentionally explicit: source-complete does not mean enabled in the default runtime.
 
+### Admin operations platform
+
+The completed admin surface contains 17 top-level modules: Dashboard, Users, Business Applications, Businesses, Listing Moderation, Reports, Cases, Appeals, Orders, Disputes, Payments, Refunds, Support, Catalog, System, Governance, and Analytics.
+
+Authorization is enforced in the owning backend services rather than only in navigation. Read-only roles do not receive mutation controls, sensitive actions use dry-run or approval gates, PII is permission-scoped, and concurrent/idempotent commands are covered by MySQL integration tests. The final exploratory audit passed with zero open P0/P1 or observed P2 defects.
+
+Verification evidence includes:
+
+- Angular: **751/751**.
+- Finance Playwright: **6/6**.
+- Catalog, System, Governance, and Analytics Playwright: **18/18**.
+- Appeals: **6/6**; reports and investigations: **7/7**; enforcement workflows: **10/10**.
+- Isolated concurrency/idempotency tests: **55/55**.
+- Payment Service after the final same-key refund concurrency fix: **68/68**, including **19/19** Payment Intent MySQL integration tests.
+
+See the [admin platform release-candidate plan](docs/mvp/adm/admin-platform-rc-01a.md) and [final exploratory audit](docs/qa/admin-platform-exploratory-audit-2026-08-24.md) for the full module matrix, safeguards, evidence, and defect ledger.
+
 ### Completed
 
 - OIDC login/session handling, account profile and address workflows.
@@ -133,7 +151,7 @@ Feature status is intentionally explicit: source-complete does not mean enabled 
 - Individual seller profiles plus versioned listing and media creation/edit flows.
 - Business onboarding, store profiles and business listing management.
 - Participant-authorized listing chat.
-- Fine-grained admin roles, business approval, listing moderation, user/business/listing enforcement, dry-run impact previews, reversible controls, ownership protection, and normalized audit timelines.
+- The full admin operations platform described above, including fine-grained roles, cross-service governance, safe financial operations, operational diagnostics, participant privacy boundaries, and normalized audit timelines.
 - Bounded local/demo business commerce covering Redis cart, inventory reservation, checkout, fake-provider payment, orders, fulfillment, cancellation compensation, returns, refunds, and durable in-app notifications. The `V2-COM-RC-01` release-candidate gate is green.
 - Responsive Angular surfaces for marketplace, account, seller, and admin jobs.
 - Shared correlation/error handling, storage adapters, test utilities and architecture checks.
@@ -150,7 +168,6 @@ Feature status is intentionally explicit: source-complete does not mean enabled 
 - Production payment-provider onboarding, capture, transfers, payouts, refunds, disputes and reconciliation.
 - Production carrier integration, partial-return handling, and operational compensation/reconciliation tooling.
 - Notification delivery transports, preferences, and retention policies.
-- Admin reporting, appeals, and later-phase trust tooling beyond the completed enforcement milestone.
 - Production AI evaluation, policy approval, controlled rollout, cost/latency monitoring and rollback evidence.
 - Removal of legacy infrastructure paths after all active services and local tooling no longer depend on them.
 
@@ -294,7 +311,7 @@ The Agent process can start without an API key for health checks, but readiness 
 - Select and integrate production payment, carrier, payout, dispute, and reconciliation providers after ownership and compliance decisions are approved.
 - Extend the verified bounded commerce lifecycle with partial returns and production-grade operational recovery tooling.
 - Add notification delivery transports and operational preferences without weakening durable in-app delivery.
-- Add admin reporting and appeals while retaining the current permission, ownership, concurrency, and audit boundaries.
+- Extend production operational evidence and recovery exercises while retaining the current permission, ownership, concurrency, and audit boundaries.
 - Collect controlled production evidence for AI answer quality, privacy, latency and cost before enabling a cohort.
 - Simplify local orchestration and retire legacy database/tooling paths once no verified workflow depends on them.
 
