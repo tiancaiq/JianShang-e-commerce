@@ -1,6 +1,7 @@
 param(
     [switch]$SkipPackage,
-    [switch]$SkipFixtures
+    [switch]$SkipFixtures,
+    [string]$EnvironmentFile = '.env.demo'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,11 +15,19 @@ $mavenWrapper = if ($env:MAVEN_WRAPPER) {
 }
 Push-Location $root
 try {
+    $environmentPath = if ([System.IO.Path]::IsPathRooted($EnvironmentFile)) {
+        $EnvironmentFile
+    } else {
+        Join-Path $root $EnvironmentFile
+    }
+    if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
+        throw "Commerce environment file '$EnvironmentFile' was not found."
+    }
     if (-not $SkipPackage) {
         & $mavenWrapper -q -DskipTests package
         if ($LASTEXITCODE -ne 0) { throw 'Commerce backend packaging failed.' }
     }
-    docker compose -f docker-compose.demo.yml -f docker-compose.cart-runtime.yml up -d --build
+    docker compose --env-file $environmentPath -f docker-compose.demo.yml -f docker-compose.cart-runtime.yml up -d --build
     if ($LASTEXITCODE -ne 0) { throw 'Commerce Compose startup failed.' }
     & .\scripts\verify-commerce-runtime.ps1
     if (-not $SkipFixtures) { & .\tools\prepare-commerce-demo.ps1 }

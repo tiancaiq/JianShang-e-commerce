@@ -23,6 +23,7 @@ import {
   ListingEngagement,
   ListingDraft,
   ListingImage,
+  ListingCatalogValues,
   ListingMedia,
   ListingMediaConfirmRequest,
   ListingMediaUploadRequest,
@@ -70,6 +71,10 @@ export class ListingService {
     return this.http.get<PublicListing[]>(`${this.baseUrl}/public/listings`, {
       withCredentials: true,
     });
+  }
+
+  getListingCatalogValues(listingId:string):Observable<ListingCatalogValues>{
+    return this.http.get<ListingCatalogValues>(`${this.baseUrl}/listings/${listingId}/catalog-values`,{withCredentials:true});
   }
 
   recordListingVisit(listingId: string): Observable<ListingEngagement> {

@@ -1,4 +1,4 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { Subject, of } from 'rxjs';
@@ -11,7 +11,7 @@ import { MarketplaceLayoutComponent } from './marketplace-layout.component';
 
 describe('MarketplaceLayoutComponent', () => {
   let fixture: ComponentFixture<MarketplaceLayoutComponent>;
-  let authenticated = false;
+  const authenticated = signal(false);
   let sessionState: { authenticated: boolean; user: unknown };
   let cartService: jasmine.SpyObj<CartService>;
   let conversationRead: Subject<string>;
@@ -53,8 +53,8 @@ describe('MarketplaceLayoutComponent', () => {
         {
           provide: AuthService,
           useValue: {
-            isAuthenticated: () => authenticated,
-            user: () => authenticated ? {
+            isAuthenticated: authenticated.asReadonly(),
+            user: () => authenticated() ? {
               id: '01USER',
               keycloakSub: 'keycloak-sub',
               email: 'alex@example.com',
@@ -93,7 +93,7 @@ describe('MarketplaceLayoutComponent', () => {
   });
 
   beforeEach(() => {
-    authenticated = false;
+    authenticated.set(false);
     sessionState = { authenticated: false, user: null };
   });
 
@@ -143,7 +143,7 @@ describe('MarketplaceLayoutComponent', () => {
   });
 
   it('links authenticated account navigation to the account dashboard shell', () => {
-    authenticated = true;
+    authenticated.set(true);
     fixture.detectChanges();
 
     const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'));
@@ -161,7 +161,7 @@ describe('MarketplaceLayoutComponent', () => {
   });
 
   it('does not load or reset cart state while the deferred capability is disabled', () => {
-    authenticated = true;
+    authenticated.set(true);
     sessionState = { authenticated: true, user: null };
     fixture.detectChanges();
 
@@ -170,7 +170,7 @@ describe('MarketplaceLayoutComponent', () => {
   });
 
   it('shows an authenticated cart link with a quantity badge when the cart capability is enabled', () => {
-    authenticated = true;
+    authenticated.set(true);
     sessionState = { authenticated: true, user: null };
     cartService.count.and.returnValue(7);
     Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
@@ -192,7 +192,7 @@ describe('MarketplaceLayoutComponent', () => {
   });
 
   it('resets cart state without loading it when the cart capability is enabled but the session is signed out', () => {
-    authenticated = false;
+    authenticated.set(false);
     sessionState = { authenticated: false, user: null };
     Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
       configurable: true,
@@ -209,7 +209,7 @@ describe('MarketplaceLayoutComponent', () => {
   it('navigates to the inbox from an ordinary click', () => {
     const router = TestBed.inject(Router);
     const navigateSpy = spyOn(router, 'navigateByUrl');
-    authenticated = true;
+    authenticated.set(true);
     fixture.detectChanges();
 
     const inboxLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
@@ -224,7 +224,7 @@ describe('MarketplaceLayoutComponent', () => {
 
   it('starts logout once from the direct header action', () => {
     const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
-    authenticated = true;
+    authenticated.set(true);
     sessionState = { authenticated: true, user: null };
     fixture.detectChanges();
 
@@ -241,7 +241,7 @@ describe('MarketplaceLayoutComponent', () => {
 
   it('clears the cart badge state once when cart-enabled logout starts', () => {
     const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
-    authenticated = true;
+    authenticated.set(true);
     sessionState = { authenticated: true, user: null };
     Object.defineProperty(fixture.componentInstance, 'cartEnabled', {
       configurable: true,
@@ -277,7 +277,7 @@ describe('MarketplaceLayoutComponent', () => {
   it('uses the global marketplace nav on the account dashboard route', () => {
     const router = TestBed.inject(Router);
     Object.defineProperty(router, 'url', { value: '/account' });
-    authenticated = true;
+    authenticated.set(true);
     fixture.detectChanges();
 
     const host = fixture.nativeElement as HTMLElement;
@@ -334,6 +334,29 @@ describe('MarketplaceLayoutComponent', () => {
     fixture.componentInstance.submitNativeAuth();
 
     expect(cartService.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismisses a busy sign-in dialog as soon as the session becomes authenticated', () => {
+    const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
+    const loginResult = new Subject<{ authenticated: boolean; user: null }>();
+    authService.nativeLogin.and.returnValue(loginResult);
+    fixture.detectChanges();
+
+    fixture.componentInstance.openAuthDialog();
+    fixture.componentInstance.authEmail = 'buyer@example.com';
+    fixture.componentInstance.authPassword = 'password-123';
+    fixture.componentInstance.submitNativeAuth();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.authDialogBusy()).toBeTrue();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.auth-dialog')).not.toBeNull();
+
+    authenticated.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.authDialogBusy()).toBeFalse();
+    expect(fixture.componentInstance.authDialogOpen()).toBeFalse();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.auth-dialog')).toBeNull();
   });
 
   it('shows a credential error when marketplace-native login is rejected', () => {

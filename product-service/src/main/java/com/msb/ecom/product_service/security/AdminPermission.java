@@ -9,7 +9,11 @@ public enum AdminPermission {
     LISTING_EDIT("admin.listing.edit"),
     LISTING_REMOVE("admin.listing.remove"),
     LISTING_SUSPEND("admin.listing.suspend"),
-    LISTING_REINSTATE("admin.listing.reinstate");
+    LISTING_REINSTATE("admin.listing.reinstate"),
+    CATALOG_READ("admin.catalog.read"),
+    CATALOG_CATEGORY_MANAGE("admin.catalog.category.manage"),
+    CATALOG_ATTRIBUTE_MANAGE("admin.catalog.attribute.manage"),
+    CATALOG_POLICY_MANAGE("admin.catalog.policy.manage");
 
     private final String id;
 

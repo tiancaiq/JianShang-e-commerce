@@ -11,4 +11,6 @@ public interface ListingMediaStorage {
     void verifyUploaded(String objectKey, String expectedContentType, long expectedSizeBytes);
 
     byte[] readObject(String objectKey);
+
+    void verifyReadable(String objectKey);
 }

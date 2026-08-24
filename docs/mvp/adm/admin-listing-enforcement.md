@@ -44,7 +44,7 @@ Administratively removed listings are read-only in this workbench. Auditors can 
 
 ## Deferred behavior
 
-Marketplace report submission, report inbox/case investigation, appeals, notifications, and AI-assisted enforcement are deferred to later approved milestones. This slice does not add cascade enforcement, automated moderation decisions, payout controls, or changes to existing-order fulfillment.
+Marketplace report submission and admin triage are implemented separately by `ADM-REP-00/01/02`; report actions do not invoke this enforcement surface. Investigation cases, appeals, notifications, and AI-assisted enforcement remain deferred. This slice does not add cascade enforcement, automated moderation decisions, payout controls, or changes to existing-order fulfillment.
 
 ## Release verification
 

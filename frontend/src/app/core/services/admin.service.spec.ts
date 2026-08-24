@@ -38,6 +38,23 @@ describe('AdminService', () => {
     expect(request.request.method).toBe('GET');
     expect(request.request.withCredentials).toBeTrue();
     expect(request.request.headers.has('Authorization')).toBeFalse();
+    request.flush({ data: {
+      userId: '01ADMIN',
+      role: 'PLATFORM_ADMIN',
+      roles: ['SUPER_ADMIN'],
+      permissions: ['admin.listing.moderation.resolve'],
+      accountState: 'ACTIVE',
+    } });
+  });
+
+  it('does not invent administrative access for an incomplete legacy response', () => {
+    service.getCurrentAdmin().subscribe(response => {
+      expect(response.data.roles).toEqual([]);
+      expect(response.data.permissions).toEqual([]);
+      expect(response.data.accountState).toBe('SUSPENDED');
+    });
+
+    const request = httpMock.expectOne('/api/v1/admin/me');
     request.flush({ data: { userId: '01ADMIN', role: 'PLATFORM_ADMIN' } });
   });
 

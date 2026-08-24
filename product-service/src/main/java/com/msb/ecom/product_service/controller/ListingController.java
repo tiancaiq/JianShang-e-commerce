@@ -16,6 +16,7 @@ import com.msb.ecom.product_service.dto.BusinessStoreItemSearchRequest;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
 import com.msb.ecom.product_service.dto.ListingEngagementResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
+import com.msb.ecom.product_service.dto.ListingCatalogValuesResponse;
 import com.msb.ecom.product_service.dto.ListingImageResponse;
 import com.msb.ecom.product_service.dto.ListingMediaConfirmRequest;
 import com.msb.ecom.product_service.dto.ListingMediaResponse;
@@ -73,6 +74,11 @@ public class ListingController {
     @GetMapping("/listings/{listingId}")
     public ListingDraftResponse getOwnedDraft(@PathVariable String listingId) {
         return listingService.getOwnedListing(listingId);
+    }
+
+    @GetMapping("/listings/{listingId}/catalog-values")
+    public ListingCatalogValuesResponse getOwnedListingCatalogValues(@PathVariable String listingId) {
+        return listingService.getOwnedListingCatalogValues(listingId);
     }
 
     @GetMapping("/public/listings/{listingId}")

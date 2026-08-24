@@ -29,7 +29,21 @@ public class PaymentRefundRepository {
     }
 
     public Optional<RefundRecord> findByIntent(String paymentIntentId) {
-        return query("SELECT * FROM payment_refunds WHERE payment_intent_id = ?", paymentIntentId);
+        return query("SELECT * FROM payment_refunds WHERE payment_intent_id = ? AND source = 'ORDER_CANCELLATION'", paymentIntentId);
+    }
+
+    /** Returns every amount already committed across cancellation, admin, and return refunds. */
+    public BigDecimal reservedAmount(String paymentIntentId) {
+        BigDecimal amount = jdbc.queryForObject("""
+                        SELECT COALESCE(SUM(amount), 0) FROM (
+                            SELECT amount FROM payment_refunds
+                            WHERE payment_intent_id = ? AND status IN ('PENDING', 'PROCESSING', 'SUCCEEDED')
+                            UNION ALL
+                            SELECT amount FROM payment_return_refunds
+                            WHERE payment_intent_id = ? AND status = 'SUCCEEDED'
+                        ) committed_refunds
+                        """, BigDecimal.class, paymentIntentId, paymentIntentId);
+        return amount == null ? BigDecimal.ZERO : amount;
     }
 
     public Optional<RefundRecord> findByKey(String idempotencyKey) {
@@ -56,11 +70,11 @@ public class PaymentRefundRepository {
                         INSERT INTO payment_refunds (
                             id, payment_intent_id, cancellation_request_id, order_id,
                             idempotency_key, amount, currency, provider, provider_reference,
-                            status, created_at, completed_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUCCEEDED', ?, ?)
+                            status, created_at, updated_at, completed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUCCEEDED', ?, ?, ?)
                         """, id, paymentIntentId, cancellationRequestId, orderId,
                 idempotencyKey, amount, currency, provider, providerReference,
-                Timestamp.from(now), Timestamp.from(now));
+                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         jdbc.update("""
                         INSERT INTO payment_refund_attempts (
                             id, refund_id, attempt_number, operation, outcome,
@@ -91,7 +105,7 @@ public class PaymentRefundRepository {
                         rs.getString("idempotency_key"), rs.getBigDecimal("amount"),
                         rs.getString("currency"), rs.getString("provider"),
                         rs.getString("provider_reference"), rs.getString("status"),
-                        rs.getTimestamp("completed_at").toInstant()), args)
+                        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()), args)
                 .stream().findFirst();
     }
 

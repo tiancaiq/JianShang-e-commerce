@@ -189,9 +189,9 @@ class CategoryGuidanceIntegrationTests {
     }
 
     @Test
-    void inactiveCategoryCannotPublishAndNonAdminCannotUseAdminRoute() throws Exception {
-        jdbcTemplate.update("update categories set status = 'INACTIVE' where id = ?", CATEGORY_ID);
-        publish("0", "Inactive category", "This must not publish.")
+    void disabledCategoryCannotPublishAndNonAdminCannotUseAdminRoute() throws Exception {
+        jdbcTemplate.update("update categories set status = 'DISABLED' where id = ?", CATEGORY_ID);
+        publish("0", "Disabled category", "This must not publish.")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code", equalTo("CATEGORY_GUIDANCE_CATEGORY_INACTIVE")));
 
@@ -233,7 +233,7 @@ class CategoryGuidanceIntegrationTests {
     }
 
     @Test
-    void exportCursorKeepsItsWatermarkAndNewExportsExcludeTombstonesAndInactiveCategories() {
+    void exportCursorKeepsItsWatermarkAndNewExportsExcludeTombstonesAndDisabledCategories() {
         service.publish(
                 CATEGORY_ID,
                 "en",
@@ -274,7 +274,7 @@ class CategoryGuidanceIntegrationTests {
                 .extracting(CategoryGuidanceSourceResponse::language)
                 .containsExactly("de", "en");
 
-        jdbcTemplate.update("update categories set status = 'INACTIVE' where id = ?", CATEGORY_ID);
+        jdbcTemplate.update("update categories set status = 'DISABLED' where id = ?", CATEGORY_ID);
         assertThat(sourceService.export("test-agent-token", null, 100).items()).isEmpty();
     }
 

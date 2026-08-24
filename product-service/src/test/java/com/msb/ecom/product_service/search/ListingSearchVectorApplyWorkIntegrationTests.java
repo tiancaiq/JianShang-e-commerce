@@ -1,5 +1,6 @@
 package com.msb.ecom.product_service.search;
 
+import com.msb.ecom.product_service.operations.ProductOperationsRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +45,7 @@ class ListingSearchVectorApplyWorkIntegrationTests {
 
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ListingSearchVectorApplyWorkRepository workRepository;
+    @Autowired ProductOperationsRepository operationsRepository;
 
     @BeforeEach
     void reset() {
@@ -127,6 +129,25 @@ class ListingSearchVectorApplyWorkIntegrationTests {
                 "01C00000000000000000001003",
                 NOW.plusSeconds(5))).isTrue();
         assertThat(workRepository.pendingCount()).isZero();
+    }
+
+    @Test
+    void productOperationsReadsVectorJobsFromTheMigratedSchema() {
+        assertThat(workRepository.insertIfAbsent(
+                "01W00000000000000000001004",
+                REQUEST_ID,
+                LISTING_ID,
+                7,
+                NOW)).isTrue();
+
+        assertThat(operationsRepository.jobs(NOW, 10, 10))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.jobId()).isEqualTo("01W00000000000000000001004");
+                    assertThat(job.jobType()).isEqualTo("LISTING_VECTOR_APPLY");
+                    assertThat(job.relatedTargetId()).isEqualTo(LISTING_ID);
+                    assertThat(job.status()).isEqualTo("PENDING");
+                });
     }
 
     private boolean insertAfter(CountDownLatch start, String workId) throws Exception {

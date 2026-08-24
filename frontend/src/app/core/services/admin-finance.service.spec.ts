@@ -1,0 +1,9 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideZonelessChangeDetection } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { AdminFinanceService } from './admin-finance.service';
+
+describe('AdminFinanceService',()=>{let service:AdminFinanceService;let http:HttpTestingController;beforeEach(()=>{TestBed.configureTestingModule({providers:[provideZonelessChangeDetection(),provideHttpClient(),provideHttpClientTesting()]});service=TestBed.inject(AdminFinanceService);http=TestBed.inject(HttpTestingController);});afterEach(()=>http.verify());
+it('uses server-side payment filtering and pagination',()=>{service.payments({status:'SUCCEEDED',businessId:'BUS',page:2,size:25,sort:'createdAt,desc'}).subscribe();const req=http.expectOne(r=>r.url==='/api/v1/admin/payments');expect(req.request.params.get('businessId')).toBe('BUS');expect(req.request.params.get('page')).toBe('2');req.flush({content:[],page:2,size:25,totalElements:0,totalPages:0,sort:'createdAt,desc'});});
+it('keeps dry-run and execution distinct and forwards the idempotency key',()=>{const body={refundType:'PARTIAL' as const,amount:12,currency:'USD',reasonCode:'CUSTOMER_REMEDIATION',reason:'Approved remedy',disputeId:null,expectedPaymentVersion:4,idempotencyKey:'admin-refund-key'};service.preview('PAY',body).subscribe();const preview=http.expectOne('/api/v1/admin/payments/PAY/refund/dry-run');expect(preview.request.method).toBe('POST');preview.flush({allowed:true});service.execute('PAY',body).subscribe();const execute=http.expectOne('/api/v1/admin/payments/PAY/refund');expect(execute.request.headers.get('Idempotency-Key')).toBe('admin-refund-key');expect(execute.request.body.expectedPaymentVersion).toBe(4);execute.flush({status:'SUCCEEDED'});});});

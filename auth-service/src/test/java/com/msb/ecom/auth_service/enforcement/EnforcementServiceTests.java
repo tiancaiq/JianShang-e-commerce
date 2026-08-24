@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -190,6 +191,7 @@ class EnforcementServiceTests {
         EnforcementRepository.Action action = action(ActionType.BAN, Set.of(Scope.USER_LOGIN), null, 0);
         when(fixture.repository.findAction(ACTION, false)).thenReturn(Optional.of(action));
         when(fixture.repository.findAction(ACTION, true)).thenReturn(Optional.of(action));
+        when(fixture.users.lockById(TARGET)).thenReturn(Optional.of(fixture.target));
         when(fixture.repository.activeActions(eq(TargetType.USER), eq(TARGET), any())).thenReturn(List.of(action));
 
         var result = fixture.service.revoke(new RevokeCommand(
@@ -201,6 +203,9 @@ class EnforcementServiceTests {
         verify(fixture.repository, never()).reserveIdempotency(any(), any(), any(), any());
         verify(fixture.repository, never()).revoke(any(), any(), any(), any(), any());
         verify(fixture.repository, never()).insertEvent(any());
+        var order = inOrder(fixture.users, fixture.repository);
+        order.verify(fixture.users).lockById(TARGET);
+        order.verify(fixture.repository).findAction(ACTION, true);
     }
 
     private static Stream<Arguments> creationPermissions() {

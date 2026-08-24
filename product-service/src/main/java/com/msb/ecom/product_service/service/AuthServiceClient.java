@@ -159,7 +159,11 @@ public interface AuthServiceClient {
                             AdminPermission.LISTING_EDIT.id(),
                             AdminPermission.LISTING_REMOVE.id(),
                             AdminPermission.LISTING_SUSPEND.id(),
-                            AdminPermission.LISTING_REINSTATE.id()),
+                            AdminPermission.LISTING_REINSTATE.id(),
+                            AdminPermission.CATALOG_READ.id(),
+                            AdminPermission.CATALOG_CATEGORY_MANAGE.id(),
+                            AdminPermission.CATALOG_ATTRIBUTE_MANAGE.id(),
+                            AdminPermission.CATALOG_POLICY_MANAGE.id()),
                     "ACTIVE");
         }
 

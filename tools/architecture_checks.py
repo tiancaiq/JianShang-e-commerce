@@ -88,6 +88,10 @@ PACKAGE_RE = re.compile(r"^\s*package\s+([a-zA-Z0-9_.]+)\s*;", re.MULTILINE)
 IMPORT_RE = re.compile(r"^\s*import\s+com\.msb\.ecom\.([a-zA-Z0-9_]+)\.", re.MULTILINE)
 SPRING_DATASOURCE_URL_RE = re.compile(r"spring\.datasource\.url\s*=\s*(.+)")
 SPRING_FLYWAY_LOCATIONS_RE = re.compile(r"spring\.flyway\.locations\s*=\s*(.+)")
+SQL_NON_CODE_RE = re.compile(
+    r"'(?:''|\\.|[^'])*'|\"(?:\"\"|\\.|[^\"])*\"|--[^\r\n]*|/\*.*?\*/",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,11 @@ def resource_files(root: Path) -> list[Path]:
         for path in base.rglob("*")
         if path.is_file() and path.suffix.lower() in {".properties", ".sql", ".yml", ".yaml"}
     )
+
+
+def sql_code_only(text: str) -> str:
+    """Remove SQL literals/comments so domain words in data do not look like schema references."""
+    return SQL_NON_CODE_RE.sub(" ", text)
 
 
 def check_service_package_ownership(repo: Path) -> list[Violation]:
@@ -224,8 +233,10 @@ def check_service_database_ownership(repo: Path) -> list[Violation]:
                             )
                         )
             if path.suffix.lower() == ".sql":
+                sql_code = sql_code_only(text)
                 for database_name in sorted(other_names):
-                    if re.search(rf"\b{re.escape(database_name)}\.", text):
+                    schema_reference = rf"(?<![A-Za-z0-9_])(?:`{re.escape(database_name)}`|{re.escape(database_name)})\s*\."
+                    if re.search(schema_reference, sql_code, re.IGNORECASE):
                         violations.append(
                             Violation(
                                 path,
@@ -321,6 +332,16 @@ def run_self_test() -> int:
             repo / "chat-service/src/main/resources/db/migration/V1__bad_root.sql",
             "create table bad_root (id bigint primary key);\n",
         )
+        write_file(
+            repo / "auth-service/src/main/resources/db/migration/identity/V2__bad_cross_schema.sql",
+            "select * from catalog.listings;\n",
+        )
+        safe_literal_path = repo / "auth-service/src/main/resources/db/migration/identity/V3__safe_literals.sql"
+        write_file(
+            safe_literal_path,
+            "insert into admin_permissions values ('admin.catalog.read', 'Chat. Catalog.');\n"
+            "-- catalog.listings is documentation, not executable SQL\n",
+        )
 
         violations = run_checks(repo)
         messages = "\n".join(violation.render(repo) for violation in violations)
@@ -329,12 +350,18 @@ def run_self_test() -> int:
             "common module contains JPA entity",
             "common module package contains domain segment",
             "datasource URL references another service database",
+            "SQL references another service schema",
             "unexpected root Flyway migration",
         ]
         missing = [fragment for fragment in required_fragments if fragment not in messages]
         if missing:
             print("Architecture check self-test failed.")
             print("Missing expected violation(s): " + ", ".join(missing))
+            print(messages)
+            return 1
+        if any(violation.path == safe_literal_path for violation in violations):
+            print("Architecture check self-test failed.")
+            print("SQL literals or comments were incorrectly treated as cross-schema references.")
             print(messages)
             return 1
         print("architecture_self_test_ok")

@@ -6,7 +6,9 @@ export default defineConfig({
   workers: 1,
   retries: process.env['CI'] ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
-  globalSetup: './e2e/global-setup.ts',
+  globalSetup: process.env['E2E_SKIP_GLOBAL_SETUP'] === 'true'
+    ? undefined
+    : './e2e/global-setup.ts',
   use: {
     baseURL: process.env['E2E_BASE_URL'] || 'http://localhost:4200',
     screenshot: 'only-on-failure',

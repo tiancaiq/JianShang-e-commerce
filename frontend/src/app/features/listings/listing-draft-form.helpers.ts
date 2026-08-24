@@ -27,6 +27,8 @@ export interface ListingDraftFormState {
   negotiable: boolean;
   sku: string;
   quantity: number | null;
+  categoryRuleVersion?:number|null;
+  attributes?:Record<string,unknown>;
 }
 
 export interface ListingDraftValidationResult {
@@ -96,6 +98,8 @@ export function buildListingDraftRequest(state: ListingDraftFormState): CreateLi
       : null,
     sku: state.sellerType === 'BUSINESS' ? state.sku.trim() : null,
     quantity: Number(state.quantity),
+    categoryRuleVersion: state.categoryRuleVersion ?? null,
+    attributes: state.attributes || {},
   };
 }
 
@@ -120,6 +124,8 @@ export function listingDraftToFormState(listing: ListingDraft): ListingDraftForm
     negotiable: listing.negotiable,
     sku: listing.sku || '',
     quantity: listing.quantity,
+    categoryRuleVersion:null,
+    attributes:{},
   };
 }
 

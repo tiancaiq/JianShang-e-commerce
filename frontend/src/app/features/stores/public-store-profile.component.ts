@@ -1,12 +1,14 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { BusinessStore } from '../../core/models/business-store.model';
 import { BusinessStoreService } from '../../core/services/business-store.service';
+import { AuthService } from '../../core/services/auth.service';
+import { ReportDialogComponent } from '../../shared/components/report-dialog.component';
 
 @Component({
   selector: 'app-public-store-profile',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, ReportDialogComponent],
   template: `
     <section class="store-page">
       @if (loading()) {
@@ -64,8 +66,11 @@ import { BusinessStoreService } from '../../core/services/business-store.service
             }
           </dl>
 
-          <a routerLink="/stores" class="catalog-link">Browse business catalog</a>
+          <div class="store-actions"><a routerLink="/stores" class="catalog-link">Browse business catalog</a><button type="button" (click)="openReport()">Report business</button></div>
         </section>
+        @if (reportOpen()) {
+          <app-report-dialog targetType="BUSINESS" [targetId]="current.businessId" targetLabel="this business" (close)="reportOpen.set(false)" />
+        }
       }
     </section>
   `,
@@ -216,6 +221,8 @@ import { BusinessStoreService } from '../../core/services/business-store.service
       justify-self: start;
     }
 
+    .store-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}.store-actions button{border:0;background:transparent;color:var(--market-muted);font:inherit;font-weight:850;text-decoration:underline;text-underline-offset:3px;cursor:pointer}.store-actions button:hover{color:#b4234f}
+
     .state {
       padding: 1.5rem;
       color: var(--market-muted);
@@ -250,11 +257,14 @@ import { BusinessStoreService } from '../../core/services/business-store.service
 })
 export class PublicStoreProfileComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly storeService = inject(BusinessStoreService);
+  private readonly authService = inject(AuthService);
 
   readonly loading = signal(true);
   readonly errorMsg = signal('');
   readonly store = signal<BusinessStore | null>(null);
+  readonly reportOpen = signal(false);
 
   ngOnInit(): void {
     const slug = this.route.snapshot.paramMap.get('storeSlug') || '';
@@ -281,5 +291,13 @@ export class PublicStoreProfileComponent implements OnInit {
 
   storeInitial(store: BusinessStore): string {
     return store.name.trim().charAt(0).toUpperCase() || 'S';
+  }
+
+  openReport(): void {
+    if (!this.authService.isAuthenticated()) {
+      this.authService.login('marketplace', this.router.url);
+      return;
+    }
+    this.reportOpen.set(true);
   }
 }

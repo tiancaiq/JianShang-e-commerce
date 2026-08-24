@@ -21,6 +21,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.time.Clock;
+import java.time.Instant;
+import java.sql.Timestamp;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +36,7 @@ public class AdminAuthorizationService {
 
     private final AuthService authService;
     private final JdbcTemplate jdbcTemplate;
+    private final Clock clock;
 
     @Transactional
     public PlatformAdminResponse requireCurrentAdmin() {
@@ -95,6 +99,22 @@ public class AdminAuthorizationService {
     public AdminIdentityLabelsResponse identityLabels(Set<String> userIds, Set<String> businessIds) {
         User user = authService.ensureUserEntity();
         requirePermission(user, AdminPermission.AUDIT_READ);
+        return labelResponse(userIds, businessIds, false);
+    }
+
+    @Transactional(readOnly = true)
+    // Supports the Order-owned admin read model without granting broader audit access.
+    public AdminIdentityLabelsResponse orderIdentityLabels(Set<String> userIds, Set<String> businessIds) {
+        User user = authService.ensureUserEntity();
+        requirePermission(user, AdminPermission.ORDER_READ);
+        return labelResponse(userIds, businessIds, false);
+    }
+
+    @Transactional(readOnly = true)
+    // Returns only safe labels for Payment-owned finance read models; PII remains separately permissioned.
+    public AdminIdentityLabelsResponse financeIdentityLabels(Set<String> userIds, Set<String> businessIds) {
+        User user = authService.ensureUserEntity();
+        requirePermission(user, AdminPermission.FINANCE_READ);
         return labelResponse(userIds, businessIds, false);
     }
 
@@ -217,18 +237,22 @@ public class AdminAuthorizationService {
         if (!"ACTIVE".equals(user.getStatus())) {
             deny(user.getId(), "inactive_account", null);
         }
+        Instant now = clock.instant();
         List<String> assignedRoles = jdbcTemplate.queryForList("""
-                select distinct ur.role_id
-                from user_roles ur
-                where ur.user_id = ?
-                  and ur.role_id in (
+                select distinct assignment.role_id
+                from admin_role_assignments assignment
+                where assignment.admin_user_id = ?
+                  and assignment.status = 'ACTIVE'
+                  and assignment.effective_at <= ?
+                  and (assignment.expires_at is null or assignment.expires_at > ?)
+                  and assignment.role_id in (
                     'PLATFORM_ADMIN', 'SUPER_ADMIN', 'TRUST_AND_SAFETY_ADMIN',
                     'BUSINESS_REVIEWER', 'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR',
-                    'BUSINESS_RESTRICTOR',
+                    'BUSINESS_RESTRICTOR', 'CATALOG_ADMIN', 'OPERATIONS_ADMIN', 'GOVERNANCE_ADMIN',
                     'AUDITOR', 'AI_ADMIN_AGENT'
                   )
-                order by ur.role_id
-                """, String.class, user.getId());
+                order by assignment.role_id
+                """, String.class, user.getId(), Timestamp.from(now), Timestamp.from(now));
         LinkedHashSet<String> effectiveRoles = new LinkedHashSet<>(assignedRoles);
         if (effectiveRoles.remove(PLATFORM_ADMIN_ROLE)) {
             effectiveRoles.add(SUPER_ADMIN_ROLE);
@@ -237,11 +261,14 @@ public class AdminAuthorizationService {
                 ? List.of()
                 : jdbcTemplate.queryForList("""
                         select distinct arp.permission_id
-                        from user_roles ur
-                        join admin_role_permissions arp on arp.role_id = ur.role_id
-                        where ur.user_id = ?
+                        from admin_role_assignments assignment
+                        join admin_role_permissions arp on arp.role_id = assignment.role_id
+                        where assignment.admin_user_id = ?
+                          and assignment.status = 'ACTIVE'
+                          and assignment.effective_at <= ?
+                          and (assignment.expires_at is null or assignment.expires_at > ?)
                         order by arp.permission_id
-                        """, String.class, user.getId());
+                        """, String.class, user.getId(), Timestamp.from(now), Timestamp.from(now));
         return new AdminAccess(List.copyOf(effectiveRoles), permissions);
     }
 

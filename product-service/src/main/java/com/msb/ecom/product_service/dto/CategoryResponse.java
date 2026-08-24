@@ -8,6 +8,12 @@ public record CategoryResponse(
         String name,
         String parentId,
         int displayOrder,
-        List<CategoryAttributeResponse> attributes
+        String status,
+        String sellerEligibility,
+        boolean listingCreationAllowed,
+        boolean listingSubmissionAllowed,
+        long ruleVersion,
+        List<CategoryAttributeResponse> attributes,
+        List<CategorySellerGuidanceResponse> sellerGuidance
 ) {
 }

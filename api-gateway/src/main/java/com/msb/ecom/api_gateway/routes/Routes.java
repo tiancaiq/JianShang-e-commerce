@@ -199,6 +199,7 @@ public class Routes {
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/store/items"))
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/store/items/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/listings/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/catalog/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/search/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/moderation/**")),
                                                 http(productServiceUrl))
@@ -373,6 +374,64 @@ public class Routes {
 
         @Bean
         @Order(0)
+        public RouterFunction<ServerResponse> adminOrderServiceRoute() {
+                return route("admin_order_service")
+                                .route(RequestPredicates.path("/api/v1/admin/orders")
+                                                .or(RequestPredicates.path("/api/v1/admin/orders/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/disputes"))
+                                                .or(RequestPredicates.path("/api/v1/admin/disputes/**")),
+                                                http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        /** Relays finance administration to Payment Service and rejects spoofed actor headers. */
+        @Bean
+        @Order(0)
+        public RouterFunction<ServerResponse> adminFinanceServiceRoute() {
+                return route("admin_finance_service")
+                                .route(RequestPredicates.path("/api/v1/admin/payments")
+                                                .or(RequestPredicates.path("/api/v1/admin/payments/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/refunds"))
+                                                .or(RequestPredicates.path("/api/v1/admin/refunds/**")),
+                                                http(paymentServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("paymentServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
+        public RouterFunction<ServerResponse> orderDisputeServiceRoute() {
+                return route("order_dispute_service")
+                                .route(RequestPredicates.path("/api/v1/disputes/**")
+                                                .or(RequestPredicates.path("/api/v1/orders/*/disputes"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/disputes"))
+                                                .or(RequestPredicates.path("/api/v1/businesses/*/disputes/**")),
+                                                http(orderServiceUrl))
+                                .before(removeRequestHeader("X-User-Id"))
+                                .before(removeRequestHeader("X-Actor-User-Id"))
+                                .before(removeRequestHeader("X-Keycloak-Sub"))
+                                .before(removeRequestHeader("X-Roles"))
+                                .filter(tokenRelay())
+                                .filter(circuitBreaker("orderServiceCircuitBreaker",
+                                                URI.create("forward:/fallbackRoute")))
+                                .build();
+        }
+
+        @Bean
+        @Order(0)
         @ConditionalOnProperty(prefix = "msb.gateway.features", name = "business-orders", havingValue = "true")
         public RouterFunction<ServerResponse> businessOrderServiceRoute() {
                 return route("business_order_service")
@@ -529,6 +588,24 @@ public class Routes {
                                                 .or(RequestPredicates.path("/api/v1/admin/users/**"))
                                                 .or(RequestPredicates.path("/api/v1/admin/businesses"))
                                                 .or(RequestPredicates.path("/api/v1/admin/businesses/**"))
+                                                .or(RequestPredicates.path("/api/v1/reports"))
+                                                .or(RequestPredicates.path("/api/v1/reports/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/reports"))
+                                                .or(RequestPredicates.path("/api/v1/admin/reports/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/cases"))
+                                                .or(RequestPredicates.path("/api/v1/admin/cases/**"))
+                                                .or(RequestPredicates.path("/api/v1/enforcements/mine"))
+                                                .or(RequestPredicates.path("/api/v1/enforcements/*/appeals"))
+                                                .or(RequestPredicates.path("/api/v1/appeals/mine"))
+                                                .or(RequestPredicates.path("/api/v1/admin/appeals"))
+                                                .or(RequestPredicates.path("/api/v1/admin/appeals/**"))
+                                                .or(RequestPredicates.path("/api/v1/support/tickets"))
+                                                .or(RequestPredicates.path("/api/v1/support/tickets/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/support/tickets"))
+                                                .or(RequestPredicates.path("/api/v1/admin/support/tickets/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/system/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/analytics/**"))
+                                                .or(RequestPredicates.path("/api/v1/admin/governance/**"))
                                                 .or(RequestPredicates.path("/api/v1/businesses/*/marketplace-capabilities"))
                                                 .or(RequestPredicates.path("/api/v1/admin/business-applications/**")),
                                                 http(authServiceUrl))

@@ -102,6 +102,7 @@ describe('ListingDraftFormComponent', () => {
       'getCategories',
       'createDraft',
       'getListing',
+      'getListingCatalogValues',
       'updateDraft',
       'submitForReview',
       'closeListing',
@@ -128,6 +129,12 @@ describe('ListingDraftFormComponent', () => {
     listingService.getCategories.and.returnValue(of([category]));
     listingService.createDraft.and.returnValue(of(draft));
     listingService.getListing.and.returnValue(of({ ...draft, images: [image] }));
+    listingService.getListingCatalogValues.and.returnValue(of({
+      listingId: draft.id,
+      categoryId: category.id,
+      categoryRuleVersion: 1,
+      attributes: {},
+    }));
     listingService.updateDraft.and.returnValue(of({ ...draft, title: 'Updated bicycle', version: 1 }));
     listingService.publishBusinessStoreItem.and.returnValue(of({
       ...draft,

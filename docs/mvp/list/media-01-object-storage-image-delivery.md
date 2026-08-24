@@ -47,8 +47,18 @@ S3_BUCKET=jianshang
 S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 S3_PATH_STYLE_ACCESS=true
+LISTING_MEDIA_HEALTH_CHECK_OBJECT_KEY=
 LISTING_MEDIA_SIGNED_URL_TTL=PT15M
 ```
+
+In S3 mode, `/actuator/health/listingMedia` performs an authenticated `HEAD`
+request against the newest persisted uploaded media object. A deployment may
+set `LISTING_MEDIA_HEALTH_CHECK_OBJECT_KEY` to use a stable private canary
+object instead. Product Service reports only the storage mode, check source,
+and a non-secret reason code; it does not expose object keys, bucket names,
+credentials, signed URLs, or provider response bodies. The Product container
+health check uses this endpoint, so invalid credentials or unreadable media
+make the deployment unhealthy.
 
 Local browser testing needs bucket CORS similar to:
 
@@ -65,6 +75,21 @@ Local browser testing needs bucket CORS similar to:
 
 Local demo mode remains available with `LISTING_MEDIA_STORAGE=local-demo` for
 offline tests and metadata-only development.
+
+The configured demo runtime uses `.env.demo`. Recreate Product Service without
+falling back to placeholder values in `.env`:
+
+```powershell
+docker compose --env-file .env.demo `
+  -f docker-compose.demo.yml `
+  -f docker-compose.cart-runtime.yml `
+  up -d --no-deps --force-recreate product-service
+```
+
+After recreation, `/actuator/health/listingMedia` must return HTTP `200` and
+`UP` before browser media verification. A public listing that reports no
+public images after storage is healthy has no approved media attached; it is
+not evidence of a storage outage.
 
 ## Frontend
 

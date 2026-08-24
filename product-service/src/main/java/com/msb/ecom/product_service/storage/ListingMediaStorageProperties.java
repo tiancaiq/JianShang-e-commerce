@@ -9,6 +9,7 @@ public record ListingMediaStorageProperties(
         String storage,
         long maxImageSizeBytes,
         Duration signedUrlTtl,
+        String healthCheckObjectKey,
         S3Properties s3
 ) {
 

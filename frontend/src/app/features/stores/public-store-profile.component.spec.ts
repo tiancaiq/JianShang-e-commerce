@@ -3,12 +3,16 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { BusinessStore } from '../../core/models/business-store.model';
+import { AuthService } from '../../core/services/auth.service';
 import { BusinessStoreService } from '../../core/services/business-store.service';
+import { ReportService } from '../../core/services/report.service';
 import { PublicStoreProfileComponent } from './public-store-profile.component';
 
 describe('PublicStoreProfileComponent', () => {
   let fixture: ComponentFixture<PublicStoreProfileComponent>;
+  let authService: jasmine.SpyObj<AuthService>;
   let storeService: jasmine.SpyObj<BusinessStoreService>;
+  let reportService: jasmine.SpyObj<ReportService>;
 
   const store: BusinessStore = {
     id: '01S00000000000000000000001',
@@ -29,7 +33,9 @@ describe('PublicStoreProfileComponent', () => {
   };
 
   beforeEach(async () => {
+    authService = jasmine.createSpyObj<AuthService>('AuthService', ['isAuthenticated', 'login']);
     storeService = jasmine.createSpyObj<BusinessStoreService>('BusinessStoreService', ['getPublicStore']);
+    reportService = jasmine.createSpyObj<ReportService>('ReportService', ['submit']);
     storeService.getPublicStore.and.returnValue(of(store));
 
     await TestBed.configureTestingModule({
@@ -37,7 +43,9 @@ describe('PublicStoreProfileComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
+        { provide: AuthService, useValue: authService },
         { provide: BusinessStoreService, useValue: storeService },
+        { provide: ReportService, useValue: reportService },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => store.slug } } } },
       ],
     }).compileComponents();

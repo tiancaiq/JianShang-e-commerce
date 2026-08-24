@@ -434,9 +434,16 @@ conversation-gated listing close covered by CHAT-05 and CHAT-06.
 ### 5.7 Basic Admin Moderation
 
 Status: `ADM-MVP-RC-01`, `ADM-SEC-01`, `ADM-ENF-00`, `ADM-USER-01/02`,
-`ADM-BUS-04/05`, and `ADM-LIST-06` are complete. ADM-00,
+`ADM-BUS-04/05`, `ADM-LIST-06`, `ADM-REP-00/01/02/03/04`, and
+`ADM-APL-00/01/02` are complete. ADM-00,
 ADM-BUS-01 through ADM-BUS-03, ADM-LIST-00 through ADM-LIST-05, ADM-AUD-01,
-and the fine-grained admin authorization foundation are complete.
+and the fine-grained admin authorization foundation are complete. Marketplace
+reporting is Auth-owned, supports authenticated `USER`, `BUSINESS`, and
+`LISTING` allegations, and has a separate permission-gated human triage inbox.
+Investigation cases group eligible reports, validated related targets, private
+notes, and internal evidence references. Reports never enforce automatically;
+ready cases use explicit dry-run-validated, human-confirmed proposals that
+orchestrate the existing enforcement engines.
 Business and listing detail pages expose normalized chronological audit
 timelines, and listing case controls are capability-gated by current admin
 ownership and resolved state. The Docker-backed two-admin browser workflow
@@ -448,7 +455,7 @@ permissions returned by `/api/v1/admin/me`. Existing `PLATFORM_ADMIN` users are
 bootstrapped as effective `SUPER_ADMIN`. Backend permission checks are
 authoritative; Angular route, navigation, and command capability checks are
 presentation safeguards. The reserved `AI_ADMIN_AGENT` role is unassigned and
-has no permissions or execution path. Role-management UI/API, reports, finance
+has no permissions or execution path. Role-management UI/API, finance
 administration, and AI automation remain deferred. ADM-ENF-00 supplies
 service-owned persistence, contracts, evaluation, authorization, idempotency,
 concurrency, dry-run validation, and timeline mapping. ADM-USER-01/02 enforces
@@ -480,19 +487,29 @@ Recommended slices:
     reinstatement.
 15. ADM-BUS-04/05 active-business administration and reversible enforcement.
 16. ADM-LIST-06 reversible listing suspension and reinstatement.
+17. ADM-REP-00 report persistence, lifecycle, snapshots, and audit foundation.
+18. ADM-REP-01 authenticated marketplace report submission and abuse controls.
+19. ADM-REP-02 report inbox, assignment, detail, and human triage.
+20. ADM-REP-03 investigation cases, report/target links, private notes,
+    validated evidence references, assignment, and human conclusion.
+21. ADM-REP-04 case-linked proposals, target dry runs, idempotent execution,
+    partial-failure truth, enforcement links, and `CLOSED_ACTIONED`.
+22. ADM-APL-00/01/02 enforcement-action appeals, affected-actor eligibility,
+    admin assignment, private review, and non-executing recommendations.
+23. ADM-APL-03 preview-bound, explicitly confirmed appeal resolution through
+    the existing target-specific enforcement owners.
 
-Recommended next after the cleanup gate: `ADM-REP-00/01/02`. This roadmap
-identifies the next milestone without implementing report submission,
-persistence, queues, or investigation behavior in the enforcement release.
+`ADM-APL-03` is implemented through the existing target-specific revocation and
+enforcement boundaries. Final acceptance remains pending the complete live and
+repository verification matrix.
 
 Search Maintenance is ongoing and feature-gated; it is not part of
 `ADM-MVP-RC-01`. Category Guidance remains disabled by default. Neither is an
 MVP admin release blocker.
 
-Reports, starting with `ADM-REP-00/01/02`, investigation/support cases, appeals,
-chat evidence review, payment/order/finance operations, payout enforcement,
-advanced trust/disputes, and AI moderation assistance are admin roadmap scope
-but remain deferred until after this release train is fully delivered.
+Support cases, chat evidence review, payment/order/finance
+operations, payout enforcement, advanced trust/disputes, and AI moderation
+assistance remain deferred.
 
 ### 5.8 V3 AI And Automated Operations Planning
 
@@ -1783,3 +1800,142 @@ has been corrected without changing test behavior, and repository-wide
 and package gate, all 633 Angular tests, the production Angular build, all 13
 Chromium Playwright scenarios, and the final 2-scenario admin release-candidate
 rerun.
+
+### ADM-APL-00/01/02/03 implementation status
+
+Implemented: Auth-owned appeals keyed to a specific enforcement action,
+server-side user/business/listing-owner eligibility, one-appeal uniqueness,
+safe affected-actor notices and submission, an admin appeal inbox, claim and
+release ownership, explicit review start, private notes, optimistic locking,
+append-only timelines, and immutable uphold/modify/revoke recommendations.
+`ADM-APL-03` adds distinct final `UPHELD`, `MODIFIED`, and `REVOKED` states,
+version- and state-bound dry runs, explicit confirmation, concurrency and
+request-fingerprint idempotency, safe affected-actor outcomes, and immutable
+final audit. Auth owns USER/BUSINESS mutation and final appeal state. Product
+owns LISTING revoke-or-replace execution behind a token-protected, appeal-scoped
+replay boundary; no service reads or writes another owner's database.
+Recommendation states remain non-executing review conclusions and are never
+counted as final outcomes. Final acceptance is pending the complete live and
+repository verification matrix. AI appeal review and automatic enforcement
+remain deferred.
+
+### ADM-ORD-01/02 admin order operations
+
+Order administration is implemented on the existing V2 business-commerce
+aggregate without moving orders into MVP or adding an admin service. It adds
+server-side order search, historical order detail, safe payment/inventory and
+current-listing context, normalized history, granular permissions, and a
+versioned/idempotent cancellation dry run and command that reuses the existing
+refund/restock compensation workflow. See
+`docs/mvp/adm/admin-order-operations.md`.
+
+### ADM-DSP-00/01/02 transaction disputes
+
+Implemented on the existing Order-owned business-commerce aggregate: scoped
+buyer/business participation, append-only statements and safe evidence,
+permissioned admin queue and assignment, participant information requests,
+priority, immutable resolutions, minimal return authorization, and bounded
+full/partial refund recommendations with no financial execution. Individual
+trades, refund execution, chargebacks, payouts, automatic enforcement, and AI
+remain outside this slice. See `docs/mvp/adm/admin-disputes.md`.
+
+### ADM-FIN-00/01/02 payment and refund administration
+
+Implemented in Payment Service with Auth-owned finance/refund permissions, server-paginated payment and unified refund views, safe Order/dispute context, non-mutating dry runs, and controlled full/partial execution. The command uses payment-row locking, optimistic versioning, actor-scoped idempotency, and one cumulative ceiling across cancellation, return, and admin refunds. The current provider is synchronous; uncertain failures remain auditable and non-retryable until a provider reconciliation contract exists. See `docs/mvp/adm/admin-financial-operations.md`.
+
+### ADM-SUP-00/01 support operations
+
+Implemented as an Auth-owned coordination aggregate with requester-safe
+submission/history, participant messages, private admin notes,
+server-paginated inbox, explicit assignment, priority, typed validated links,
+deliberate handoffs, final resolution, optimistic locking, request-hash
+idempotency, and append-only audit. Token-protected read adapters in Order,
+Product, and Payment expose only allow-listed context. No support command calls
+an order, refund, dispute, report, case, or enforcement mutation API. See
+`docs/mvp/adm/admin-support-operations.md`.
+
+| Milestone | Status |
+| --- | --- |
+| `ADM-ORD-01/02` | Complete |
+| `ADM-DSP-00/01/02` | Complete |
+| `ADM-FIN-00/01/02` | Complete |
+| `ADM-SUP-00/01` | Implemented; acceptance pending repository-wide Playwright orchestration |
+| `ADM-CAT-01/02` | Complete |
+| `ADM-SYS-01/02` | Complete |
+| `ADM-GOV-01/02` | Complete |
+| `ADM-APL-00/01/02/03` | Implemented; final acceptance pending complete live and repository verification |
+| `ADM-ANL-01` | Implemented with authoritative final appeal metrics; final acceptance pending complete live and repository verification |
+| `ADM-PLATFORM-RC-01A` | Complete at repository-verification boundary; deployed-stack acceptance remains in `ADM-PLATFORM-RC-01B` |
+
+Remaining human-admin operations after governance are ordered as follows:
+
+1. `ADM-PAY-03` payout administration only after payouts exist.
+2. Close the remaining `ADM-APL-03` and `ADM-ANL-01` verification gates.
+3. `ADM-PLATFORM-RC-01B` deployed-stack, cross-role final acceptance.
+4. `ADM-AI-*` only after the human control plane is mature.
+
+### ADM-CAT-01/02 catalog and marketplace governance
+
+Complete. The full backend, Angular, production-build, and Playwright matrix is
+green. Product Service owns database-backed hierarchy,
+lifecycle, attributes/options, seller guidance, rule versions, listing
+validation, impact previews, idempotency, and audit. Existing active and
+pending listings are never silently rewritten. See
+`docs/mvp/adm/admin-catalog-governance.md`. `ADM-SYS-01/02` followed in the
+historical sequence and is complete below. AI remains out of scope.
+
+### ADM-SYS-01/02 marketplace and system operations
+
+Complete. The full backend, Angular, production-build, and Playwright matrix is
+green. Auth aggregates bounded safe health and owner-
+service operational projections and owns permission, idempotency, and admin
+request audit. Product, Order, Payment, and Inventory retain their data and
+worker mechanisms. Only failed supported work/outbox retries and one-listing
+current-state reindex are mutable; finance reconciliation, inventory anomalies,
+and environment-backed features are read-only. Legacy full Search Maintenance
+remains feature-gated/deferred. See
+`docs/mvp/adm/admin-system-operations.md`. ADM-GOV-01/02 followed and is
+complete; AI is not part of ADM-SYS.
+
+### ADM-GOV-01/02 admin governance and sensitive-action approval
+
+Complete. Auth owns the time-aware assignment and approval ledgers, preserves
+legacy admin authority, prevents last-super-admin lockout, and exposes bounded
+governance/admin/approval views. SUPER_ADMIN grant/revoke requires two distinct
+reviewers. Configured large refunds and high-impact category disablement pause
+before owner mutation, revalidate current state, and execute only through typed
+Payment/Product adapters. Existing bounded ADM-SYS actions remain direct
+because no supported high-impact system command exists. See
+`docs/mvp/adm/admin-governance.md`. `ADM-ANL-01` follows below; AI remains
+deferred.
+
+### ADM-ANL-01 admin analytics and operational insights
+
+Implemented as a read-only Auth facade over owner-local bounded aggregates.
+UTC half-open ranges, equal previous periods, typed trends, financial/system/
+governance visibility, section-level partial failure, accessible Angular
+charts/tables, and allow-listed drill-downs are defined in
+`docs/mvp/adm/admin-analytics.md`. Product, Order, Payment, and ADM-SYS remain
+authoritative; no analytics copy, warehouse, mutation, risk score, or AI was
+added.
+
+The appeal domain now persists authoritative final outcomes separately from
+recommendations. `appealsFinalized` is the sum of final `UPHELD`, `MODIFIED`,
+and `REVOKED` rows resolved in the selected window. The adjustment rate is
+`(MODIFIED + REVOKED) / appealsFinalized * 100`, is `N/A` at a zero
+denominator, and excludes recommendation and pending states. The milestone is
+not marked complete until the full live and repository verification matrix is
+green; after that gate, the recommended next milestone is
+`ADM-PLATFORM-RC-01`.
+
+### ADM-PLATFORM-RC-01A admin platform audit and stabilization
+
+Complete at the repository-verification boundary. The cross-admin route,
+permission, privacy, audit, concurrency/idempotency, error, query-performance,
+migration, feature-flag, test, and documentation pass is recorded in
+`docs/mvp/adm/admin-platform-rc-01a.md`. The targeted fixes fail incomplete
+admin identity responses closed, keep case-enforcement dry runs out of the
+case timeline/version, batch Governance and Support page reads, and group the
+permission-aware admin navigation. No migration or environment change was
+required. `ADM-PLATFORM-RC-01B` is the next milestone for deployed-stack,
+cross-role final acceptance; it is not implemented here.

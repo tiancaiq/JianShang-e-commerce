@@ -59,6 +59,20 @@ public class ListingMediaRepository {
         return matches.stream().findFirst();
     }
 
+    // Supplies a persisted uploaded object for the storage-read deployment health check.
+    public Optional<String> findStorageHealthCheckObjectKey() {
+        List<String> matches = jdbcTemplate.queryForList("""
+                select object_key
+                from listing_media_objects
+                where upload_status = 'UPLOADED'
+                  and object_key is not null
+                  and object_key <> ''
+                order by updated_at desc, id desc
+                limit 1
+                """, String.class);
+        return matches.stream().findFirst();
+    }
+
     public ListingMediaResponse confirmMedia(
             String listingId,
             String mediaId,

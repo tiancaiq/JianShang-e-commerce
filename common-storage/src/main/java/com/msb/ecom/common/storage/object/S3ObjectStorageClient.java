@@ -15,23 +15,15 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
-import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 
 public class S3ObjectStorageClient implements AutoCloseable {
 
     private final S3Client s3Client;
     private final S3Presigner presigner;
-    private final HttpClient httpClient;
     private final S3ObjectStorageSettings settings;
 
     public S3ObjectStorageClient(S3ObjectStorageSettings settings) {
@@ -65,7 +57,6 @@ public class S3ObjectStorageClient implements AutoCloseable {
 
         this.s3Client = clientBuilder.build();
         this.presigner = presignerBuilder.build();
-        this.httpClient = HttpClient.newHttpClient();
     }
 
     public String bucket() {
@@ -127,37 +118,38 @@ public class S3ObjectStorageClient implements AutoCloseable {
                 .bucket(bucket())
                 .key(objectKey)
                 .build();
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(settings.signedUrlTtl())
-                .getObjectRequest(getObjectRequest)
-                .build();
         try {
-            PresignedGetObjectRequest signedRequest = presigner.presignGetObject(presignRequest);
-            HttpResponse<byte[]> response = httpClient.send(
-                    HttpRequest.newBuilder(URI.create(signedRequest.url().toString())).GET().build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() == 200) {
-                return response.body();
+            return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        } catch (NoSuchKeyException exception) {
+            throw new ObjectStorageNotFoundException("Stored object could not be read.");
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 403) {
+                throw new ObjectStorageAccessDeniedException("Stored object could not be read.");
             }
-            if (response.statusCode() == 403) {
-                throw new ObjectStorageAccessDeniedException(
-                        "Stored object could not be read. storageStatus=403 storageBody="
-                                + safeStorageBody(response.body()));
-            }
-            if (response.statusCode() == 404) {
+            if (exception.statusCode() == 404) {
                 throw new ObjectStorageNotFoundException("Stored object could not be read.");
             }
-            throw new ObjectStorageException(
-                    "Stored object read failed with HTTP " + response.statusCode(),
-                    S3Exception.builder()
-                            .message("Stored object read failed with HTTP " + response.statusCode())
-                            .statusCode(response.statusCode())
-                            .build());
-        } catch (IOException exception) {
             throw new ObjectStorageException("Stored object could not be read.", exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new ObjectStorageException("Stored object read was interrupted.", exception);
+        }
+    }
+
+    // Uses the authenticated SDK path to verify that a known object is readable without downloading its bytes.
+    public void verifyReadable(String objectKey) {
+        try {
+            s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucket())
+                    .key(objectKey)
+                    .build());
+        } catch (NoSuchKeyException exception) {
+            throw new ObjectStorageNotFoundException("Stored object could not be verified.");
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 403) {
+                throw new ObjectStorageAccessDeniedException("Stored object could not be verified.");
+            }
+            if (exception.statusCode() == 404) {
+                throw new ObjectStorageNotFoundException("Stored object could not be verified.");
+            }
+            throw new ObjectStorageException("Stored object could not be verified.", exception);
         }
     }
 
@@ -172,16 +164,6 @@ public class S3ObjectStorageClient implements AutoCloseable {
                 throw new ObjectStorageException("Stored object could not be deleted.", exception);
             }
         }
-    }
-
-    private String safeStorageBody(byte[] body) {
-        if (body == null || body.length == 0) {
-            return "<empty>";
-        }
-        String text = new String(body, StandardCharsets.UTF_8)
-                .replaceAll("\\s+", " ")
-                .trim();
-        return text.length() > 240 ? text.substring(0, 240) : text;
     }
 
     @Override

@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { AdminDashboardSummary } from '../../core/models/admin.model';
 import { ADMIN_PERMISSIONS } from '../../core/security/admin-permissions';
 import { AdminService } from '../../core/services/admin.service';
+import { SupportService } from '../../core/services/support.service';
 
 @Component({
   selector: 'app-admin-dashboard',
@@ -33,6 +34,26 @@ import { AdminService } from '../../core/services/admin.service';
             <a class="metric" routerLink="/admin/businesses">
               <span>Business administration</span>
               <strong>Open</strong>
+            </a>
+          }
+          @if (adminService.hasPermission(permissions.SUPPORT_READ)) {
+            <a class="metric support-metric" routerLink="/admin/support">
+              <span>Support inbox</span>
+              @switch (supportSummaryState()) {
+                @case ('ready') {
+                  <strong>{{ unassignedSupportTickets() }}</strong>
+                  <small>Unassigned tickets</small>
+                }
+                @case ('unavailable') {
+                  <strong aria-hidden="true">—</strong>
+                  <small>Count temporarily unavailable</small>
+                }
+                @default {
+                  <strong aria-hidden="true">…</strong>
+                  <small>Loading unassigned tickets</small>
+                }
+              }
+              <span class="metric-action">Open inbox <span aria-hidden="true">→</span></span>
             </a>
           }
           @if (adminService.hasPermission(permissions.BUSINESS_APPLICATION_READ)) {
@@ -100,6 +121,20 @@ import { AdminService } from '../../core/services/admin.service';
       text-decoration: none;
     }
 
+    .support-metric {
+      position: relative;
+      overflow: hidden;
+      padding-left: 1.25rem;
+    }
+
+    .support-metric::before {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0.25rem;
+      background: var(--color-info);
+      content: '';
+    }
+
     .metric span {
       display: block;
       color: var(--color-text-muted);
@@ -112,6 +147,31 @@ import { AdminService } from '../../core/services/admin.service';
       margin-top: 0.5rem;
       font-size: 2rem;
       letter-spacing: 0;
+    }
+
+    .metric small {
+      display: block;
+      margin-top: 0.125rem;
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+    }
+
+    .metric .metric-action {
+      display: block;
+      margin-top: 0.75rem;
+      color: var(--color-info);
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+
+    .metric:hover,
+    .metric:focus-visible {
+      border-color: var(--color-info);
+    }
+
+    .metric:focus-visible {
+      outline: 2px solid var(--color-info);
+      outline-offset: 2px;
     }
 
     .state-panel {
@@ -131,13 +191,20 @@ import { AdminService } from '../../core/services/admin.service';
 })
 export class AdminDashboardComponent implements OnInit {
   readonly adminService = inject(AdminService);
+  private readonly supportService = inject(SupportService);
   readonly permissions = ADMIN_PERMISSIONS;
 
   readonly loading = signal(true);
   readonly errorMsg = signal('');
   readonly summary = signal<AdminDashboardSummary | null>(null);
+  readonly unassignedSupportTickets = signal(0);
+  readonly supportSummaryState = signal<'loading' | 'ready' | 'unavailable'>('loading');
 
   ngOnInit(): void {
+    if (this.adminService.hasPermission(this.permissions.SUPPORT_READ)) {
+      this.loadSupportSummary();
+    }
+
     this.adminService.getDashboardSummary().subscribe({
       next: summary => {
         this.summary.set(summary);
@@ -147,6 +214,21 @@ export class AdminDashboardComponent implements OnInit {
         this.errorMsg.set('Admin dashboard could not be loaded.');
         this.loading.set(false);
       },
+    });
+  }
+
+  private loadSupportSummary(): void {
+    this.supportService.search({
+      assignment: 'UNASSIGNED',
+      page: 0,
+      size: 1,
+      sort: 'updatedAt,desc',
+    }).subscribe({
+      next: page => {
+        this.unassignedSupportTickets.set(page.totalElements);
+        this.supportSummaryState.set('ready');
+      },
+      error: () => this.supportSummaryState.set('unavailable'),
     });
   }
 }

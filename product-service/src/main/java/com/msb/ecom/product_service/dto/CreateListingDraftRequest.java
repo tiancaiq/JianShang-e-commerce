@@ -8,6 +8,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import java.util.Map;
+
 public record CreateListingDraftRequest(
         @NotNull ListingSellerType sellerType,
         String businessId,
@@ -20,6 +22,8 @@ public record CreateListingDraftRequest(
         Boolean negotiable,
         @Valid ListingLocationRequest location,
         @Size(max = 64) String sku,
-        @Positive Integer quantity
+        @Positive Integer quantity,
+        Long categoryRuleVersion,
+        Map<String, Object> attributes
 ) {
 }

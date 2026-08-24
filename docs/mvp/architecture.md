@@ -283,8 +283,10 @@ Responsibilities:
 
 MVP enables only `LISTING_BUYER_SELLER` conversations. Customer service,
 business-admin support, admin direct messaging, AI agent sessions, reviews,
-reports, and blocking require future domain-specific slices before they are
-enabled.
+message reports, and blocking require future domain-specific slices before
+they are enabled. Cross-domain marketplace reports and admin triage are owned
+by Auth Service under `ADM-REP-00/01/02`; they do not make chat messages a
+supported report target.
 
 Realtime delivery may use WebSocket/SSE later. HTTP remains the authoritative
 command and history interface. Persistent state remains in MySQL. Redis may
@@ -375,6 +377,12 @@ Responsibilities:
 Initially implemented as a module with its own API and tables. It can be
 deployed with marketplace administration until load or ownership justifies a
 separate service.
+
+The current implementation places the module in Auth Service, alongside the
+existing Auth-owned reports, investigation cases, and appeals. This keeps the
+requester/admin identity and permission boundary local without creating a new
+service. Support uses authenticated, bounded owner-service reads for Order,
+Product, and Payment context and never imports or mutates their aggregates.
 
 Responsibilities:
 
@@ -763,3 +771,50 @@ default-off outside the bounded commerce runtime.
 Product Service owns listing enforcement actions, scopes, events, idempotency, effective-policy evaluation, and the local public-read filter. Public browse, detail, media, search rehydration, and derived-index inputs all revalidate against Product MySQL. Search indexes remain derived and are not trusted as the final visibility authority.
 
 Order Service calls Product Service's authenticated batch capability endpoint at each new-commerce boundary. Product returns decisions only; it does not query or mutate Order storage. Order preserves paid/existing order state and fails closed when Product cannot decide.
+
+## ADM-ORD-01/02 administrative order boundary
+
+Order Service exposes the human-admin search/detail and bounded cancellation
+APIs for its existing V2 business-order aggregate. It does not become an admin
+microservice and does not copy Payment, Inventory, Product, or Auth tables.
+Auth supplies effective permissions, safe labels, and active user/business
+enforcement context through an order-specific read boundary; Product supplies current
+listing/enforcement context; Payment supplies the safe intent view; Inventory
+supplies the reservation view. Order-owned immutable snapshots remain the
+historical transaction record when any current resource changes or disappears.
+
+Administrative cancellation is a new authenticated command entrypoint into the
+existing Order cancellation-request, outbox, refund, and inventory-compensation
+workflow. It cannot set arbitrary statuses. Dry run is read only, execution is
+versioned and idempotent, and unsupported financial or fulfillment states fail
+before mutation.
+
+## ADM-DSP-00/01/02 transaction-dispute boundary
+
+Order Service owns transaction disputes as aggregates scoped to one existing
+business-order group. This preserves multi-business isolation and reuses the
+order-time item snapshots without turning disputes into order status, returns,
+Trust & Safety reports, enforcement, or refunds. Participant authorization is
+resolved through Auth-owned buyer identity and active business membership;
+administrative access composes granular Auth permissions with dispute
+assignment.
+
+Dispute resolution stores transaction decisions and bounded refund
+recommendations only. Payment is read for current-state validation but no
+refund, captured-amount, ledger, payout, Inventory, Product, or enforcement
+write is reachable from the dispute resolution command. The later ADM-FIN
+boundary must independently revalidate and execute any approved financial
+remedy.
+
+## ADM-SUP-00/01 support-operations boundary
+
+Auth Service owns the support-ticket coordination aggregate, requester-safe
+conversation, private admin notes, assignment, typed references, deliberate
+handoffs, and audit history. Order, Product, and Payment expose only narrow,
+token-protected support context reads. Auth-owned user, business, report, and
+case validation remains local to the owning schema.
+
+No Support command can call order cancellation, dispute resolution, refund
+execution, report/case enforcement, or listing/user/business enforcement.
+Handoff records link to an existing specialized record and leave the support
+ticket open until a human intentionally resolves it.

@@ -79,6 +79,7 @@ describe('BusinessAccountComponent', () => {
       '/seller/business/apply',
       '/seller/businesses/01JY0000000000000000000003/store',
       '/seller/store/items',
+      '/account/appeals',
     ]);
     expect(host.innerHTML).not.toContain('/account/profile');
   });
@@ -93,7 +94,12 @@ describe('BusinessAccountComponent', () => {
 
     expect(host.textContent).toContain('No approved business store is connected to this account yet.');
     expect(host.textContent).toContain('Application');
-    expect(links).toEqual(['/seller/business/apply', '/seller/business/apply', '/seller/business/apply']);
+    expect(links).toEqual([
+      '/seller/business/apply',
+      '/seller/business/apply',
+      '/seller/business/apply',
+      '/account/appeals',
+    ]);
   });
 
   it('shows a context loading error without leaving the business surface', () => {

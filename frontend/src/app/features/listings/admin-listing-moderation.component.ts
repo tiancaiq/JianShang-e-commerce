@@ -1,7 +1,8 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
   AdminListingModerationCase,
@@ -430,6 +431,8 @@ export class AdminListingModerationComponent implements OnInit {
   private readonly listingService = inject(ListingService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroy = inject(DestroyRef);
   private readonly adminService = inject(AdminService);
 
   readonly filters: { value: ListingModerationCaseFilter; label: string }[] = [
@@ -449,7 +452,12 @@ export class AdminListingModerationComponent implements OnInit {
   currentAdminUserId = signal('');
 
   ngOnInit(): void {
-    this.loadQueue();
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroy)).subscribe(params => {
+      const filter = params.get('filter');
+      this.selectedFilter.set(this.filters.some(item => item.value === filter)
+        ? filter as ListingModerationCaseFilter : 'open');
+      this.loadQueue();
+    });
   }
 
   loadQueue(preserveMessage = false): void {

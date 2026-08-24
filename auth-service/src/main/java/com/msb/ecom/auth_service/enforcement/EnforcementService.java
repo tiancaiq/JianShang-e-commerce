@@ -24,7 +24,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
@@ -99,6 +104,29 @@ public class EnforcementService {
     }
 
     @Transactional
+    // Previews an appeal replacement after excluding the original action that the same transaction will revoke.
+    public Result previewReplacement(CreateCommand rawCommand, String originalEnforcementActionId) {
+        User actor = authService.ensureUserEntity();
+        Instant now = clock.instant();
+        EnforcementPolicy.NormalizedCreate command = policy.normalize(rawCommand, now);
+        if (!command.dryRun()) {
+            throw new EnforcementExceptions.Validation("Replacement preview must be a dry run.");
+        }
+        authorizationService.requirePermission(actor, permission(command.targetType(), command.actionType()));
+        long targetVersion = lockAndValidateTarget(command);
+        EnforcementRepository.Action original = repository.findAction(originalEnforcementActionId, true)
+                .orElseThrow(() -> new EnforcementExceptions.NotFound("Enforcement action was not found."));
+        if (original.targetType() != command.targetType() || !original.targetId().equals(command.targetId())) {
+            throw new EnforcementExceptions.Validation("Replacement must target the original enforcement target.");
+        }
+        if (original.revokedAt() != null) {
+            throw new EnforcementExceptions.Conflict("The original enforcement action is already revoked.");
+        }
+        rejectExactActiveDuplicate(command, now, original.id());
+        return dryRunCreate(command, targetVersion, now, original.id());
+    }
+
+    @Transactional
     // Revokes one recorded action using its own optimistic version and preserves the original row and scopes.
     public Result revoke(RevokeCommand rawCommand) {
         User actor = authService.ensureUserEntity();
@@ -116,6 +144,7 @@ public class EnforcementService {
             }
         }
 
+        lockTarget(initial.targetType(), initial.targetId());
         EnforcementRepository.Action action = repository.findAction(command.enforcementActionId(), true)
                 .orElseThrow(() -> new EnforcementExceptions.NotFound("Enforcement action was not found."));
         if (!command.dryRun()) {
@@ -170,6 +199,28 @@ public class EnforcementService {
                 .toList();
     }
 
+    @Transactional
+    // Pins the owner row and every Auth-owned action so an appeal preview can be
+    // compared and, during execution, held stable through the final mutation.
+    public StatePin lockState(TargetType targetType, String targetId, Instant at) {
+        if (targetType == TargetType.LISTING) {
+            throw new EnforcementExceptions.Validation("Listing enforcement is Product-owned.");
+        }
+        Instant now = at == null ? clock.instant() : at;
+        long targetVersion = lockTarget(targetType, targetId);
+        List<EnforcementRepository.Action> actions = repository.actions(targetType, targetId, true);
+        String actionState = actions.stream().sorted(Comparator.comparing(EnforcementRepository.Action::id))
+                .map(action -> String.join(":", action.id(), Long.toString(action.version()),
+                        action.actionType().name(), lifecycle(action, now).name(),
+                        String.valueOf(action.effectiveAt()), String.valueOf(action.expiresAt()),
+                        String.valueOf(action.revokedAt()), action.scopes().stream().map(Enum::name)
+                                .sorted().reduce((left, right) -> left + "," + right).orElse("")))
+                .reduce((left, right) -> left + ";" + right).orElse("");
+        String token = sha256(String.join("|", targetType.name(), targetId,
+                Long.toString(targetVersion), actionState));
+        return new StatePin(targetVersion, token, selectEffective(actions, now));
+    }
+
     @Transactional(readOnly = true)
     public List<TimelineEntry> timeline(TargetType targetType, String targetId) {
         User actor = authService.ensureUserEntity();
@@ -182,24 +233,44 @@ public class EnforcementService {
     }
 
     private long lockAndValidateTarget(EnforcementPolicy.NormalizedCreate command) {
-        long actual;
-        if (command.targetType() == TargetType.USER) {
-            User target = userRepository.lockById(command.targetId())
-                    .orElseThrow(() -> new EnforcementExceptions.NotFound("User target was not found."));
-            actual = target.getVersion();
-        } else {
-            actual = repository.lockBusiness(command.targetId())
-                    .orElseThrow(() -> new EnforcementExceptions.NotFound("Business target was not found."))
-                    .version();
-        }
+        long actual = lockTarget(command.targetType(), command.targetId());
         if (actual != command.expectedTargetVersion()) {
             throw new EnforcementExceptions.Conflict("The target version is stale.");
         }
         return actual;
     }
 
+    private long lockTarget(TargetType targetType, String targetId) {
+        if (targetType == TargetType.USER) {
+            return userRepository.lockById(targetId)
+                    .orElseThrow(() -> new EnforcementExceptions.NotFound("User target was not found."))
+                    .getVersion();
+        }
+        return repository.lockBusiness(targetId)
+                .orElseThrow(() -> new EnforcementExceptions.NotFound("Business target was not found."))
+                .version();
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    public record StatePin(long targetVersion, String confirmationToken,
+                           List<EffectiveRestriction> effectiveRestrictions) { }
+
     private void rejectExactActiveDuplicate(EnforcementPolicy.NormalizedCreate command, Instant now) {
+        rejectExactActiveDuplicate(command, now, null);
+    }
+
+    private void rejectExactActiveDuplicate(EnforcementPolicy.NormalizedCreate command, Instant now,
+                                            String excludedActionId) {
         boolean duplicate = repository.activeActions(command.targetType(), command.targetId(), now).stream()
+                .filter(action -> excludedActionId == null || !excludedActionId.equals(action.id()))
                 .anyMatch(action -> action.actionType() == command.actionType()
                         && action.scopes().equals(command.scopes()));
         if (duplicate) {
@@ -239,6 +310,11 @@ public class EnforcementService {
     }
 
     private Result dryRunCreate(EnforcementPolicy.NormalizedCreate command, long targetVersion, Instant now) {
+        return dryRunCreate(command, targetVersion, now, null);
+    }
+
+    private Result dryRunCreate(EnforcementPolicy.NormalizedCreate command, long targetVersion, Instant now,
+                                String excludedActionId) {
         EnforcementRepository.Action proposal = new EnforcementRepository.Action(
                 null, command.targetType(), command.targetId(), command.actionType(), command.scopes(), 0,
                 command.effectiveAt(), command.expiresAt(), command.reasonCode(), command.reason(), command.caseId(),
@@ -246,7 +322,8 @@ public class EnforcementService {
                 null, null, command.safeMetadata());
         return new Result(null, command.targetType(), command.targetId(), command.actionType(), command.scopes(),
                 lifecycle(proposal, now), command.effectiveAt(), command.expiresAt(), 0, now, null,
-                command.reasonCode(), command.reason(), proposedEffective(proposal, now), proposal.correlationId(), true);
+                command.reasonCode(), command.reason(), proposedEffective(proposal, now, excludedActionId),
+                proposal.correlationId(), true);
     }
 
     private Result result(EnforcementRepository.Action action, Instant now, boolean dryRun) {
@@ -258,8 +335,15 @@ public class EnforcementService {
     }
 
     private List<EffectiveRestriction> proposedEffective(EnforcementRepository.Action proposal, Instant now) {
+        return proposedEffective(proposal, now, null);
+    }
+
+    private List<EffectiveRestriction> proposedEffective(EnforcementRepository.Action proposal, Instant now,
+                                                         String excludedActionId) {
         List<EnforcementRepository.Action> actions = new ArrayList<>(
-                repository.activeActions(proposal.targetType(), proposal.targetId(), now));
+                repository.activeActions(proposal.targetType(), proposal.targetId(), now).stream()
+                        .filter(action -> excludedActionId == null || !excludedActionId.equals(action.id()))
+                        .toList());
         if (lifecycle(proposal, now) == LifecycleState.ACTIVE) {
             actions.add(proposal);
         }

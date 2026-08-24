@@ -67,6 +67,8 @@ $auth = Assert-Profile 'msb-demo-auth-service'
 $product = Assert-Profile 'msb-demo-product-service'
 $frontend = Assert-Profile 'msb-demo-frontend'
 
+Assert-Setting $product 'LISTING_MEDIA_STORAGE' 's3' 'msb-demo-product-service'
+
 Assert-Setting $gateway 'ORDER_SERVICE_URL' 'http://order-service:8081' 'msb-demo-api-gateway'
 Assert-Setting $gateway 'GATEWAY_FEATURE_CART' 'true' 'msb-demo-api-gateway'
 Assert-Setting $gateway 'GATEWAY_FEATURE_CHECKOUT' 'true' 'msb-demo-api-gateway'
@@ -101,6 +103,7 @@ Assert-Healthy 'Gateway' "$GatewayBaseUrl/actuator/health"
 Assert-Healthy 'Frontend' "$FrontendBaseUrl/"
 Assert-Healthy 'Auth Service' 'http://127.0.0.1:8085/actuator/health'
 Assert-Healthy 'Product Service' 'http://127.0.0.1:8091/actuator/health'
+Assert-Healthy 'Listing media storage' 'http://127.0.0.1:8091/actuator/health/listingMedia'
 Assert-Healthy 'Inventory Service' 'http://127.0.0.1:8082/actuator/health'
 Assert-Healthy 'Order Service' 'http://127.0.0.1:8081/actuator/health'
 Assert-Healthy 'Payment Service' 'http://127.0.0.1:8084/actuator/health'
@@ -129,4 +132,4 @@ if ($LASTEXITCODE -ne 0 -or -not $mysqlVersion.Trim().StartsWith('8.4.')) {
     throw "Commerce MySQL did not report an 8.4 server version."
 }
 
-Write-Output 'Commerce RC runtime verified: profile, frontend build, routes, services, Redis, MySQL 8.4, and Keycloak are aligned.'
+Write-Output 'Commerce RC runtime verified: profile, frontend build, routes, services, listing media storage, Redis, MySQL 8.4, and Keycloak are aligned.'

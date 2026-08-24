@@ -149,6 +149,8 @@ class EnforcementServiceTests {
     void dryRunRevocationRequiresReinstateAndDoesNotPersist() {
         Fixture fixture = fixture(List.of(AdminPermission.LISTING_REINSTATE.id()));
         EnforcementRepository.Action action = action(null, 0);
+        when(fixture.repository.action(ACTION, false)).thenReturn(Optional.of(action));
+        when(fixture.repository.lockListing(TARGET)).thenReturn(Optional.of(activeTarget()));
         when(fixture.repository.action(ACTION, true)).thenReturn(Optional.of(action));
         when(fixture.repository.active(eq(TARGET), any())).thenReturn(List.of(action));
 

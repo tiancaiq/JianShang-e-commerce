@@ -47,6 +47,11 @@ class ListingDomainFoundationMigrationTests {
             assertThat(tableCount(connection, "listing_search_projection_coordination")).isEqualTo(1);
             assertThat(tableCount(connection, "listing_search_rebuild_runs")).isEqualTo(1);
             assertThat(tableCount(connection, "listing_search_vector_apply_work")).isEqualTo(1);
+            assertThat(tableCount(connection, "category_attribute_options")).isEqualTo(1);
+            assertThat(tableCount(connection, "category_rule_versions")).isEqualTo(1);
+            assertThat(tableCount(connection, "category_seller_guidance")).isEqualTo(1);
+            assertThat(tableCount(connection, "catalog_events")).isEqualTo(1);
+            assertThat(tableCount(connection, "catalog_command_idempotency")).isEqualTo(1);
         }
     }
 

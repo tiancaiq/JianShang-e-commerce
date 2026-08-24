@@ -27,26 +27,92 @@ import {
           >Menu</button>
         </div>
         <nav id="admin-navigation" aria-label="Admin navigation">
-          @if (adminService.hasPermission(permissions.DASHBOARD_READ)) {
-            <a routerLink="/admin/dashboard" routerLinkActive="active" (click)="closeMobileMenu()">Dashboard</a>
+          @if (hasAnyPermission(permissions.DASHBOARD_READ, permissions.ANALYTICS_READ)) {
+            <section class="nav-group" aria-labelledby="admin-nav-overview">
+              <p id="admin-nav-overview" class="nav-group-label">Overview</p>
+              @if (adminService.hasPermission(permissions.DASHBOARD_READ)) {
+                <a routerLink="/admin/dashboard" routerLinkActive="active" (click)="closeMobileMenu()">Dashboard</a>
+              }
+              @if (adminService.hasPermission(permissions.ANALYTICS_READ)) {
+                <a routerLink="/admin/analytics" routerLinkActive="active" (click)="closeMobileMenu()">Analytics</a>
+              }
+            </section>
           }
-          @if (adminService.hasPermission(permissions.USER_READ)) {
-            <a routerLink="/admin/users" routerLinkActive="active" (click)="closeMobileMenu()">Users</a>
+          @if (hasMarketplaceNavigation()) {
+            <section class="nav-group" aria-labelledby="admin-nav-marketplace">
+              <p id="admin-nav-marketplace" class="nav-group-label">Marketplace</p>
+              @if (adminService.hasPermission(permissions.USER_READ)) {
+                <a routerLink="/admin/users" routerLinkActive="active" (click)="closeMobileMenu()">Users</a>
+              }
+              @if (adminService.hasPermission(permissions.BUSINESS_READ)) {
+                <a routerLink="/admin/businesses" routerLinkActive="active" (click)="closeMobileMenu()">Businesses</a>
+              }
+              @if (adminService.hasPermission(permissions.BUSINESS_APPLICATION_READ)) {
+                <a routerLink="/admin/business-applications" routerLinkActive="active" (click)="closeMobileMenu()">Business Review</a>
+              }
+              @if (adminService.hasPermission(permissions.LISTING_MODERATION_READ)) {
+                <a routerLink="/admin/listings/moderation" routerLinkActive="active" (click)="closeMobileMenu()">Listing Review</a>
+              }
+              @if (adminService.hasPermission(permissions.CATALOG_READ)) {
+                <a routerLink="/admin/catalog" routerLinkActive="active" (click)="closeMobileMenu()">Catalog</a>
+              }
+              @if (categoryGuidanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
+                <a routerLink="/admin/category-guidance" routerLinkActive="active" (click)="closeMobileMenu()">Category Guidance</a>
+              }
+            </section>
           }
-          @if (adminService.hasPermission(permissions.BUSINESS_READ)) {
-            <a routerLink="/admin/businesses" routerLinkActive="active" (click)="closeMobileMenu()">Businesses</a>
+          @if (hasAnyPermission(permissions.REPORT_READ, permissions.APPEAL_READ)) {
+            <section class="nav-group" aria-labelledby="admin-nav-trust">
+              <p id="admin-nav-trust" class="nav-group-label">Trust &amp; Safety</p>
+              @if (adminService.hasPermission(permissions.REPORT_READ)) {
+                <a routerLink="/admin/reports" routerLinkActive="active" (click)="closeMobileMenu()">Report Inbox</a>
+                <a routerLink="/admin/cases" routerLinkActive="active" (click)="closeMobileMenu()">Investigation Cases</a>
+              }
+              @if (adminService.hasPermission(permissions.APPEAL_READ)) {
+                <a routerLink="/admin/appeals" routerLinkActive="active" (click)="closeMobileMenu()">Appeal Inbox</a>
+              }
+            </section>
           }
-          @if (adminService.hasPermission(permissions.BUSINESS_APPLICATION_READ)) {
-            <a routerLink="/admin/business-applications" routerLinkActive="active" (click)="closeMobileMenu()">Business Review</a>
+          @if (hasCommerceNavigation()) {
+            <section class="nav-group" aria-labelledby="admin-nav-commerce">
+              <p id="admin-nav-commerce" class="nav-group-label">Commerce</p>
+              @if (adminService.hasPermission(permissions.ORDER_READ)) {
+                <a routerLink="/admin/orders" routerLinkActive="active" (click)="closeMobileMenu()">Orders</a>
+              }
+              @if (adminService.hasPermission(permissions.DISPUTE_READ)) {
+                <a routerLink="/admin/disputes" routerLinkActive="active" (click)="closeMobileMenu()">Disputes</a>
+              }
+              @if (adminService.hasPermission(permissions.FINANCE_READ)) {
+                <a routerLink="/admin/payments" routerLinkActive="active" (click)="closeMobileMenu()">Payments</a>
+              }
+              @if (adminService.hasPermission(permissions.REFUND_READ)) {
+                <a routerLink="/admin/refunds" routerLinkActive="active" (click)="closeMobileMenu()">Refunds</a>
+              }
+            </section>
           }
-          @if (adminService.hasPermission(permissions.LISTING_MODERATION_READ)) {
-            <a routerLink="/admin/listings/moderation" routerLinkActive="active" (click)="closeMobileMenu()">Listing Review</a>
+          @if (adminService.hasPermission(permissions.SUPPORT_READ)) {
+            <section class="nav-group" aria-labelledby="admin-nav-customer-operations">
+              <p id="admin-nav-customer-operations" class="nav-group-label">Customer Operations</p>
+              <a routerLink="/admin/support" routerLinkActive="active" (click)="closeMobileMenu()">Support</a>
+            </section>
           }
-          @if (categoryGuidanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
-            <a routerLink="/admin/category-guidance" routerLinkActive="active" (click)="closeMobileMenu()">Category Guidance</a>
+          @if (adminService.hasPermission(permissions.SYSTEM_READ)
+              || (adminSearchMaintenanceEnabled && adminService.hasRole('SUPER_ADMIN'))) {
+            <section class="nav-group" aria-labelledby="admin-nav-operations">
+              <p id="admin-nav-operations" class="nav-group-label">Operations</p>
+              @if (adminService.hasPermission(permissions.SYSTEM_READ)) {
+                <a routerLink="/admin/system" routerLinkActive="active" (click)="closeMobileMenu()">System</a>
+              }
+              @if (adminSearchMaintenanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
+                <a routerLink="/admin/search-maintenance" routerLinkActive="active" (click)="closeMobileMenu()">Search Maintenance</a>
+              }
+            </section>
           }
-          @if (adminSearchMaintenanceEnabled && adminService.hasRole('SUPER_ADMIN')) {
-            <a routerLink="/admin/search-maintenance" routerLinkActive="active" (click)="closeMobileMenu()">Search Maintenance</a>
+          @if (adminService.hasPermission(permissions.GOVERNANCE_READ)) {
+            <section class="nav-group" aria-labelledby="admin-nav-governance">
+              <p id="admin-nav-governance" class="nav-group-label">Governance</p>
+              <a routerLink="/admin/governance" routerLinkActive="active" (click)="closeMobileMenu()">Admins, roles &amp; approvals</a>
+            </section>
           }
         </nav>
         <a routerLink="/" class="back-link" (click)="closeMobileMenu()">Marketplace</a>
@@ -113,7 +179,24 @@ import {
     nav {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.85rem;
+      overflow-y: auto;
+    }
+
+    .nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .nav-group-label {
+      margin: 0;
+      padding: 0 0.75rem 0.2rem;
+      color: var(--color-text-muted);
+      font-size: 0.68rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     nav a,
@@ -255,6 +338,29 @@ export class AdminLayoutComponent {
   readonly mobileMenuOpen = signal(false);
   readonly categoryGuidanceEnabled = environment.features.categoryGuidance;
   readonly adminSearchMaintenanceEnabled = inject(ADMIN_SEARCH_MAINTENANCE_ENABLED);
+
+  hasAnyPermission(...permissions: (typeof ADMIN_PERMISSIONS)[keyof typeof ADMIN_PERMISSIONS][]): boolean {
+    return permissions.some(permission => this.adminService.hasPermission(permission));
+  }
+
+  hasMarketplaceNavigation(): boolean {
+    return this.hasAnyPermission(
+      this.permissions.USER_READ,
+      this.permissions.BUSINESS_READ,
+      this.permissions.BUSINESS_APPLICATION_READ,
+      this.permissions.LISTING_MODERATION_READ,
+      this.permissions.CATALOG_READ,
+    ) || (this.categoryGuidanceEnabled && this.adminService.hasRole('SUPER_ADMIN'));
+  }
+
+  hasCommerceNavigation(): boolean {
+    return this.hasAnyPermission(
+      this.permissions.ORDER_READ,
+      this.permissions.DISPUTE_READ,
+      this.permissions.FINANCE_READ,
+      this.permissions.REFUND_READ,
+    );
+  }
 
   closeMobileMenu(): void {
     this.mobileMenuOpen.set(false);

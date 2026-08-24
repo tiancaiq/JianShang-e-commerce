@@ -132,12 +132,54 @@ public class AdminBusinessService {
 
     @Transactional
     public EnforcementPreview createPreview(String businessId, CreateEnforcementRequest request) {
-        return create(businessId, request, true);
+        return create(businessId, request, null, true);
     }
 
     @Transactional
     public Result createConfirmed(String businessId, CreateEnforcementRequest request) {
-        return create(businessId, request, false).proposedAction();
+        return create(businessId, request, null, false).proposedAction();
+    }
+
+    @Transactional
+    public EnforcementPreview createCasePreview(String businessId, CreateEnforcementRequest request, String caseId) {
+        return create(businessId, request, caseId, true);
+    }
+
+    @Transactional
+    public Result createCaseConfirmed(String businessId, CreateEnforcementRequest request, String caseId) {
+        return create(businessId, request, caseId, false).proposedAction();
+    }
+
+    @Transactional
+    // Previews an appeal replacement while treating its still-active original action as revoked.
+    public EnforcementPreview createAppealReplacementPreview(String rawBusinessId,
+            String originalEnforcementId, CreateEnforcementRequest request, String caseId) {
+        User actor = authService.ensureUserEntity();
+        if (request == null || request.actionType() == null) {
+            throw new EnforcementExceptions.Validation("Action type is required.");
+        }
+        authorizationService.requirePermission(actor, switch (request.actionType()) {
+            case RESTRICT -> AdminPermission.BUSINESS_RESTRICT;
+            case SUSPEND -> AdminPermission.BUSINESS_SUSPEND;
+            case BAN -> AdminPermission.BUSINESS_BAN;
+        });
+        String businessId = businessId(rawBusinessId);
+        BusinessRow target = findBusiness(businessId);
+        Set<Scope> scopes = request.actionType() == ActionType.BAN
+                ? OPERATIONAL_SCOPES : operationalScopes(request.scopes());
+        List<Result> existing = enforcementService.actions(TargetType.BUSINESS, businessId).stream()
+                .filter(this::active)
+                .filter(action -> !action.enforcementActionId().equals(originalEnforcementId))
+                .filter(action -> action.scopes().stream().anyMatch(scopes::contains)).toList();
+        Result proposed = enforcementService.previewReplacement(new CreateCommand(
+                TargetType.BUSINESS, businessId, request.actionType(), scopes, request.reasonCode(),
+                request.reason(), caseId, request.effectiveAt(), request.expiresAt(),
+                request.expectedBusinessVersion(), null, safeMetadata(request.safeMetadata()), true),
+                originalEnforcementId);
+        return new EnforcementPreview(proposed, existing, proposed.effectiveRestrictions(),
+                warnings(proposed, existing), request.expiresAt() == null,
+                request.expectedBusinessVersion() != null && target.version() == request.expectedBusinessVersion(),
+                impactSummary(scopes));
     }
 
     @Transactional
@@ -151,7 +193,8 @@ public class AdminBusinessService {
         return revoke(businessId, enforcementId, request, false).proposedAction();
     }
 
-    private EnforcementPreview create(String rawBusinessId, CreateEnforcementRequest request, boolean dryRun) {
+    private EnforcementPreview create(String rawBusinessId, CreateEnforcementRequest request, String caseId,
+                                      boolean dryRun) {
         User actor = authService.ensureUserEntity();
         if (request == null || request.actionType() == null) {
             throw new EnforcementExceptions.Validation("Action type is required.");
@@ -168,7 +211,7 @@ public class AdminBusinessService {
         List<Result> existing = enforcementService.actions(TargetType.BUSINESS, businessId).stream()
                 .filter(this::active).filter(action -> action.scopes().stream().anyMatch(scopes::contains)).toList();
         Result proposed = enforcementService.create(new CreateCommand(TargetType.BUSINESS, businessId,
-                request.actionType(), scopes, request.reasonCode(), request.reason(), null, request.effectiveAt(),
+                request.actionType(), scopes, request.reasonCode(), request.reason(), caseId, request.effectiveAt(),
                 request.expiresAt(), request.expectedBusinessVersion(), request.idempotencyKey(),
                 safeMetadata(request.safeMetadata()), dryRun));
         boolean versionCurrent = request.expectedBusinessVersion() != null

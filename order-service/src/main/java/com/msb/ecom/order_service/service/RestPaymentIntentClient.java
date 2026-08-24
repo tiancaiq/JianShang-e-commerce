@@ -85,6 +85,27 @@ public class RestPaymentIntentClient implements PaymentIntentClient {
     }
 
     @Override
+    public PaymentIntent get(String paymentIntentId, String buyerId) {
+        try {
+            PaymentIntent response = client.get()
+                    .uri(uri -> uri.path("/api/v1/internal/payment-intents/{paymentIntentId}")
+                            .queryParam("buyerId", buyerId)
+                            .build(paymentIntentId))
+                    .header(INTERNAL_TOKEN_HEADER, internalServiceToken)
+                    .retrieve()
+                    .body(PaymentIntent.class);
+            if (response == null) {
+                throw unavailable();
+            }
+            return response;
+        } catch (CheckoutException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            throw unavailable();
+        }
+    }
+
+    @Override
     public DemoCompletion completeDemo(
             String paymentIntentId,
             String buyerId,

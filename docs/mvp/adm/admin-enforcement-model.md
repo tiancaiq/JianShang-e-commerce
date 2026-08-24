@@ -125,9 +125,21 @@ listings; business actions do not affect listings, orders, or payouts; listing
 actions do not affect sellers.
 
 User, business, and listing runtime integration is implemented without
-cross-target cascades. The next admin milestone is `ADM-REP-00/01/02`; reports,
-investigation cases, appeals, disputes, payout enforcement, and AI automation
-remain deferred and are not enabled by this foundation.
+cross-target cascades. `ADM-REP-00/01/02` adds a separate Auth-owned report and
+human-triage ledger. `ADM-REP-03` adds a distinct Auth-owned investigation case
+ledger whose `READY_FOR_ACTION` state has no automatic effect and only admits
+the explicit proposal workflow.
+Reports never call enforcement mutation services. `ADM-REP-04` ready-case
+proposals orchestrate these same target-specific dry-run and creation services,
+preserve `caseId`, permissions, idempotency, versions, and normal enforcement
+events, and add only Auth-owned proposal/link history. See
+[admin-case-enforcement.md](admin-case-enforcement.md). `ADM-APL-00/01/02`
+adds an Auth-owned appeal and recommendation ledger keyed to one enforcement
+action. Recommendations cannot mutate enforcement. `ADM-APL-03` separately
+executes preview-bound final uphold/revoke/replace outcomes through these same
+target-owner boundaries while preserving the original action and case history.
+See [admin-appeals.md](admin-appeals.md). Disputes, payout enforcement, and AI
+automation remain deferred.
 
 ## Business runtime activation (ADM-BUS-04/05)
 

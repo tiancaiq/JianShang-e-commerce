@@ -21,7 +21,7 @@ test.describe.serial('ADM-USER-01/02 runtime enforcement', () => {
       await openUserFromSearch(admin, BUYER_ID, 'Jon Bell');
       await applyEnforcement(admin, 'USER_BUYING', 'Buying boundary release verification.');
       await expect(admin.getByRole('region', { name: 'Enforcement preview' })).toHaveCount(0);
-      await expect(admin.getByText('Enforcement created', { exact: true })).toBeVisible();
+      await expect(admin.getByText('Enforcement created', { exact: true }).last()).toBeVisible();
       await expect(admin.locator('.scope-row').filter({ hasText: 'Buying' }).getByText(/Blocked.*RESTRICT/)).toBeVisible();
 
       await buyer.goto(`/listings/${LISTING_ID}`);

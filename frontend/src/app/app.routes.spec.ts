@@ -2,6 +2,7 @@ import {
   adminSearchMaintenanceRoute,
   agentMessageRoutes,
   buyerAddressesRoute,
+  buyerOrderRoutes,
   businessOrderRoutes,
   cartRoute,
   categoryGuidanceRoute,
@@ -92,6 +93,11 @@ describe('app routes', () => {
       path: 'dashboard',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'analytics',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.analytics.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: 'users',
       canActivate: [jasmine.any(Function)],
       data: { adminPermission: 'admin.user.read' },
@@ -102,10 +108,53 @@ describe('app routes', () => {
       data: { adminPermission: 'admin.user.read' },
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'orders',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.order.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'orders/:orderId',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.order.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'support',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.support.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'support/:ticketId',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.support.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'system',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.system.read', systemSection: 'summary' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'system/search',
+      data: { adminPermission: 'admin.system.read', systemSection: 'search' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'system/features',
+      data: { adminPermission: 'admin.feature.read', systemSection: 'features' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: 'business-applications/:id',
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: 'listings/moderation/:caseId',
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'cases',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.report.read' },
+    }));
+    expect(adminRoute?.children).toContain(jasmine.objectContaining({
+      path: 'cases/:caseId',
+      canActivate: [jasmine.any(Function)],
+      data: { adminPermission: 'admin.report.read' },
     }));
     expect(adminRoute?.children).toContain(jasmine.objectContaining({
       path: 'category-guidance',
@@ -139,6 +188,14 @@ describe('app routes', () => {
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
       path: 'account/profile',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'support',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'support/:ticketId',
       canActivate: [authGuard],
     }));
     expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
@@ -268,6 +325,30 @@ describe('app routes', () => {
     expect(detail?.redirectTo).toBe('/marketplace');
     expect(review?.loadComponent).toBeUndefined();
     expect(detail?.loadComponent).toBeUndefined();
+  });
+
+  it('keeps dispute deep links distinct from disabled buyer order routes', () => {
+    expect(buyerOrderRoutes(false)).toEqual([
+      jasmine.objectContaining({ path: 'account/orders', pathMatch: 'full' }),
+      jasmine.objectContaining({ path: 'account/orders/:orderId', pathMatch: 'full' }),
+    ]);
+
+    const marketplaceRoute = routes.find(route => route.path === '');
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/orders/:orderId/disputes/new',
+      canActivate: [authGuard],
+    }));
+    expect(marketplaceRoute?.children).toContain(jasmine.objectContaining({
+      path: 'account/disputes/:disputeId',
+      canActivate: [authGuard],
+    }));
+  });
+
+  it('uses the seller portal prefix for the participant dispute route', () => {
+    const sellerRoute = routes.find(route => route.path === 'seller');
+    expect(sellerRoute?.children).toContain(jasmine.objectContaining({
+      path: 'businesses/:businessId/disputes/:disputeId',
+    }));
   });
 
   it('allows a cart-only build without exposing checkout routes', () => {
@@ -416,6 +497,12 @@ describe('app routes', () => {
         expect(v2DemoSegments.has(firstSegment(route.redirectTo as string | undefined)))
           .withContext(`redirect "${route.redirectTo}" should not point to V2 demo UI in MVP navigation`)
           .toBeFalse();
+
+        // Admin operations have separate, approved payment/refund routes; this
+        // assertion only fences the legacy buyer-facing V2 demo surfaces.
+        if (route.path === 'admin') {
+          continue;
+        }
 
         if (route.children) {
           visit(route.children);

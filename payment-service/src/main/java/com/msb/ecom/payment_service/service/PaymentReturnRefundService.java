@@ -22,12 +22,13 @@ public class PaymentReturnRefundService{
   if(req==null||blank(req.returnId())||blank(req.orderId())||blank(req.businessOrderId())||req.amount()==null||req.amount().signum()<=0||!"USD".equals(req.currency())||blank(key))
    throw err(HttpStatus.BAD_REQUEST,"PAYMENT_RETURN_REFUND_INVALID","A complete return refund command is required.");
   var keyed=refunds.findByKey(key).orElse(null);if(keyed!=null)return replay(keyed,intentId,req);
-  return tx.execute(s->execute(intentId,key,req,correlation==null?ids.next():correlation,clock.instant()));
+ return tx.execute(s->execute(intentId,key,req,correlation==null?ids.next():correlation,clock.instant()));
  }
  private ReturnRefundResponse execute(String intentId,String key,CreateReturnRefundRequest req,String correlation,Instant now){
-  var existing=refunds.findByReturn(req.returnId()).orElse(null);if(existing!=null)return replay(existing,intentId,req);
+  // Acquire the shared payment lock before any consistent read so a waiter sees the winning refund commit.
   var intent=intents.lockIntent(intentId).orElseThrow(()->err(HttpStatus.NOT_FOUND,"PAYMENT_INTENT_NOT_FOUND","Payment intent was not found."));
-  BigDecimal alreadyRefunded=refunds.completedAmount(intentId);
+  var existing=refunds.findByReturn(req.returnId()).orElse(null);if(existing!=null)return replay(existing,intentId,req);
+  BigDecimal alreadyRefunded=intents.reservedAmount(intentId);
   if(!"SUCCEEDED".equals(intent.status())||!req.currency().equals(intent.currency())
     ||req.amount().compareTo(intent.amount())>0
     ||alreadyRefunded.add(req.amount()).compareTo(intent.amount())>0)

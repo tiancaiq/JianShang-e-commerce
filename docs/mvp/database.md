@@ -1111,7 +1111,47 @@ Append-only action, reason, actor, and created time.
 
 ### `reports`
 
-Reporter, subject, category, description, linked case, and status.
+Auth Service owns the `ADM-REP-00/01/02` cross-domain report ledger. `reports`
+stores the server-derived reporter reference, target type/reference, safe target
+label, compatible reason, bounded plain-text description, deterministic/admin
+severity, operational/reserved status, assignment, immutable allow-listed JSON
+snapshot, empty allow-listed evidence metadata, optimistic version, disposition,
+correlation ID, and timestamps. Target/admin/reporter IDs deliberately have no
+cross-service or lifecycle-coupled foreign keys.
+
+`report_events` is append-only and locally references its report with
+`ON DELETE RESTRICT`. `report_submission_dedup` provides a concurrent-safe
+24-hour reporter/target/reason slot. `report_rate_limit_buckets` provides
+transactional five-per-hour and twenty-per-day safeguards. The report migration
+is `V202608150400__create_marketplace_reporting.sql`; it also activates the
+already-reserved report permissions. See
+`docs/mvp/adm/admin-reporting.md` for lifecycle and privacy rules.
+
+### `investigation_cases`
+
+Auth Service owns the `ADM-REP-03` investigation aggregate. Forward migration
+`V202608150500__create_investigation_cases.sql` adds `investigation_cases`,
+unique current `investigation_case_reports`, typed `investigation_case_targets`,
+append-only `investigation_case_notes`, immutable validated
+`investigation_case_evidence`, and append-only `investigation_case_events`.
+Only the local report relationship has a foreign key; USER/BUSINESS/LISTING
+targets remain opaque cross-service references.
+
+Case status is `OPEN|UNDER_INVESTIGATION|READY_FOR_ACTION|CLOSED_NO_ACTION|CLOSED_ACTIONED`.
+Inbox, severity, primary-target, relationship, and time
+indexes support stable server-side search. The report unique key prevents a
+current report from belonging to two cases. Notes use a case/admin/idempotency
+unique key; evidence uses a case/type/reference unique key. Case rows and
+evidence/notes/events are never hard-deleted by application commands. See
+`docs/mvp/adm/admin-investigation-cases.md`.
+
+Forward migration `V202608160100__create_case_linked_enforcement.sql` adds
+`case_enforcement_proposals`, normalized `case_enforcement_proposal_scopes`,
+and immutable `case_enforcement_links`. Proposal status is
+`DRAFT|VALIDATED|EXECUTED|FAILED|CANCELLED`; versions, dry-run target versions,
+and a pinned execution key protect concurrent/retried execution. Resulting
+USER/BUSINESS/LISTING enforcement IDs are opaque references with no
+cross-service foreign key. See `docs/mvp/adm/admin-case-enforcement.md`.
 
 ### `suspensions`
 
@@ -1566,3 +1606,206 @@ Auth Service continues to use the ADM-ENF-00 `enforcement_actions`, scope, event
 The existing Product-owned `enforcement_actions`, `enforcement_action_scopes`, `enforcement_events`, and `enforcement_command_idempotency` tables are authoritative for reversible listing enforcement. `target_type=LISTING` uses `LISTING_PUBLIC_VISIBILITY` and `LISTING_PURCHASABILITY`; no listing lifecycle column is rewritten. Existing target/effective-state and scope indexes support public anti-join filtering and bounded internal batch evaluation, so ADM-LIST-06 adds no Product schema migration.
 
 Auth migration `V202608150300__activate_listing_enforcement_permissions.sql` activates `admin.listing.suspend` and `admin.listing.reinstate` without altering existing role grants.
+
+## ADM-APL-00/01/02/03 appeal storage
+
+Auth migration `V202608160200__create_marketplace_appeals.sql` adds the
+Auth-owned `appeals`, normalized `appeal_replacement_scopes`, append-only
+`appeal_review_notes`, and append-only `appeal_events` tables. The appeal row
+stores a stable enforcement action ID and derived target/appellant context but
+has no cross-service foreign key. A unique enforcement-action key enforces one
+appeal per action. USER/BUSINESS context is resolved locally; listing context
+is read through Product's token-protected API. Recommendation states and
+replacement proposals remain non-executing review data.
+
+Auth forward migration
+`V202608260100__complete_marketplace_appeal_resolution.sql` activates
+`admin.appeal.resolve` and extends `appeals` with:
+
+- final `UPHELD`, `MODIFIED`, and `REVOKED` status support plus `resolved_at`;
+- server-derived executor ID/display name and a bounded safe resolution
+  summary;
+- a unique resolution idempotency key and request hash;
+- the replacement enforcement action reference, if any; and
+- the original enforcement and target versions confirmed by execution.
+
+It adds `(resolved_at,status,id)` for bounded final-outcome analytics and
+creates `appeal_resolution_previews`, a short-lived executor/appeal-bound token
+ledger containing only the request fingerprint, optional Product owner
+confirmation token, and expiry. Append-only `appeal_events` accepts the three
+final success event types and normalized `APPEAL_RESOLUTION_FAILED` audit type.
+USER/BUSINESS finalization and enforcement mutation remain inside the Auth
+schema and transaction.
+
+Auth forward migration
+`V202608260200__reserve_appeal_resolution_commands.sql` adds
+`appeal_resolution_commands`, a durable globally unique idempotency-key
+reservation with appeal ID and request hash. The reservation is committed
+before a Product owner command so two appeals cannot race the same key and an
+Auth rollback cannot orphan an unclaimable Product mutation. It stores command
+identity only, not copied enforcement or Product state.
+
+Product forward migration
+`V202608260100__create_listing_appeal_resolution_commands.sql` creates
+`listing_appeal_resolution_commands`. Its primary key is the idempotency key and
+its unique appeal ID permits one Product resolution per appeal. It stores the
+outcome, request fingerprint, original/replacement action references, confirmed
+enforcement/listing versions, executor, correlation ID, and completion time.
+Both action foreign keys are Product-local. Product executes LISTING revoke or
+revoke-plus-replacement in one local transaction; the durable command allows a
+completed owner mutation to be replayed while Auth finalizes its own appeal
+state. No cross-service foreign key, copied enforcement row, or distributed
+transaction is introduced.
+
+Product forward migration
+`V202608260200__allow_upheld_listing_appeal_resolutions.sql` extends the owner
+command outcome constraint to `UPHELD`. This makes no-action finalization a
+state-pinned Product command too: Product locks the listing and complete active
+enforcement set, validates the confirmation fingerprint, and records durable
+completion without revoking or creating an action.
+
+## ADM-ORD-01/02 order administration storage
+
+Order migration `V15__create_admin_order_operations.sql` keeps `orders` and its
+existing snapshots authoritative. It adds only query indexes for admin status,
+payment, created-time, business, and listing access patterns; actor/reason
+fields on the existing cancellation request; an admin-command idempotency
+table; and append-only `order_admin_events`. No admin status, override status,
+or copied order table is introduced.
+
+Auth migration `V202608160300__activate_admin_order_operations.sql` activates
+`admin.order.read` and `admin.order.cancel`, reserves `admin.order.manage`, and
+maps the approved read/cancel roles. Payment, Inventory, Product, and Auth data
+remain in their owning schemas and are accessed through authenticated APIs.
+
+## ADM-DSP-00/01/02 dispute storage
+
+Order migration `V16__create_order_disputes.sql` adds the Order-owned
+`order_disputes` aggregate, item scope, append-only participant statements,
+validated evidence references, admin-only notes, normalized events, and
+actor-scoped command idempotency. A generated active business-order-group key
+enforces one non-final dispute for the supported transaction segment while
+retaining immutable final history. Foreign keys are strictly service-local;
+Auth, Product, Payment, and Inventory are never joined.
+
+Resolution fields store a decision or recommendation only. There is no copied
+payment table, financial ledger, payout hold, provider reference, or refund
+execution record in the dispute schema. Auth migration
+`V202608190100__activate_admin_dispute_operations.sql` activates the four
+granular dispute permissions and least-privilege role mappings.
+
+## ADM-FIN-00/01/02 finance administration storage
+
+Payment migration `V8__add_admin_financial_operations.sql` extends the existing `payment_refunds` table forward-only for human-admin full/partial operations, dispute/order linkage, safe failure and reconciliation metadata, actor attribution, timestamps, versioning, and queue indexes. It broadens existing attempt/history constraints for truthful pending, processing, succeeded, failed, and uncertain outcomes and adds `payment_admin_refund_commands` for actor-scoped request-hash idempotency.
+
+`payment_intents` remains the lock and optimistic-version boundary. Refund totals are calculated across successful `payment_refunds` and `payment_return_refunds`, with standard pending/processing amounts reserved. No copied Order, dispute, identity, payout, or card data is stored. Order migration is unnecessary: its existing authoritative tables are read through a bounded internal projection. Auth migration `V202608200100__activate_admin_finance_operations.sql` adds and maps the three finance permissions.
+
+## ADM-SUP-00/01 support operations storage
+
+Auth migration `V202608210100__create_support_operations.sql` adds Auth-owned
+`support_tickets`, append-only `support_messages`, private append-only
+`support_internal_notes`, normalized `support_ticket_links`, append-only
+`support_escalations`, append-only `support_ticket_events`, and
+actor/operation-scoped `support_command_idempotency`. The ticket row is the
+optimistic version boundary and retains final resolution history; no
+hard-delete path exists.
+
+Only requester and ticket-child relationships use Auth-schema foreign keys.
+Typed entity links deliberately have no cross-service foreign keys. Indexes
+cover requester history, status/assignment/priority inbox reads, category,
+duplicate fingerprint cooldown, linked-target reverse lookup, chronological
+messages/notes/escalations/events, and idempotency expiry. Order, Product,
+Payment, dispute, report/case, and enforcement data remain authoritative in
+their existing owners.
+
+## ADM-CAT-01/02 catalog governance storage
+
+Product migration `V202608220100__create_admin_catalog_governance.sql`
+extends existing category/attribute tables, adds
+`listings.category_rule_version`, and creates
+`category_attribute_options`, immutable `category_rule_versions`,
+`category_seller_guidance`, append-only `catalog_events`, and
+`catalog_command_idempotency`. It maps legacy `INACTIVE` to `DISABLED`, maps
+attribute `STRING` to `TEXT`, bootstraps rule version 1, and preserves every
+existing category/listing ID. All foreign keys remain Product-local.
+
+Auth migration `V202608220100__activate_admin_catalog_governance.sql` adds the
+four canonical catalog permissions and `CATALOG_ADMIN` mappings. No Order,
+Payment, identity, or enforcement records are copied or mutated. See
+[adm/admin-catalog-governance.md](adm/admin-catalog-governance.md).
+
+## ADM-SYS-01/02 system operations storage
+
+Auth migration `V202608230100__activate_admin_system_operations.sql` activates
+four implemented permissions, adds `OPERATIONS_ADMIN`, and creates
+`system_operation_commands` plus append-only `system_operation_events` for
+actor-scoped request-hash idempotency and normalized request audit. It stores no
+copied job, outbox, payment, refund, reservation, listing, or feature state.
+
+Product migration
+`V202608230100__support_bounded_system_search_recovery.sql` adds correlation and
+indexes failed projection and outbox reads. Forward migration
+`V202608230200__restore_projection_intent_uniqueness.sql` restores the normal
+listing/version uniqueness fence and adds a serialized replay sequence so
+bounded admin reindexes preserve both intent idempotency and recovery history.
+Payment migration `V9__index_system_operations_signals.sql`
+adds only a reconciliation read index. Order and Inventory require no schema
+change. See [adm/admin-system-operations.md](adm/admin-system-operations.md).
+
+## ADM-GOV-01/02 admin governance storage
+
+Auth migration `V202608240100__create_admin_governance.sql` adds the canonical
+governance permissions and `GOVERNANCE_ADMIN`, then creates:
+
+- `admin_governance_state`, the serialized optimistic authority boundary;
+- historical, time-aware `admin_role_assignments`, backfilled from existing
+  admin `user_roles` without removing legacy access;
+- typed/versioned `sensitive_action_policies` with the initial SUPER_ADMIN,
+  large-refund, and high-impact category-disable policies;
+- `admin_approval_requests` and append-only `admin_approval_decisions`;
+- append-only `admin_governance_events`.
+
+Indexes cover effective assignment lookup by user/role/window, recent admin
+history, paginated approval status/action/requester/expiry reads, distinct
+decisions, and bounded event timelines. Domain target IDs are stable references
+without cross-service foreign keys. Safe JSON contains only allow-listed action
+preview fields; raw provider/domain payloads are not copied.
+
+Forward migration
+`V202608240200__strengthen_admin_governance_idempotency.sql` adds unique,
+fingerprinted replay boundaries for role revocation and approval cancellation.
+Grant requests, approval requests/decisions/execution, and downstream owner
+commands have their own existing keys/fingerprints. Expiration correctness is
+query-time and does not rely on a cleanup scheduler. See
+[adm/admin-governance.md](adm/admin-governance.md).
+
+## ADM-ANL-01 analytics access paths
+
+Analytics creates no source-of-truth or copied-domain table. Auth migration
+`V202608250100__activate_admin_analytics.sql` activates
+`admin.analytics.read` for `SUPER_ADMIN`, `PLATFORM_ADMIN`,
+`OPERATIONS_ADMIN`, and `AUDITOR`, then adds bounded time/event access paths for
+reports, report events, cases, enforcement, appeals, support tickets, and real
+support-admin first responses.
+
+Final appeal flows use the `appeals.resolved_at` and final-status access path
+added by Auth migration
+`V202608260100__complete_marketplace_appeal_resolution.sql`. Queries count only
+`UPHELD`, `MODIFIED`, and `REVOKED` in the half-open analytics window;
+recommendation and pending rows remain outside the finalized denominator.
+
+Owner-local forward indexes are:
+
+- Order `V17__index_admin_analytics.sql` for bounded dispute and fulfillment
+  analytics not already covered by ADM-ORD indexes;
+- Payment `V10__index_admin_analytics.sql` for terminal payment/refund outcome
+  time and return-refund reads;
+- Product `V202608250100__index_admin_analytics.sql` for listing creation,
+  moderation resolution/decisions, and listing-enforcement creation/active
+  evaluation.
+
+All queries execute in the owning schema using server-side `COUNT`, `SUM`,
+`AVG`, and bounded `GROUP BY`. Cross-service IDs are never joined in SQL. No
+`analytics_orders`, `analytics_reports`, `analytics_refunds`, warehouse,
+materialized dashboard, or Redis cache is introduced. See
+[adm/admin-analytics.md](adm/admin-analytics.md).

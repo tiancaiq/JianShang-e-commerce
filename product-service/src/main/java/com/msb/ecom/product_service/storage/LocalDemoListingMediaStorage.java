@@ -33,4 +33,9 @@ public class LocalDemoListingMediaStorage implements ListingMediaStorage {
         return new byte[0];
     }
 
+    @Override
+    public void verifyReadable(String objectKey) {
+        // Local demo mode has no object bytes to verify.
+    }
+
 }

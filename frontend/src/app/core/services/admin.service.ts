@@ -9,7 +9,7 @@ import {
   PlatformAdmin,
 } from '../models/admin.model';
 import { ApiDataResponse } from '../models/auth.model';
-import { AdminPermission, AdminRole, ADMIN_PERMISSIONS } from '../security/admin-permissions';
+import { AdminPermission, AdminRole } from '../security/admin-permissions';
 
 @Injectable({ providedIn: 'root' })
 export class AdminService {
@@ -61,8 +61,8 @@ function normalizeAdmin(admin: Partial<PlatformAdmin> & Pick<PlatformAdmin, 'use
   return {
     userId: admin.userId,
     role: admin.role,
-    roles: admin.roles ?? ['SUPER_ADMIN'],
-    permissions: admin.permissions ?? Object.values(ADMIN_PERMISSIONS),
-    accountState: admin.accountState ?? 'ACTIVE',
+    roles: admin.roles ?? [],
+    permissions: admin.permissions ?? [],
+    accountState: admin.accountState ?? 'SUSPENDED',
   };
 }

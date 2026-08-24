@@ -2833,17 +2833,39 @@ PATCH /notification-preferences
 ## 14. Administration and Support
 
 The original MVP admin boundary includes business application review and
-listing moderation. The completed enforcement release train additionally
-implements the target-specific user, business, and listing routes documented
-in this contract. Reports, investigation/support cases, appeals, chat evidence
-review, payment/order/finance operations, payout enforcement, advanced
-trust/disputes, and AI moderation assistance remain deferred. The next planned
-admin milestone is `ADM-REP-00/01/02`; this cleanup does not implement it.
+listing moderation. The enforcement release train implements target-specific
+user, business, and listing routes. `ADM-REP-00/01/02` adds authenticated
+report submission and separate human Trust & Safety triage. `ADM-REP-03` adds
+Auth-owned investigation cases without enforcement. Support cases, appeals,
+chat evidence, finance/payout operations, advanced
+disputes, and AI moderation assistance remain deferred.
 
 ```text
-GET  /admin/reports
-POST /admin/reports/{reportId}/claim
-POST /admin/reports/{reportId}/resolve
+POST  /api/v1/reports
+
+GET   /api/v1/admin/reports
+GET   /api/v1/admin/reports/{reportId}
+POST  /api/v1/admin/reports/{reportId}/claim
+POST  /api/v1/admin/reports/{reportId}/release
+PATCH /api/v1/admin/reports/{reportId}/severity
+POST  /api/v1/admin/reports/{reportId}/dismiss
+POST  /api/v1/admin/reports/{reportId}/ready-for-investigation
+POST  /api/v1/admin/reports/{reportId}/investigation-case
+
+GET   /api/v1/admin/cases
+GET   /api/v1/admin/cases/{caseId}
+POST  /api/v1/admin/cases/{caseId}/claim
+POST  /api/v1/admin/cases/{caseId}/release
+POST  /api/v1/admin/cases/{caseId}/start
+POST  /api/v1/admin/cases/{caseId}/reports
+POST  /api/v1/admin/cases/{caseId}/reports/{reportId}/unlink
+POST  /api/v1/admin/cases/{caseId}/targets
+POST  /api/v1/admin/cases/{caseId}/targets/{targetType}/{targetId}/unlink
+POST  /api/v1/admin/cases/{caseId}/notes
+POST  /api/v1/admin/cases/{caseId}/evidence
+PATCH /api/v1/admin/cases/{caseId}/severity
+POST  /api/v1/admin/cases/{caseId}/ready-for-action
+POST  /api/v1/admin/cases/{caseId}/close-no-action
 
 GET  /admin/support-cases
 POST /admin/support-cases/{caseId}/notes
@@ -2852,13 +2874,63 @@ POST /admin/support-cases/{caseId}/responses
 GET  /admin/audit-logs
 ```
 
-Admin list endpoints require bounded filters and server-side pagination. The
-current user and business administration APIs use bounded `page`/`size`
-pagination; future unbounded collections should use the approved cursor
-contract unless their target slice explicitly specifies otherwise.
-Future listing-report admin reads should filter `GET /admin/reports` to listing
-subjects rather than mixing user reports into the listing submission moderation
-queue.
+Admin report search accepts `unresolved=true` only as a bounded status union of
+`SUBMITTED`, `UNDER_TRIAGE`, and `READY_FOR_INVESTIGATION`. It composes with the
+existing assignment filter and does not include resolved/read-only
+`LINKED_TO_CASE` reports.
+
+Public submission accepts only `targetType`, `targetId`, `reasonCode`, and
+optional bounded `description`; identity and snapshots are server-derived. It
+returns only `reportId`, `status`, `createdAt`, and `supportReference`. Supported
+targets are `USER`, `BUSINESS`, and `LISTING`. Duplicate reporter/target/reason
+submissions inside 24 hours return `409 REPORT_ALREADY_SUBMITTED`.
+
+The inbox supports `q`, `status`, `targetType`, `reasonCode`, `severity`,
+`assignment`, `createdFrom`, `createdTo`, `page`, `size`, and stable `sort`.
+Assignment is `UNASSIGNED|ASSIGNED_TO_ME|ASSIGNED|ALL`. Mutations carry
+`expectedVersion`; stale state returns `409 REPORT_VERSION_CONFLICT`. Claim and
+release require `admin.report.assign`; reads require `admin.report.read`;
+severity, dismiss, and ready require `admin.report.resolve` and assignment to
+the current admin. Detail returns report-time snapshot and current target as
+separate values, bounded same-target reports, safe active-enforcement context,
+timeline, and authoritative capabilities. No report command creates enforcement
+or changes marketplace target state. Full reason/status/privacy rules are in
+`docs/mvp/adm/admin-reporting.md`.
+
+Case search supports `q`, operational `status`, `severity`, `targetType`,
+`assignment`, created/updated ranges, pagination, and stable sort. Reads require
+`admin.report.read`; claim/release require `admin.report.assign`; investigation
+mutations require `admin.report.investigate`; conclusions require
+`admin.report.resolve`. Creating from a report derives the primary target and
+defaults severity to the report when omitted. Report link/unlink validates both
+expected versions atomically. Notes require a bounded idempotency key. Evidence
+accepts only validated report snapshots, linked-target snapshots, or existing
+enforcement context. `READY_FOR_ACTION` enables only the explicit case-linked
+enforcement plan; `CLOSED_NO_ACTION` and `CLOSED_ACTIONED` are read-only.
+
+Case-linked enforcement endpoints are:
+
+```text
+POST  /api/v1/admin/cases/{caseId}/enforcement-proposals
+PATCH /api/v1/admin/cases/{caseId}/enforcement-proposals/{proposalId}
+POST  /api/v1/admin/cases/{caseId}/enforcement-proposals/{proposalId}/dry-run
+POST  /api/v1/admin/cases/{caseId}/enforcement-proposals/{proposalId}/execute
+POST  /api/v1/admin/cases/{caseId}/enforcement-proposals/{proposalId}/cancel
+POST  /api/v1/admin/cases/{caseId}/close-actioned
+```
+
+Creation, editing, cancellation, dry run, execution, and closure require the
+assigned resolver and `admin.report.resolve`. Dry-run and execution also
+compose the target-specific enforcement permission. Execute accepts only
+expected case and proposal versions plus a stable idempotency key. Listing
+dispatch uses a token-authenticated internal Product route with the current
+admin bearer token; it is not gateway-routed. See
+`docs/mvp/adm/admin-case-enforcement.md`.
+
+A successful dry run may refresh only the proposal's bounded technical preview
+cache. It does not change the case version, append a case timeline event,
+consume the execution idempotency key, or mutate the target. Proposal edits and
+target-version changes invalidate that preview before execution.
 
 ## 15. Agent APIs and Tools (V3)
 
@@ -4230,3 +4302,410 @@ POST /api/v1/internal/listings/capabilities/evaluate-batch
 Admin reads require `admin.listing.moderation.read`; action creation requires `admin.listing.suspend`; revocation requires `admin.listing.reinstate`; timeline reads also require `admin.audit.read`. Create and revoke commits require idempotency keys and expected versions. Dry runs do not persist. The route listing ID is authoritative and an action from another listing returns `404`. Stale versions and duplicate active actions return `409`. Temporary enforcement on `REMOVED_BY_ADMIN` or another non-active listing returns `400`.
 
 Listing actions are `RESTRICT` or `SUSPEND`; listing `BAN` is invalid. `SUSPEND` deterministically expands to both listing scopes. The internal endpoint accepts 1–50 listing IDs and one or both listing scopes, requires `X-Internal-Service-Token`, and returns one explicit allowed/restricted decision per requested listing and scope without PII or staff reasons.
+
+### Enforcement appeals (`ADM-APL-00/01/02/03`)
+
+Affected-actor endpoints:
+
+```text
+GET  /api/v1/enforcements/mine
+POST /api/v1/enforcements/{enforcementActionId}/appeals
+GET  /api/v1/appeals/mine
+```
+
+The create request accepts only `reasonCode`, bounded plain-text `explanation`,
+and the currently empty safe-evidence-reference list. Actor, target, ownership,
+case, and enforcement version are derived server-side. Only active enforcement
+is eligible; duplicate action appeals return `409 APPEAL_ALREADY_EXISTS`.
+
+Admin endpoints:
+
+```text
+GET  /api/v1/admin/appeals
+GET  /api/v1/admin/appeals/{appealId}
+POST /api/v1/admin/appeals/{appealId}/claim
+POST /api/v1/admin/appeals/{appealId}/release
+POST /api/v1/admin/appeals/{appealId}/start-review
+POST /api/v1/admin/appeals/{appealId}/notes
+POST /api/v1/admin/appeals/{appealId}/review
+POST /api/v1/admin/appeals/{appealId}/resolution/dry-run
+POST /api/v1/admin/appeals/{appealId}/resolution
+```
+
+Review-stage mutations require `expectedVersion`. Notes also require a bounded
+idempotency key: replaying the same note is safe and changing its body returns
+`409 APPEAL_NOTE_IDEMPOTENCY_CONFLICT`. Review accepts an outcome of
+`UPHOLD_RECOMMENDED`, `MODIFY_RECOMMENDED`, or `REVOKE_RECOMMENDED`;
+modify also requires a target-compatible replacement proposal. These commands
+do not execute enforcement.
+
+Final resolution is a separate `admin.appeal.resolve`-protected command. Dry
+run accepts `expectedAppealVersion`, `expectedEnforcementVersion`, and
+`expectedTargetVersion`; it performs no enforcement or appeal-state mutation,
+stores only the expiring confirmation record, and returns the recommendation's
+inferred final outcome, replacement proposal when applicable, predicted
+effective enforcement, remaining restrictions, bounded impact/warnings, and a
+short-lived preview token. Execution accepts the same versions plus
+`previewToken`, a bounded `idempotencyKey`, and `confirmed=true`. The token is
+bound to the executor and the authoritative appeal, target, original action,
+replacement, and overlapping-action state. Expiry, changed state, or a stale
+version requires a new dry run.
+
+The result mapping is fixed:
+
+```text
+UPHOLD_RECOMMENDED -> UPHELD   (original action unchanged)
+MODIFY_RECOMMENDED -> MODIFIED (original revoked; stored replacement created)
+REVOKE_RECOMMENDED -> REVOKED  (original revoked)
+```
+
+`UPHELD`, `MODIFIED`, and `REVOKED` are authoritative final statuses, not
+aliases for recommendation states. Same key and same request replay the final
+detail; changed reuse returns `409 APPEAL_RESOLUTION_IDEMPOTENCY_CONFLICT`.
+The key is reserved globally in Auth before any remote owner mutation, so it
+cannot be raced across appeals. Concurrent resolution has one winner, and a
+final result is immutable. Revoke also requires the target-specific reinstate
+permission; modify additionally requires the replacement action's
+target-specific create permission. The reviewer and executor may differ, and
+the server records the actual executor. A MODIFY preview cannot outlive its
+replacement expiry, and first execution rejects a replacement that has expired
+since preview without revoking the original action.
+
+Product's LISTING owner routes are internal, token-protected, and absent from
+the gateway contract:
+
+```text
+POST /api/v1/internal/admin/appeals/{appealId}/listing-enforcement-resolution/dry-run
+POST /api/v1/internal/admin/appeals/{appealId}/listing-enforcement-resolution
+```
+
+They require the trusted executor's `admin.appeal.resolve` and
+`admin.listing.reinstate`; MODIFY also requires `admin.listing.suspend`. Product
+locks the listing and its complete enforcement set for every outcome. UPHELD
+pins the confirmed state without mutating enforcement; REVOKED and MODIFIED
+perform revoke or revoke-plus-replacement in one local transaction. Product
+stores an appeal-scoped request fingerprint so Auth can replay a completed
+owner command after a partial cross-service response failure. Recovery-only
+mode can return completed work but cannot begin a new stale mutation. No
+cross-service database access or distributed transaction is introduced.
+
+Affected-actor appeal results add only resolution time, a bounded safe outcome
+summary, and current effective target state. They omit reviewer/executor
+identity, private notes/reasons, case evidence, and correlation data. Full
+privacy and lifecycle semantics are in
+`docs/mvp/adm/admin-appeals.md`.
+
+### Admin order operations (`ADM-ORD-01/02`)
+
+```text
+GET  /api/v1/admin/orders
+GET  /api/v1/admin/orders/{orderId}
+POST /api/v1/admin/orders/{orderId}/cancel/dry-run
+POST /api/v1/admin/orders/{orderId}/cancel
+```
+
+Reads require `admin.order.read`; cancellation requires `admin.order.cancel`.
+Search supports bounded `page`/`size`, allowlisted stable sort, order query,
+buyer/business/listing IDs, order/payment/fulfillment states, and an exclusive
+created-to date range. The business-only commerce model has no seller-user
+filter. Queue responses contain no address or payment-provider PII.
+`fulfillmentStatus` is evaluated against the same cancellation-aware aggregate
+value returned by the queue. It does not match a cancelled order merely because
+one of its groups retains a historical fulfillment value such as
+`PENDING_ACCEPTANCE`.
+
+Detail returns immutable purchase-time item/store/policy/address snapshots and
+labels current listing state separately. Complete street/recipient/phone data
+also requires `admin.user.pii.read`. Payment and inventory sections expose only
+safe owner-provided fields and identify a last-known Order projection when the
+live owner is unavailable. Order Service resolves safe labels and active
+USER/BUSINESS enforcement through the Auth-owned, `admin.order.read`-protected
+`GET /api/v1/admin/order-context` service boundary; current LISTING enforcement
+remains Product-owned. The context is read-only and does not expose enforcement
+mutation controls.
+
+The cancel request is `{reasonCode, reason, expectedOrderVersion,
+idempotencyKey}`; dry run may omit the idempotency key and persists nothing.
+Execution returns `CANCELLATION_REQUESTED` and reuses the existing asynchronous
+refund/restock compensation workflow. Stable failures include
+`ORDER_NOT_FOUND`, `ORDER_ADMIN_ACTION_NOT_ALLOWED`,
+`ORDER_VERSION_CONFLICT`, `ORDER_ALREADY_CANCELLED`,
+`ORDER_FINANCIAL_STATE_UNSUPPORTED`, and `ORDER_IDEMPOTENCY_CONFLICT`.
+There is no arbitrary order-status update endpoint.
+
+### Transaction disputes (`ADM-DSP-00/01/02`)
+
+Participant APIs:
+
+```text
+POST /api/v1/orders/{orderId}/disputes
+GET  /api/v1/orders/{orderId}/disputes
+GET  /api/v1/disputes/{disputeId}
+POST /api/v1/disputes/{disputeId}/statements
+POST /api/v1/businesses/{businessId}/disputes
+GET  /api/v1/businesses/{businessId}/disputes/{disputeId}
+POST /api/v1/businesses/{businessId}/disputes/{disputeId}/statements
+```
+
+Admin APIs:
+
+```text
+GET   /api/v1/admin/disputes
+GET   /api/v1/admin/disputes/{disputeId}
+POST  /api/v1/admin/disputes/{disputeId}/claim
+POST  /api/v1/admin/disputes/{disputeId}/release
+PATCH /api/v1/admin/disputes/{disputeId}/priority
+POST  /api/v1/admin/disputes/{disputeId}/notes
+POST  /api/v1/admin/disputes/{disputeId}/request-information
+POST  /api/v1/admin/disputes/{disputeId}/ready-for-decision
+POST  /api/v1/admin/disputes/{disputeId}/resolve
+```
+
+Participant identity and business membership are derived server-side. Creation
+is scoped to one real business-order group and uses an `Idempotency-Key`.
+Participant reads omit assignment, internal notes, admin identity, internal
+correlation, Trust & Safety private data, and unrelated PII.
+
+Admin detail distinguishes purchase-time item snapshots from current Product
+listing summaries and returns safe read-only refund, inventory reservation /
+release, fulfillment, and shipment context. The active-scope uniqueness rule
+permits only one non-final dispute for a business-order group; final history is
+retained and a later distinct issue may create a new dispute.
+
+Admin queue filters `q`, order/buyer/business, status, reason, priority,
+assignment, dates, page, size, and allowlisted sort in SQL. Read, assignment,
+investigation, and resolution use their matching `admin.dispute.*` permission.
+Normal mutation additionally requires assignment to the current admin and an
+expected version.
+
+Resolution types are `RESOLVED_NO_ACTION`, `RETURN_APPROVED`,
+`REFUND_RECOMMENDED`, and `PARTIAL_REFUND_RECOMMENDED`. Return approval is an
+authorization record only. Refund outcomes are bounded recommendations only;
+the endpoint has no Payment refund side effect. Stable errors include
+`DISPUTE_NOT_FOUND`, `DISPUTE_NOT_ELIGIBLE`, `DISPUTE_ALREADY_EXISTS`,
+`DISPUTE_NOT_ASSIGNED_TO_CURRENT_ADMIN`, `DISPUTE_VERSION_CONFLICT`,
+`DISPUTE_ALREADY_RESOLVED`, `DISPUTE_REFUND_AMOUNT_INVALID`, and
+`DISPUTE_FINANCIAL_STATE_CHANGED`.
+## ADM-FIN-00/01/02 finance administration API
+
+All endpoints require an authenticated admin and return `Cache-Control: no-store`. Lists are server-side paginated. Backend permissions, not UI guards, authorize every operation.
+
+| Method | Path | Permission | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/admin/payments` | `admin.finance.read` | Filtered payment queue |
+| `GET` | `/api/v1/admin/payments/{paymentId}` | `admin.finance.read` | Payment, order snapshot, disputes, refunds, timeline, capabilities |
+| `GET` | `/api/v1/admin/refunds` | `admin.refund.read` | Unified refund queue |
+| `GET` | `/api/v1/admin/refunds/{refundId}` | `admin.refund.read` | Refund financial impact, attempt, failure/reconciliation, timeline |
+| `POST` | `/api/v1/admin/payments/{paymentId}/refund/dry-run` | `admin.refund.execute` | Non-mutating current-impact preview |
+| `POST` | `/api/v1/admin/payments/{paymentId}/refund` | `admin.refund.execute` | Revalidated provider-backed refund |
+
+The refund body contains `refundType` (`FULL` or `PARTIAL`), optional partial `amount`, payment `currency`, allow-listed `reasonCode`, optional operator `reason`, optional linked `disputeId`, `expectedPaymentVersion`, and an execution `idempotencyKey`. Execution also accepts the same key in `Idempotency-Key`; the controller makes the header authoritative.
+
+Dry run returns captured, successful-refunded, pending, current refundable, requested, projected refunded, projected remaining, dispute comparison, warnings, allow/deny reason, and the version that must be confirmed. It never writes or calls a provider. A `409 PAYMENT_VERSION_CONFLICT` requires a new detail read and dry run. Idempotency replays identical completed commands and returns `REFUND_IDEMPOTENCY_CONFLICT` for changed content.
+
+The Order-internal context routes are token-protected and not gateway/public APIs: batch `POST /api/v1/internal/admin-finance/payment-contexts` and `GET /api/v1/internal/admin-finance/orders/{orderId}`. Auth's `/api/v1/admin/finance-context` supplies safe labels after `admin.finance.read` authorization.
+
+Provider credentials, raw card/bank data, tokens, exact addresses, and unrestricted PII are absent from every contract. See [adm/admin-financial-operations.md](adm/admin-financial-operations.md).
+
+## ADM-SUP-00/01 support operations API
+
+Requester endpoints require authentication and derive requester identity server-side:
+
+```text
+POST /api/v1/support/tickets
+GET  /api/v1/support/tickets/mine
+GET  /api/v1/support/tickets/{ticketId}
+POST /api/v1/support/tickets/{ticketId}/messages
+```
+
+Creation accepts broad category, subject, description, and optional
+order/business/listing IDs. `Idempotency-Key` is required. Owner-service
+validation and a ten-minute same-requester fingerprint cooldown reject unsafe
+or obvious duplicate links/submissions. Requester responses omit assignment,
+priority operations, private notes, admin identity, escalation internals,
+correlation IDs, and PII.
+
+Admin endpoints are:
+
+```text
+GET   /api/v1/admin/support/tickets
+GET   /api/v1/admin/support/tickets/{ticketId}
+POST  /api/v1/admin/support/tickets/{ticketId}/claim
+POST  /api/v1/admin/support/tickets/{ticketId}/release
+POST  /api/v1/admin/support/tickets/{ticketId}/messages
+POST  /api/v1/admin/support/tickets/{ticketId}/request-information
+POST  /api/v1/admin/support/tickets/{ticketId}/notes
+PATCH /api/v1/admin/support/tickets/{ticketId}/priority
+POST  /api/v1/admin/support/tickets/{ticketId}/links
+POST  /api/v1/admin/support/tickets/{ticketId}/links/{targetType}/{targetId}/unlink
+POST  /api/v1/admin/support/tickets/{ticketId}/escalations
+POST  /api/v1/admin/support/tickets/{ticketId}/resolve
+```
+
+Inbox filters are `q`, requester, category, status, priority, assignment,
+linked order/business, dates, bounded page/size, and allow-listed sort. All
+aggregate mutations require `expectedVersion`. Claim/release use
+`admin.support.assign`; participant responses, information requests, notes,
+priority, and links use `admin.support.respond`; resolution and escalation use
+their dedicated permissions. Idempotency protects creation,
+participant/admin messages, information requests, notes, resolution, and
+escalation.
+
+Escalation validates and records an existing Order, Dispute, Trust & Safety
+report, or Payment destination and leaves the support ticket open. It never
+calls a specialized mutation. Stable failures include
+`SUPPORT_TICKET_NOT_FOUND`, `SUPPORT_TICKET_NOT_ASSIGNABLE`,
+`SUPPORT_TICKET_NOT_ASSIGNED_TO_CURRENT_ADMIN`,
+`SUPPORT_TICKET_ALREADY_RESOLVED`, `SUPPORT_TICKET_VERSION_CONFLICT`,
+`SUPPORT_INVALID_LINK`, `SUPPORT_DUPLICATE_TICKET`, and
+`SUPPORT_IDEMPOTENCY_CONFLICT`. Full semantics are in
+[adm/admin-support-operations.md](adm/admin-support-operations.md).
+
+## ADM-CAT-01/02 catalog governance API
+
+Product Service exposes protected admin catalog reads/commands below
+`/api/v1/admin/catalog/categories`. Overview filters name/slug, status, and
+seller eligibility and returns aggregate listing counts. Detail returns path,
+children, attributes/options, seller guidance, rule history, audit, and
+server-derived capabilities. Status, move, policy, attribute creation/update,
+and enum-option status have `/dry-run` companions. Attribute creation preview
+is `/attributes/create/dry-run`; existing required-rule preview is
+`/attributes/dry-run?attributeId=...`; attribute lifecycle and option previews append
+`/status/dry-run` to the option resource. Mutations use `expectedVersion`;
+dangerous duplicate-prone creates and status changes also use
+`Idempotency-Key`.
+
+`GET /api/v1/categories` is the seller schema: active creation-enabled
+categories, current rule version, typed active attributes/options, and active
+non-blocking guidance. Listing create/update accepts `categoryRuleVersion` and
+`attributes`; owner-scoped
+`GET /api/v1/listings/{listingId}/catalog-values` reloads them. Stale rules
+return `409 CATEGORY_RULE_CHANGED`; business-rule/type failures return `422`.
+See [adm/admin-catalog-governance.md](adm/admin-catalog-governance.md).
+
+## ADM-SYS-01/02 system operations API
+
+Auth exposes `GET /api/v1/admin/system/summary`, `/health`, `/jobs`,
+`/jobs/{jobId}`, `/outbox`, `/outbox/{eventId}`, `/reconciliation`,
+`/inventory`, `/search`, `/features`, and `/operations`. Job/outbox reads accept
+bounded paging and allow-listed filters. Owner-service snapshots are obtained
+through token-protected `/api/v1/internal/system/operations` adapters and never
+include raw payload or exception data.
+
+For exact analytics drill-downs, job `status=FAILURE` expands only to
+`FAILED|DEAD_LETTER|TERMINAL`; outbox `status=FAILURE` expands only to
+`FAILED|DEAD_LETTER`. All other status values retain exact-match semantics.
+
+Supported commands are `POST .../jobs/{jobId}/retry`,
+`.../outbox/{eventId}/retry`, and
+`.../search/listings/{listingId}/reindex`; each has a `/dry-run` companion.
+Final commands require `Idempotency-Key` and a reason and return `202` with
+`ACCEPTED`, `REJECTED`, `ALREADY_COMPLETED`, or `NOT_RETRYABLE`. `ACCEPTED`
+describes queue acceptance, not worker success. Stable facade failures include
+`SYSTEM_TARGET_NOT_FOUND`, `SYSTEM_OPERATION_NOT_SUPPORTED`,
+`SYSTEM_OPERATION_ALREADY_RUNNING`, and `SYSTEM_IDEMPOTENCY_CONFLICT`.
+See [adm/admin-system-operations.md](adm/admin-system-operations.md).
+
+## ADM-GOV-01/02 admin governance API
+
+Auth exposes protected governance reads below `/api/v1/admin/governance`:
+
+```text
+GET /dashboard
+GET /admins?q=&role=&status=&hasTemporaryElevation=&page=&size=&sort=
+GET /admins/{adminId}
+GET /roles
+GET /approvals?status=&riskLevel=&actionType=&requesterAdminId=&targetType=&page=&size=&sort=
+GET /approvals/{approvalId}
+```
+
+Role commands are `POST /admins/{adminId}/roles/dry-run`,
+`POST /admins/{adminId}/roles`, and matching
+`/roles/{assignmentId}/revoke/dry-run` and `/revoke` endpoints. Grant requests
+carry an allow-listed role, optional effective/expiry times, reason, governance
+version, and idempotency key. Revoke requests carry assignment version, reason,
+and key. The server derives the actor. A direct grant returns `201`; a direct
+revoke returns `200`; governed SUPER_ADMIN changes return `202` with an
+approval summary and do not change authority until executed.
+
+Approval commands are:
+
+```text
+POST /approvals/{approvalId}/approve
+POST /approvals/{approvalId}/reject
+POST /approvals/{approvalId}/cancel
+POST /approvals/{approvalId}/execute
+```
+
+They require expected versions, reasons where applicable, and
+`Idempotency-Key`. The requester cannot review an independent-approval request;
+dual approval counts distinct reviewers only. Execution returns `202` and its
+detail reports `EXECUTED`, `FAILED`, or another explicit lifecycle state.
+
+Typed owner-service policy gates are
+`POST /domain/refunds` and `POST /domain/catalog/category-disable`. Payment and
+Product call them only after normal domain authorization and dry run. A
+below-threshold response is `200 APPROVAL_NOT_REQUIRED`; a governed response is
+`202 PENDING_APPROVAL`. The public refund/category command consequently has a
+documented response union: its existing owner-domain result for a direct
+operation or a safe approval reference for a paused operation.
+
+Auth dispatches approved work only to token-protected typed owner routes:
+
+```text
+POST /api/v1/internal/admin/payments/{paymentId}/refund
+POST /api/v1/internal/admin/catalog/categories/{categoryId}/status
+```
+
+These internal endpoints also require the executor bearer token and preserve
+normal Payment/Product permission, version, idempotency, and audit behavior.
+There is no arbitrary action/payload execution endpoint. Stable failures
+include `GOVERNANCE_VERSION_CONFLICT`, `GOVERNANCE_IDEMPOTENCY_CONFLICT`,
+`GOVERNANCE_SELF_APPROVAL_PROHIBITED`, `GOVERNANCE_LAST_SUPER_ADMIN`,
+`GOVERNANCE_APPROVAL_EXPIRED`, and `GOVERNANCE_APPROVAL_STALE`. See
+[adm/admin-governance.md](adm/admin-governance.md).
+
+## ADM-ANL-01 admin analytics API
+
+Auth exposes read-only, `admin.analytics.read`-protected endpoints:
+
+```text
+GET /api/v1/admin/analytics/overview?range=&from=&to=&timezone=UTC&compare=
+GET /api/v1/admin/analytics/trends?metric=&range=&from=&to=&timezone=UTC&granularity=
+```
+
+Ranges are UTC, half-open `[from,to)`, future-ending and non-positive windows
+are rejected, and the maximum is 90 days. Presets are `TODAY`,
+`LAST_7_DAYS`, `LAST_30_DAYS`, `LAST_90_DAYS`, and `CUSTOM`. Comparison is the
+immediately preceding equal-duration window. Trend metric and granularity are
+enums; no arbitrary query/formula input is accepted. `HOUR` is limited to 48
+hours and every series is bounded to at most 100 points.
+Supplying `from` or `to` without `range` infers `CUSTOM` (and therefore requires
+both bounds); omitting the preset and both bounds defaults to `LAST_30_DAYS`.
+
+The overview returns range/capabilities/generated time plus named marketplace,
+moderation, Trust & Safety, commerce, support, catalog, operations, and
+governance sections. Each section has `AVAILABLE`, `DEGRADED`, `UNAVAILABLE`,
+or `RESTRICTED`, a safe optional message, data-as-of time, typed bounded metrics,
+and bounded breakdowns. An owner failure returns HTTP 200 with only dependent
+sections unavailable. Auth-owned Marketplace, business moderation, Trust &
+Safety, Support, and Governance reads have the same section isolation. Auth
+authorization and range validation may fail the request normally. Missing
+dependency data is never fabricated as zero.
+
+The Trust & Safety section counts final appeals by `resolved_at` in the selected
+half-open interval. Its final metric keys are `appealsFinalized`,
+`appealsUpheld`, `appealsModified`, `appealsRevoked`, and
+`appealAdjustmentRate`. `appealsFinalized = appealsUpheld + appealsModified +
+appealsRevoked`; `appealAdjustmentRate = (appealsModified + appealsRevoked) /
+appealsFinalized * 100`, with `N/A` at a zero denominator. `SUBMITTED`,
+`UNDER_REVIEW`, and all three `*_RECOMMENDED` states are excluded from those
+final metrics.
+
+Currency amount breakdowns are omitted unless the actor also has
+`admin.finance.read`; operations and governance require their existing read
+permissions. Drill-down values are allow-listed keys, not browser-controlled
+paths. Owner reads use token-protected
+`/api/v1/internal/admin/analytics/summary` and typed trend routes in Product,
+Order, and Payment. No analytics POST/PATCH/PUT/DELETE endpoint exists. See
+[adm/admin-analytics.md](adm/admin-analytics.md).

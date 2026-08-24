@@ -1,5 +1,7 @@
 package com.msb.ecom.order_service.repository;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.msb.ecom.order_service.dto.OrderDisputeContracts;
 import com.msb.ecom.order_service.model.BusinessOrderView;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -29,6 +31,8 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
 
     private static JdbcTemplate jdbc;
     private static BusinessOrderRepository repository;
+    private static AdminOrderRepository adminOrderRepository;
+    private static OrderDisputeRepository disputeRepository;
 
     @BeforeAll
     static void migrate() {
@@ -41,6 +45,8 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
         Flyway.configure().dataSource(dataSource).load().migrate();
         jdbc = new JdbcTemplate(dataSource);
         repository = new BusinessOrderRepository(jdbc);
+        adminOrderRepository = new AdminOrderRepository(jdbc);
+        disputeRepository = new OrderDisputeRepository(jdbc, new ObjectMapper());
     }
 
     @AfterAll
@@ -50,11 +56,66 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
 
     @BeforeEach
     void clean() {
+        jdbc.update("DELETE FROM order_dispute_commands");
+        jdbc.update("DELETE FROM order_dispute_events");
+        jdbc.update("DELETE FROM order_dispute_admin_notes");
+        jdbc.update("DELETE FROM order_dispute_evidence");
+        jdbc.update("DELETE FROM order_dispute_statements");
+        jdbc.update("DELETE FROM order_dispute_items");
+        jdbc.update("DELETE FROM order_disputes");
         jdbc.update("DELETE FROM order_addresses");
         jdbc.update("DELETE FROM order_items");
         jdbc.update("DELETE FROM business_orders");
         jdbc.update("DELETE FROM orders");
         jdbc.update("DELETE FROM checkout_sessions");
+    }
+
+    @Test
+    void disputeResolutionPersistsARecommendationWithoutMutatingPaymentOrOrderState() {
+        Seed seed = seedOrder(2, BASE, BUSINESS_ONE);
+        jdbc.update("UPDATE business_orders SET fulfillment_status='DELIVERED' WHERE id=?",
+                seed.firstBusinessOrderId());
+        String disputeId = id(12002);
+        String itemId = id(8020);
+        var row = new OrderDisputeRepository.DisputeRow(disputeId, seed.orderId(),
+                seed.firstBusinessOrderId(), BUSINESS_ONE, id(2002), "BUYER", id(2002),
+                "ITEM_NOT_AS_DESCRIBED", "The received item differs from its purchase snapshot.",
+                OrderDisputeContracts.Status.OPEN, OrderDisputeContracts.Priority.MEDIUM, null,
+                null, null, null, null, "USD", null, null, BASE, BASE, null, 0,
+                "dispute-test-correlation");
+
+        disputeRepository.insert(row, List.of(itemId));
+        var context = disputeRepository.scopeForDispute(disputeId, false).orElseThrow();
+        assertThat(context.releaseStatus()).isEqualTo("COMPLETE");
+        assertThat(context.shipmentStatus()).isNull();
+        assertThat(disputeRepository.claim(disputeId, 0, id(13002), BASE.plusSeconds(1))).isOne();
+        assertThat(disputeRepository.status(disputeId, 1, id(13002),
+                OrderDisputeContracts.Status.UNDER_ADMIN_REVIEW,
+                OrderDisputeContracts.Status.READY_FOR_DECISION, BASE.plusSeconds(2))).isOne();
+        assertThat(disputeRepository.resolve(disputeId, 2, id(13002),
+                OrderDisputeContracts.Resolution.PARTIAL_REFUND_RECOMMENDED,
+                "ITEM_VALUE_ADJUSTMENT", "Recommend a bounded adjustment.",
+                new BigDecimal("5.0000"), null, null, BASE.plusSeconds(3))).isOne();
+
+        var resolved = disputeRepository.find(disputeId, false).orElseThrow();
+        assertThat(resolved.status()).isEqualTo(
+                OrderDisputeContracts.Status.PARTIAL_REFUND_RECOMMENDED);
+        assertThat(resolved.recommendedRefundAmount()).isEqualByComparingTo("5.0000");
+        assertThat(jdbc.queryForObject("SELECT payment_status FROM orders WHERE id=?", String.class,
+                seed.orderId())).isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class,
+                seed.orderId())).isEqualTo("CONFIRMED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM business_order_returns WHERE order_id=?",
+                Integer.class, seed.orderId())).isZero();
+        var followUp = new OrderDisputeRepository.DisputeRow(id(12003), seed.orderId(),
+                seed.firstBusinessOrderId(), BUSINESS_ONE, id(2002), "BUYER", id(2002),
+                "RETURN_DISAGREEMENT", "A distinct issue occurred after the first decision.",
+                OrderDisputeContracts.Status.OPEN, OrderDisputeContracts.Priority.MEDIUM, null,
+                null, null, null, null, "USD", null, null, BASE.plusSeconds(4),
+                BASE.plusSeconds(4), null, 0, "follow-up-correlation");
+        disputeRepository.insert(followUp, List.of(itemId));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_disputes WHERE business_order_id=?",
+                Integer.class, seed.firstBusinessOrderId())).isEqualTo(2);
     }
 
     @Test
@@ -122,6 +183,37 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
                 BUSINESS_ONE, "CANCELLED", null, null, 10, false))
                 .extracting(BusinessOrderView::businessOrderId)
                 .containsExactly(cancelled.firstBusinessOrderId());
+    }
+
+    @Test
+    void adminFulfillmentFilterMatchesTheCancellationAwareAggregateShownInQueueRows() {
+        Seed cancelled = seedOrder(24, BASE.plusSeconds(3), BUSINESS_ONE);
+        Seed mixed = seedOrder(25, BASE.plusSeconds(2), BUSINESS_ONE, BUSINESS_TWO);
+        Seed accepted = seedOrder(26, BASE.plusSeconds(1), BUSINESS_ONE);
+        jdbc.update("UPDATE business_orders SET cancellation_status = 'CANCELLED' WHERE order_id = ?",
+                cancelled.orderId());
+        jdbc.update("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", cancelled.orderId());
+        jdbc.update("UPDATE business_orders SET fulfillment_status = 'ACCEPTED' WHERE id = ?",
+                mixed.secondBusinessOrderId());
+        jdbc.update("UPDATE business_orders SET fulfillment_status = 'ACCEPTED' WHERE order_id = ?",
+                accepted.orderId());
+
+        AdminOrderRepository.SearchResult pending = adminOrderRepository.search(
+                filter("PENDING_ACCEPTANCE"));
+        AdminOrderRepository.SearchResult acceptedResult = adminOrderRepository.search(filter("ACCEPTED"));
+
+        assertThat(pending.rows())
+                .extracting(AdminOrderRepository.SearchRow::orderId)
+                .containsExactly(mixed.orderId());
+        assertThat(pending.rows())
+                .extracting(AdminOrderRepository.SearchRow::fulfillmentStatus)
+                .containsOnly("PENDING_ACCEPTANCE");
+        assertThat(acceptedResult.rows())
+                .extracting(AdminOrderRepository.SearchRow::orderId)
+                .containsExactly(accepted.orderId());
+        assertThat(acceptedResult.rows())
+                .extracting(AdminOrderRepository.SearchRow::fulfillmentStatus)
+                .containsOnly("ACCEPTED");
     }
 
     @Test
@@ -299,10 +391,15 @@ class BusinessOrderRepositoryMySqlIntegrationTests {
                 id(10000 + value),
                 value + " Snapshot St",
                 Timestamp.from(createdAt));
-        return new Seed(first, second);
+        return new Seed(orderId, first, second);
     }
 
-    private record Seed(String firstBusinessOrderId, String secondBusinessOrderId) {
+    private AdminOrderRepository.SearchFilter filter(String fulfillmentStatus) {
+        return new AdminOrderRepository.SearchFilter(null, null, null, null,
+                null, null, fulfillmentStatus, null, null, 0, 25, "createdAt,desc");
+    }
+
+    private record Seed(String orderId, String firstBusinessOrderId, String secondBusinessOrderId) {
     }
 
     private static String id(int value) {

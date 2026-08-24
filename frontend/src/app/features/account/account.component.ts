@@ -293,6 +293,28 @@ import { NOTIFICATION_CENTER_ENABLED } from './notification-center.capability';
             </span>
             <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
           </a>
+
+          <a routerLink="/account/appeals" class="account-tile">
+            <span class="tile-icon purple">
+              <svg viewBox="0 0 24 24"><path d="M12 3 20 6v5.8c0 4.8-3.4 8-8 9.2-4.6-1.2-8-4.4-8-9.2V6l8-3zm-1 5h2v5h-2V8zm0 7h2v2h-2v-2z"/></svg>
+            </span>
+            <span>
+              <b>Appeals</b>
+              <small>Review active restrictions and request a staff review.</small>
+            </span>
+            <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
+          </a>
+
+          <a routerLink="/support" class="account-tile">
+            <span class="tile-icon green">
+              <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9v3a3 3 0 0 0 3 3h2v-7H5.1a7 7 0 0 1 13.8 0H16v7h2a3 3 0 0 0 3-3v-3a9 9 0 0 0-9-9zm-1 15h2v2h-2v-2z"/></svg>
+            </span>
+            <span>
+              <b>Support</b>
+              <small>Ask for help and follow your support requests.</small>
+            </span>
+            <svg class="row-arrow" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6V6z"/></svg>
+          </a>
         </div>
       </div>
     </section>

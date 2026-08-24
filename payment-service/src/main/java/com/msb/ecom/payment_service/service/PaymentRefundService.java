@@ -104,6 +104,10 @@ public class PaymentRefundService {
             throw error(HttpStatus.CONFLICT, "PAYMENT_REFUND_STATE_CONFLICT",
                     "Only a succeeded payment can be refunded.");
         }
+        if (repository.reservedAmount(paymentIntentId).signum() > 0) {
+            throw error(HttpStatus.CONFLICT, "PAYMENT_REFUND_STATE_CONFLICT",
+                    "A cancellation refund cannot exceed the payment's remaining refundable amount.");
+        }
         if (!DeterministicFakePaymentProvider.PROVIDER.equals(intent.provider())) {
             throw error(HttpStatus.CONFLICT, "PAYMENT_REFUND_PROVIDER_UNSUPPORTED",
                     "The payment provider does not support this bounded refund.");

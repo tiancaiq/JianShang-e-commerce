@@ -418,45 +418,49 @@ refresh. See `docs/mvp/adm/admin-user-control.md`.
 The following features are in admin product scope but are deferred until after
 the MVP admin foundation is stable:
 
-1. Reports queue, starting with user-reported listings.
-2. Investigation cases, appeals, and support notes.
-3. Chat evidence review with strict access auditing.
-4. Payment, order, payout, and finance admin operations.
-5. Advanced trust, disputes, and safety tooling.
-6. AI moderation assistance.
+1. Investigation cases, appeals, and support notes.
+2. Chat evidence review with strict access auditing.
+3. Payment, refund, payout, and broader finance admin operations; order
+   search/detail and bounded cancellation are delivered by ADM-ORD-01/02.
+4. Advanced trust, disputes, and safety tooling.
+5. AI moderation assistance.
 
 These later slices need their own contracts, permissions, state machines,
 auditing rules, and release placement. They should not be mixed into the MVP
 business approval and listing moderation implementation.
 
-### ADM-REP-01 User-reported listing queue
+### ADM-REP-00/01/02 Marketplace reporting and admin triage
 
-Status: deferred. Reporting submission is not implemented yet, so this slice is
-documentation-only until the user report flow and report persistence exist.
+Status: implemented. Auth Service owns cross-target report persistence;
+authenticated users can report supported users, businesses, and listings;
+admins have a separate permission-gated inbox, assignment, immutable snapshot
+versus live state detail, related reports, read-only enforcement context, and
+audited dismiss/ready/severity triage. Reporting remains separate from listing
+submission moderation and cannot execute enforcement. See
+[admin-reporting.md](admin-reporting.md).
 
-Goal: let platform admins see listings that users have reported, without
-mixing user reports into the listing submission moderation queue.
+### ADM-REP-03 Investigation cases
 
-Expected deliverables:
+Status: implemented. Auth Service owns versioned investigation cases, report
+and target links, append-only private notes, validated internal evidence
+references, assignment, conclusion, and a normalized timeline. Admin routes are
+`/admin/cases` and `/admin/cases/:caseId`. `READY_FOR_ACTION` and
+`CLOSED_NO_ACTION` is terminal and creates no enforcement. See
+[admin-investigation-cases.md](admin-investigation-cases.md).
 
-- Admin route for reported listings.
-- Backend endpoint for listing reports, likely a filtered form of
-  `GET /api/v1/admin/reports`.
-- Queue rows showing report ID, reported listing ID/title, reporter metadata
-  safe for staff review, report reason/category, report status, submitted time,
-  assigned admin, and linked moderation/action state.
-- Detail entry point from each reported listing row.
+### ADM-REP-04 Case-linked enforcement
 
-Acceptance criteria for the future slice:
+Status: implemented. `READY_FOR_ACTION` cases hold explicit linked-target
+proposals. Each proposal uses the existing target dry run, requires an exact
+human confirmation, composes case and target permissions, pins one idempotency
+key, records partial failure without compensation, and links the real action
+ID. Resolved plans close as read-only `CLOSED_ACTIONED`. See
+[admin-case-enforcement.md](admin-case-enforcement.md).
 
-- Only authorized platform staff can view reports.
-- The queue shows user-reported listings separately from submitted listing
-  review cases.
-- Report claim/status changes are audited.
-- Reported-listing actions must reuse approved admin listing actions where
-  possible, such as active listing edit/removal.
-- Reports do not expose unrestricted chat bodies, payment data, secrets, or
-  unrelated user PII.
+`ADM-APL-01/02` appeals is the recommended next milestone.
+User-profile UI reporting is deferred until an
+appropriate public profile exists; the authenticated API already supports the
+`USER` target.
 
 ## Build Order
 
@@ -504,5 +508,103 @@ Reversible listing enforcement is implemented as a Product-owned policy ledger o
 The complete Docker/Playwright matrix in
 [admin-listing-enforcement.md](admin-listing-enforcement.md) passes. Final
 cleanup delivery remains gated only on the complete post-cleanup repository,
-backend, frontend, and browser verification matrix. After that gate closes,
-the next admin milestone is `ADM-REP-00/01/02`.
+backend, frontend, and browser verification matrix. `ADM-REP-00/01/02` is now
+implemented. `ADM-REP-03` investigation cases and `ADM-REP-04` case-linked
+enforcement are also implemented. `ADM-APL-00/01/02` appeal foundation,
+affected-actor submission, admin assignment, private review, and non-executing
+recommendations are implemented in [admin-appeals.md](admin-appeals.md).
+`ADM-APL-03` now adds preview-bound, explicitly confirmed, idempotent final
+UPHELD/MODIFIED/REVOKED resolution through each enforcement owner. Its final
+acceptance remains pending the complete live and repository verification
+matrix.
+
+## ADM-ORD-01/02 order operations
+
+Status: implemented. Order Service now owns permission-gated, server-paginated
+admin order search, a purchase-time administrative detail read model, safe
+Payment/Inventory/Product/Auth enrichment, normalized order history, and a
+narrow dry-run/confirm cancellation command. Cancellation reuses the existing
+paid-order compensation workflow and is blocked before mutation when refund or
+restock safety is unavailable. See [admin-order-operations.md](admin-order-operations.md).
+
+The subsequent control-plane sequence is:
+
+```text
+ADM-DSP-00/01/02
+→ ADM-FIN-00/01/02
+→ ADM-CAT-01/02
+→ ADM-PAY-03 when payouts exist
+→ ADM-SYS-01/02
+→ ADM-GOV-01/02
+→ ADM-APL-03
+→ ADM-ANL-01
+→ ADM-AI-* later
+```
+
+None of those future milestones is implemented by ADM-ORD-01/02.
+
+## ADM-DSP-00/01/02 transaction disputes
+
+Status: implemented. Order Service owns a business-group-scoped dispute
+aggregate with participant statements, bounded evidence references, admin-only
+notes, claim/release ownership, information requests, priority, normalized
+audit history, and immutable no-action, return-approved, or refund-recommended
+decisions. Refund recommendations move no money and create no enforcement.
+See [admin-disputes.md](admin-disputes.md).
+
+## ADM-FIN-00/01/02 payment and refund administration
+
+Status: implemented. Payment Service owns permission-gated, server-paginated payment and refund search/detail plus versioned, actor-idempotent full and partial refund dry-run/confirmation. Execution revalidates the cumulative refund ceiling across cancellation, return, and admin sources under a payment lock. Order supplies bounded context and Auth supplies safe labels and permissions. See [admin-financial-operations.md](admin-financial-operations.md).
+
+## ADM-SUP-00/01 support operations
+
+Status: implemented; final acceptance awaits a green repository-wide Playwright
+run across the mixed live-fixture and route-mocked suites. Auth Service owns requester-safe support tickets,
+participant messages, private notes, a filterable admin inbox, claim/release,
+priority, validated cross-domain links, explicit handoffs, resolution,
+optimistic locking, idempotency, and audit history. Owner services expose only
+bounded read validation; Support cannot mutate orders, disputes, finance,
+Trust & Safety, or enforcement. See
+[admin-support-operations.md](admin-support-operations.md).
+
+`ADM-CAT-01/02` is complete. The complete backend, Angular, production-build,
+and Playwright acceptance gates passed. Product Service owns governed hierarchy/lifecycle, seller
+eligibility, typed attributes/options, seller guidance, immutable rule
+versions, listing validation, impact previews, idempotency, and audit. Angular
+routes are `/admin/catalog` and `/admin/catalog/categories/:categoryId`. See
+[admin-catalog-governance.md](admin-catalog-governance.md).
+
+## ADM-SYS-01/02 marketplace and system operations
+
+Status: complete. The complete repository, Angular, production-build, and
+Playwright verification matrix passed. Auth provides the permissioned
+aggregation/audit facade, while Product, Order, Payment, and Inventory retain
+ownership of their operational state. The console exposes safe health, durable
+work, redacted outbox, finance reconciliation, expired-reservation, search,
+feature/configuration, and recovery-audit views. Only existing idempotent worker
+mechanisms and bounded one-listing reindex are actionable. See
+[admin-system-operations.md](admin-system-operations.md).
+
+## ADM-GOV-01/02 admin governance
+
+Status: complete. Auth now owns time-aware, historical admin role assignments,
+temporary elevation, lockout-safe role changes, bounded governance activity,
+typed sensitive-action policies, independent review, dual approval, stale
+revalidation, and explicit execution. Large refunds and high-impact category
+disablement reuse their Payment/Product owner commands; no generic mutation
+engine exists. See [admin-governance.md](admin-governance.md).
+
+## ADM-ANL-01 admin analytics and operational insights
+
+Status: implemented, including authoritative final appeal outcomes and the
+appeal-adjustment rate; final acceptance remains pending the complete live and
+repository verification matrix. Auth owns a permissioned read-only facade;
+Product, Order, Payment, and ADM-SYS retain their source data and expose bounded
+aggregate reads. UTC half-open ranges, equal-duration comparisons,
+finance/system/governance visibility, partial failure, typed drill-downs,
+accessible trends, and no-mutation/privacy rules are defined in
+[admin-analytics.md](admin-analytics.md). Recommendation and pending appeal
+states are excluded from finalized counts and from
+`(MODIFIED + REVOKED) / finalized * 100`.
+
+Payouts/chargebacks and AI remain later work.

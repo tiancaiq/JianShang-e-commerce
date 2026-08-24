@@ -59,6 +59,57 @@ class EnforcementRepository {
         } catch (DuplicateKeyException exception) { return false; }
     }
 
+    Optional<AppealResolutionCommand> appealResolution(String key, boolean lock) {
+        if (key == null) return Optional.empty();
+        return jdbcTemplate.query("""
+                select idempotency_key, appeal_id, outcome, command_fingerprint,
+                       original_enforcement_action_id, replacement_enforcement_action_id,
+                       expected_enforcement_version, expected_target_version,
+                       executed_by_actor_id, executed_by_actor_display_name, correlation_id,
+                       created_at, completed_at
+                from listing_appeal_resolution_commands where idempotency_key = ?
+                """ + (lock ? " for update" : ""), this::appealResolution, key).stream().findFirst();
+    }
+
+    Optional<AppealResolutionCommand> appealResolutionForAppeal(String appealId, boolean lock) {
+        return jdbcTemplate.query("""
+                select idempotency_key, appeal_id, outcome, command_fingerprint,
+                       original_enforcement_action_id, replacement_enforcement_action_id,
+                       expected_enforcement_version, expected_target_version,
+                       executed_by_actor_id, executed_by_actor_display_name, correlation_id,
+                       created_at, completed_at
+                from listing_appeal_resolution_commands where appeal_id = ?
+                """ + (lock ? " for update" : ""), this::appealResolution, appealId).stream().findFirst();
+    }
+
+    boolean reserveAppealResolution(String key, String appealId, String outcome, String fingerprint,
+            String originalActionId, long expectedEnforcementVersion, long expectedTargetVersion,
+            Actor executor, String correlationId, Instant now) {
+        try {
+            return jdbcTemplate.update("""
+                    insert into listing_appeal_resolution_commands (
+                        idempotency_key, appeal_id, outcome, command_fingerprint,
+                        original_enforcement_action_id, expected_enforcement_version,
+                        expected_target_version, executed_by_actor_id,
+                        executed_by_actor_display_name, correlation_id, created_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, key, appealId, outcome, fingerprint, originalActionId,
+                    expectedEnforcementVersion, expectedTargetVersion, executor.id(), executor.display(),
+                    correlationId, Timestamp.from(now)) == 1;
+        } catch (DuplicateKeyException exception) { return false; }
+    }
+
+    void completeAppealResolution(String key, String replacementActionId, Instant now) {
+        int updated = jdbcTemplate.update("""
+                update listing_appeal_resolution_commands
+                   set replacement_enforcement_action_id = ?, completed_at = ?
+                 where idempotency_key = ? and completed_at is null
+                """, replacementActionId, Timestamp.from(now), key);
+        if (updated != 1) {
+            throw new EnforcementExceptions.Conflict("The appeal enforcement resolution could not be completed.");
+        }
+    }
+
     void complete(String type, String key, String actionId, Instant now) {
         int updated = jdbcTemplate.update("""
                 update enforcement_command_idempotency set enforcement_action_id = ?, completed_at = ?
@@ -68,15 +119,19 @@ class EnforcementRepository {
     }
 
     void insert(Action action) {
+        insert(action, null);
+    }
+
+    void insert(Action action, String parentActionId) {
         jdbcTemplate.update("""
                 insert into enforcement_actions (
                     id, target_type, target_id, action_type, version, effective_at, expires_at, reason_code,
-                    reason, case_id, target_version_at_decision, source, created_by_actor_id,
+                    reason, case_id, parent_enforcement_action_id, target_version_at_decision, source, created_by_actor_id,
                     created_by_actor_display_name, created_at, correlation_id, request_id,
                     idempotency_key, command_fingerprint, safe_metadata
-                ) values (?, 'LISTING', ?, ?, 0, ?, ?, ?, ?, ?, ?, 'HUMAN_ADMIN', ?, ?, ?, ?, ?, ?, ?, cast(? as json))
+                ) values (?, 'LISTING', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'HUMAN_ADMIN', ?, ?, ?, ?, ?, ?, ?, cast(? as json))
                 """, action.id(), action.targetId(), action.actionType().name(), Timestamp.from(action.effectiveAt()),
-                timestamp(action.expiresAt()), action.reasonCode(), action.reason(), action.caseId(),
+                timestamp(action.expiresAt()), action.reasonCode(), action.reason(), action.caseId(), parentActionId,
                 action.targetVersion(), action.actorId(), action.actorDisplay(), Timestamp.from(action.createdAt()),
                 action.correlationId(), action.requestId(), action.idempotencyKey(), action.fingerprint(),
                 json(action.metadata()));
@@ -152,6 +207,10 @@ class EnforcementRepository {
     }
 
     List<Action> all(String targetId) {
+        return all(targetId, false);
+    }
+
+    List<Action> all(String targetId, boolean lock) {
         return jdbcTemplate.query("""
                 select id, target_id, action_type, version, effective_at, expires_at, reason_code, reason,
                        case_id, target_version_at_decision, created_by_actor_id, created_by_actor_display_name,
@@ -159,7 +218,8 @@ class EnforcementRepository {
                        command_fingerprint, safe_metadata
                 from enforcement_actions where target_type = 'LISTING' and target_id = ?
                 order by created_at desc, id desc
-                """, this::action, targetId).stream().map(this::withScopes).toList();
+                """ + (lock ? " for update" : ""), this::action, targetId).stream()
+                .map(this::withScopes).toList();
     }
 
     Set<String> restrictedTargets(Set<String> targetIds, Scope scope, Instant at) {
@@ -224,6 +284,17 @@ class EnforcementRepository {
                 map(rs.getString("safe_metadata")));
     }
 
+    private AppealResolutionCommand appealResolution(ResultSet rs, int row) throws SQLException {
+        return new AppealResolutionCommand(rs.getString("idempotency_key"), rs.getString("appeal_id"),
+                rs.getString("outcome"), rs.getString("command_fingerprint"),
+                rs.getString("original_enforcement_action_id"),
+                rs.getString("replacement_enforcement_action_id"),
+                rs.getLong("expected_enforcement_version"), rs.getLong("expected_target_version"),
+                rs.getString("executed_by_actor_id"), rs.getString("executed_by_actor_display_name"),
+                rs.getString("correlation_id"), rs.getTimestamp("created_at").toInstant(),
+                instant(rs, "completed_at"));
+    }
+
     private Action withScopes(Action action) { return action.withScopes(scopes(action.id())); }
     private String json(Map<String, String> value) {
         try { return objectMapper.writeValueAsString(value); }
@@ -240,6 +311,11 @@ class EnforcementRepository {
 
     record Target(String id, long version, String status, String moderationStatus) { }
     record Idempotency(String fingerprint, String actionId) { }
+    record AppealResolutionCommand(String idempotencyKey, String appealId, String outcome,
+            String fingerprint, String originalActionId, String replacementActionId,
+            long expectedEnforcementVersion, long expectedTargetVersion,
+            String executorId, String executorDisplay, String correlationId,
+            Instant createdAt, Instant completedAt) { }
     record Actor(String id, String display) { }
     record Action(String id, String targetId, ActionType actionType, Set<Scope> scopes, long version,
             Instant effectiveAt, Instant expiresAt, String reasonCode, String reason, String caseId,

@@ -53,7 +53,12 @@ public class EnforcementService {
     @Transactional
     // Records Product-owned listing enforcement without rewriting listing moderation or lifecycle state.
     public Result create(CreateCommand raw) {
-        AdminActor actor = require(AdminPermission.LISTING_SUSPEND);
+        return createTrusted(raw, require(AdminPermission.LISTING_SUSPEND), null);
+    }
+
+    @Transactional
+    Result createTrusted(CreateCommand raw, TrustedAdminActor actor, String parentActionId) {
+        actor.require(AdminPermission.LISTING_SUSPEND);
         Instant now = clock.instant();
         EnforcementPolicy.NormalizedCreate command = policy.normalize(raw, now);
         String fingerprint = policy.fingerprint(command);
@@ -95,7 +100,8 @@ public class EnforcementService {
                 command.expiresAt(), command.reasonCode(), command.reason(), command.caseId(), version,
                 actor.userId(), actor.display(), now, null, correlationId, ulidGenerator.next(),
                 command.idempotencyKey(), fingerprint, command.safeMetadata());
-        repository.insert(action);
+        if (parentActionId == null) repository.insert(action);
+        else repository.insert(action, parentActionId);
         repository.event(new EnforcementRepository.Event(ulidGenerator.next(), actionId, "CREATED", null,
                 lifecycle(action, now).name(), now, actor.userId(), actor.display(), command.reasonCode(),
                 command.reason(), correlationId, ulidGenerator.next(), command.safeMetadata()));
@@ -106,7 +112,12 @@ public class EnforcementService {
     @Transactional
     // Revokes a listing enforcement action with compare-and-set versioning and immutable history.
     public Result revoke(RevokeCommand raw) {
-        AdminActor actor = require(AdminPermission.LISTING_REINSTATE);
+        return revokeTrusted(raw, require(AdminPermission.LISTING_REINSTATE));
+    }
+
+    @Transactional
+    Result revokeTrusted(RevokeCommand raw, TrustedAdminActor actor) {
+        actor.require(AdminPermission.LISTING_REINSTATE);
         EnforcementPolicy.NormalizedRevoke command = policy.normalize(raw);
         String fingerprint = policy.fingerprint(command);
         Instant now = clock.instant();
@@ -114,6 +125,10 @@ public class EnforcementService {
             Result replay = replay("REVOKE", command.idempotencyKey(), fingerprint, now, false);
             if (replay != null) return replay;
         }
+        EnforcementRepository.Action initial = repository.action(command.enforcementActionId(), false)
+                .orElseThrow(() -> new EnforcementExceptions.NotFound("Enforcement action was not found."));
+        repository.lockListing(initial.targetId())
+                .orElseThrow(() -> new EnforcementExceptions.NotFound("Listing target was not found."));
         EnforcementRepository.Action action = repository.action(command.enforcementActionId(), true)
                 .orElseThrow(() -> new EnforcementExceptions.NotFound("Enforcement action was not found."));
         if (!command.dryRun()) {
@@ -145,7 +160,7 @@ public class EnforcementService {
 
     @Transactional
     public Result revokeForListing(String listingId, RevokeCommand raw) {
-        require(AdminPermission.LISTING_REINSTATE);
+        TrustedAdminActor actor = require(AdminPermission.LISTING_REINSTATE);
         if (raw == null || raw.enforcementActionId() == null) {
             throw new EnforcementExceptions.Validation("Enforcement action is required.");
         }
@@ -155,7 +170,36 @@ public class EnforcementService {
         if (!targetId.equals(action.targetId())) {
             throw new EnforcementExceptions.NotFound("Enforcement action was not found for this listing.");
         }
-        return revoke(raw);
+        return revokeTrusted(raw, actor);
+    }
+
+    @Transactional
+    Result previewReplacementAfterRevocation(CreateCommand raw, String excludedActionId,
+            TrustedAdminActor actor) {
+        actor.require(AdminPermission.LISTING_SUSPEND);
+        Instant now = clock.instant();
+        EnforcementPolicy.NormalizedCreate command = policy.normalize(raw, now);
+        if (!command.dryRun()) {
+            throw new EnforcementExceptions.Validation("Replacement preview must be a dry run.");
+        }
+        EnforcementRepository.Target target = repository.lockListing(command.targetId())
+                .orElseThrow(() -> new EnforcementExceptions.NotFound("Listing target was not found."));
+        if ("REMOVED_BY_ADMIN".equals(target.status())) {
+            throw new EnforcementExceptions.Validation(
+                    "Administratively removed listings cannot receive temporary enforcement.");
+        }
+        if (!"ACTIVE".equals(target.status())) {
+            throw new EnforcementExceptions.Validation("Only active listings can receive temporary enforcement.");
+        }
+        if (target.version() != command.expectedTargetVersion()) {
+            throw new EnforcementExceptions.Conflict("The listing version is stale.");
+        }
+        List<EnforcementRepository.Action> active = repository.active(command.targetId(), now).stream()
+                .filter(action -> !action.id().equals(excludedActionId)).toList();
+        boolean duplicate = active.stream().anyMatch(action -> action.actionType() == command.actionType()
+                && action.scopes().equals(command.scopes()));
+        if (duplicate) throw new EnforcementExceptions.Conflict("An equivalent active enforcement action exists.");
+        return dryRun(command, target.version(), now, excludedActionId);
     }
 
     @Transactional(readOnly = true)
@@ -293,11 +337,18 @@ public class EnforcementService {
     }
 
     private Result dryRun(EnforcementPolicy.NormalizedCreate command, long version, Instant now) {
+        return dryRun(command, version, now, null);
+    }
+
+    private Result dryRun(EnforcementPolicy.NormalizedCreate command, long version, Instant now,
+            String excludedActionId) {
         EnforcementRepository.Action proposal = new EnforcementRepository.Action(null, command.targetId(),
                 command.actionType(), command.scopes(), 0, command.effectiveAt(), command.expiresAt(),
                 command.reasonCode(), command.reason(), command.caseId(), version, null, null, now, null,
                 correlationId(), null, null, null, command.safeMetadata());
-        List<EnforcementRepository.Action> actions = new ArrayList<>(repository.active(command.targetId(), now));
+        List<EnforcementRepository.Action> actions = new ArrayList<>(repository.active(command.targetId(), now)
+                .stream().filter(action -> excludedActionId == null || !excludedActionId.equals(action.id()))
+                .toList());
         if (lifecycle(proposal, now) == LifecycleState.ACTIVE) actions.add(proposal);
         return new Result(null, TargetType.LISTING, command.targetId(), command.actionType(), command.scopes(),
                 lifecycle(proposal, now), command.effectiveAt(), command.expiresAt(), 0, now, null,
@@ -327,9 +378,9 @@ public class EnforcementService {
                 ? LifecycleState.EXPIRED : LifecycleState.ACTIVE;
     }
 
-    private AdminActor require(AdminPermission permission) {
+    private TrustedAdminActor require(AdminPermission permission) {
         AuthServiceClient.PlatformAdminAuthorization admin = requireAuthorization(permission);
-        return new AdminActor(admin.userId(), "Platform administrator");
+        return new TrustedAdminActor(admin.userId(), "Platform administrator", Set.copyOf(admin.permissions()));
     }
 
     private AuthServiceClient.PlatformAdminAuthorization requireAuthorization(AdminPermission permission) {
@@ -347,5 +398,12 @@ public class EnforcementService {
         return value == null || value.isBlank() ? CorrelationId.generate().value() : value;
     }
 
-    private record AdminActor(String userId, String display) { }
+    record TrustedAdminActor(String userId, String display, Set<String> permissions) {
+        void require(AdminPermission permission) {
+            if (permissions == null || !permissions.contains(permission.id())) {
+                throw new com.msb.ecom.product_service.model.ListingAuthorizationException(
+                        "Admin permission is required for this action.");
+            }
+        }
+    }
 }

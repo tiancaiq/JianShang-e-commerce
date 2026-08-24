@@ -27,7 +27,7 @@ The plan builds on approved requirements and deferred contracts:
 - `AI-03` for seller-confirmed listing-content drafts;
 - `ADM-03` for the reports queue;
 - `ADM-04` for separately authorized suspension and restoration;
-- `POST /api/v1/reports` and the deferred admin report APIs;
+- the implemented `ADM-REP-00/01/02` intake and admin-triage APIs;
 - the V3 agent session APIs and allowlisted tool model.
 
 A listing-bound customer-service assistant and automated report operations need
@@ -227,17 +227,20 @@ identifies an owned listing draft and selected media IDs; the response returns
 structured suggested fields plus uncertainty metadata. Applying selected
 fields continues to use the existing listing `PATCH` contract with `If-Match`.
 
-Report intake and admin review continue from the deferred contracts:
+Report intake and human admin triage are implemented by `ADM-REP-00/01/02`:
 
 ```text
 POST /api/v1/reports
 GET  /api/v1/admin/reports
 POST /api/v1/admin/reports/{reportId}/claim
-POST /api/v1/admin/reports/{reportId}/resolve
+POST /api/v1/admin/reports/{reportId}/dismiss
+POST /api/v1/admin/reports/{reportId}/ready-for-investigation
 ```
 
-Automated classification is an internal workflow, not a public endpoint.
-Admin resolve/restore commands remain authoritative override paths.
+Automated classification remains a future internal workflow, not a public
+endpoint. The implemented triage commands never invoke enforcement; future
+case decisions and separately authorized enforcement commands remain the
+authoritative human-controlled paths.
 
 ## Safety And Operational Controls
 

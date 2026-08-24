@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { ActivatedRoute, convertToParamMap, ParamMap, Router } from '@angular/router';
+import { BehaviorSubject, of, throwError } from 'rxjs';
 import { AdminListingModerationCase } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { ToastService } from '../../core/services/toast.service';
@@ -15,6 +15,7 @@ describe('AdminListingModerationComponent', () => {
   let toastService: jasmine.SpyObj<ToastService>;
   let router: jasmine.SpyObj<Router>;
   let adminService: jasmine.SpyObj<AdminService>;
+  let queryParams: BehaviorSubject<ParamMap>;
 
   const moderationCase: AdminListingModerationCase = {
     id: '01MC0000000000000000000001',
@@ -51,6 +52,7 @@ describe('AdminListingModerationComponent', () => {
     toastService = jasmine.createSpyObj<ToastService>('ToastService', ['success']);
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     adminService = jasmine.createSpyObj<AdminService>('AdminService', ['getCurrentAdmin', 'hasPermission']);
+    queryParams = new BehaviorSubject(convertToParamMap({}));
     adminService.hasPermission.and.returnValue(true);
     adminService.getCurrentAdmin.and.returnValue(of({
       data: {
@@ -82,6 +84,7 @@ describe('AdminListingModerationComponent', () => {
         { provide: ListingService, useValue: listingService },
         { provide: ToastService, useValue: toastService },
         { provide: Router, useValue: router },
+        { provide: ActivatedRoute, useValue: { queryParamMap: queryParams.asObservable() } },
         { provide: AdminService, useValue: adminService },
       ],
     }).compileComponents();
@@ -104,6 +107,16 @@ describe('AdminListingModerationComponent', () => {
     ) as HTMLButtonElement[];
     expect(filterButtons.find(button => button.textContent?.trim() === 'Open')?.getAttribute('aria-pressed')).toBe('true');
     expect(filterButtons.find(button => button.textContent?.trim() === 'Resolved')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('hydrates and resets the exact unassigned analytics filter on query navigation', () => {
+    queryParams.next(convertToParamMap({ filter: 'unassigned' }));
+    expect(listingService.getListingModerationCases.calls.mostRecent().args[0]).toBe('unassigned');
+    expect(component.selectedFilter()).toBe('unassigned');
+
+    queryParams.next(convertToParamMap({}));
+    expect(listingService.getListingModerationCases.calls.mostRecent().args[0]).toBe('open');
+    expect(component.selectedFilter()).toBe('open');
   });
 
   it('renders read-only queue cards without claim permission', () => {

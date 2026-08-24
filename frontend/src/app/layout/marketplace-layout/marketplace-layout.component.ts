@@ -1,4 +1,4 @@
-import { Component, Injector, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, Injector, OnDestroy, OnInit, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterOutlet } from '@angular/router';
 import { take } from 'rxjs';
@@ -352,6 +352,11 @@ export class MarketplaceLayoutComponent implements OnInit, OnDestroy {
   authEmail = '';
   authPassword = '';
   authDisplayName = '';
+  private readonly authenticatedDialogEffect = effect(() => {
+    if (this.authDialogOpen() && this.authService.isAuthenticated()) {
+      this.completeAuthenticatedDialog();
+    }
+  });
 
   ngOnInit(): void {
     this.showSignedOutConfirmation();
@@ -483,16 +488,24 @@ export class MarketplaceLayoutComponent implements OnInit, OnDestroy {
   }
 
   private finishAuthAttempt(authenticated: boolean, unauthenticatedMessage: string): void {
-    this.authDialogBusy.set(false);
     if (authenticated) {
-      this.authDialogOpen.set(false);
-      this.authPassword = '';
-      if (this.cartEnabled) {
-        this.cartService.load().subscribe({ error: () => undefined });
-      }
+      this.completeAuthenticatedDialog();
       return;
     }
+    this.authDialogBusy.set(false);
     this.authDialogError.set(unauthenticatedMessage);
+  }
+
+  // Dismisses the modal at the session transition instead of waiting for optional profile enrichment.
+  private completeAuthenticatedDialog(): void {
+    const wasAttemptActive = this.authDialogOpen() || this.authDialogBusy();
+    this.authDialogOpen.set(false);
+    this.authDialogBusy.set(false);
+    this.authDialogError.set(null);
+    this.authPassword = '';
+    if (wasAttemptActive && this.cartEnabled) {
+      this.cartService.load().subscribe({ error: () => undefined });
+    }
   }
 
   private nativeAuthErrorMessage(error: unknown): string {

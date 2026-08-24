@@ -31,9 +31,9 @@ public class ListingDraftRepository {
                     id, seller_type, individual_seller_user_id, business_id, store_id,
                     category_id, title, description, condition_code, condition_notes,
                     price_amount, currency, negotiable, sku, quantity, public_city, public_region,
-                    status, moderation_status, version, created_at, updated_at
+                    category_rule_version, status, moderation_status, version, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         'DRAFT', 'NOT_SUBMITTED', 0, ?, ?)
                 """,
                 draft.id(),
@@ -53,6 +53,7 @@ public class ListingDraftRepository {
                 draft.quantity(),
                 draft.publicCity(),
                 draft.publicRegion(),
+                draft.categoryRuleVersion(),
                 Timestamp.from(draft.now()),
                 Timestamp.from(draft.now()));
 
@@ -739,7 +740,8 @@ public class ListingDraftRepository {
         return count == null ? 0 : count;
     }
 
-    public int updateDraft(String listingId, long expectedVersion, ListingDraftUpdate update, Instant now) {
+    public int updateDraft(String listingId, long expectedVersion, ListingDraftUpdate update,
+                           long categoryRuleVersion, Instant now) {
         return jdbcTemplate.update("""
                 update listings
                 set category_id = ?,
@@ -754,6 +756,7 @@ public class ListingDraftRepository {
                     quantity = ?,
                     public_city = ?,
                     public_region = ?,
+                    category_rule_version = ?,
                     status = 'DRAFT',
                     moderation_status = 'NOT_SUBMITTED',
                     publication_source = null,
@@ -776,6 +779,7 @@ public class ListingDraftRepository {
                 update.quantity(),
                 update.publicCity(),
                 update.publicRegion(),
+                categoryRuleVersion,
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);
@@ -949,6 +953,7 @@ public class ListingDraftRepository {
             String listingId,
             long expectedVersion,
             ListingDraftUpdate update,
+            long categoryRuleVersion,
             Instant now) {
         return jdbcTemplate.update("""
                 update listings
@@ -964,6 +969,7 @@ public class ListingDraftRepository {
                     quantity = ?,
                     public_city = ?,
                     public_region = ?,
+                    category_rule_version = ?,
                     version = version + 1,
                     updated_at = ?
                 where id = ?
@@ -984,6 +990,7 @@ public class ListingDraftRepository {
                 update.quantity(),
                 update.publicCity(),
                 update.publicRegion(),
+                categoryRuleVersion,
                 Timestamp.from(now),
                 listingId,
                 expectedVersion);

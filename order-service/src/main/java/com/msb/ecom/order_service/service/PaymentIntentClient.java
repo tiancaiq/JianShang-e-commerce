@@ -10,6 +10,10 @@ public interface PaymentIntentClient {
 
     PaymentIntent create(String idempotencyKey, String correlationId, Command command);
 
+    default PaymentIntent get(String paymentIntentId, String buyerId) {
+        throw new UnsupportedOperationException("Payment lookup is not configured.");
+    }
+
     default DemoCompletion completeDemo(
             String paymentIntentId,
             String buyerId,

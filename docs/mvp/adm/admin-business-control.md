@@ -41,6 +41,8 @@ Creates and revocations retain ADM-ENF-00 idempotency and optimistic locking. A 
 
 There is no protected/system-business type in the current domain. No name-based protection was invented.
 
-Deferred: reports/cases, appeals, payout enforcement, automatic cascades, and
-AI recommendations or decisions. Reversible listing suspension is implemented
+Cross-target report intake and triage are implemented separately by
+`ADM-REP-00/01/02` and never mutate business enforcement records. Investigation
+cases, appeals, payout enforcement, automatic cascades, and AI recommendations
+or decisions remain deferred. Reversible listing suspension is implemented
 separately by `ADM-LIST-06` and never changes business enforcement records.

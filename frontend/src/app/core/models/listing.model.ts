@@ -15,18 +15,33 @@ export interface Category {
   name: string;
   parentId: string | null;
   displayOrder: number;
+  status?: string;
+  sellerEligibility?: 'INDIVIDUAL'|'BUSINESS'|'BOTH'|'NONE';
+  listingCreationAllowed?: boolean;
+  listingSubmissionAllowed?: boolean;
+  ruleVersion?: number;
   attributes: CategoryAttribute[];
+  guidance?: CategorySellerGuidance[];
 }
+
+export interface CategoryAttributeOption { id:string;value:string;label:string;displayOrder:number;status:string;version:number; }
+export interface CategorySellerGuidance { id:string;guidanceType:string;title:string;body:string;displayOrder:number;status:string;version:number; }
 
 export interface CategoryAttribute {
   id: string;
   key: string;
   label: string;
+  description?: string|null;
   dataType: string;
   required: boolean;
+  searchable?:boolean;
+  filterable?:boolean;
   allowedValuesJson: string | null;
   validationJson: string | null;
   displayOrder: number;
+  status?:string;
+  version?:number;
+  options?:CategoryAttributeOption[];
 }
 
 export interface CreateListingDraftRequest {
@@ -48,7 +63,11 @@ export interface CreateListingDraftRequest {
   } | null;
   sku?: string | null;
   quantity?: number | null;
+  categoryRuleVersion?:number|null;
+  attributes?:Record<string,unknown>;
 }
+
+export interface ListingCatalogValues { listingId:string;categoryId:string;categoryRuleVersion:number;attributes:Record<string,unknown>; }
 
 export interface AdminActiveListingUpdateRequest {
   categoryId: string;

@@ -1,6 +1,8 @@
 package com.msb.ecom.payment_service;
 
 import com.msb.ecom.payment_service.dto.CreatePaymentIntentRequest;
+import com.msb.ecom.payment_service.dto.AdminFinanceContracts.RefundExecution;
+import com.msb.ecom.payment_service.dto.AdminFinanceContracts.RefundRequest;
 import com.msb.ecom.payment_service.dto.PaymentIntentResponse;
 import com.msb.ecom.payment_service.dto.PaymentWebhookResponse;
 import com.msb.ecom.payment_service.dto.CreatePaymentRefundRequest;
@@ -11,11 +13,20 @@ import com.msb.ecom.payment_service.model.PaymentIntent;
 import com.msb.ecom.payment_service.model.PaymentIntentException;
 import com.msb.ecom.payment_service.model.PaymentIntentStatus;
 import com.msb.ecom.payment_service.repository.PaymentIntentRepository;
+import com.msb.ecom.payment_service.repository.AdminFinanceRepository;
+import com.msb.ecom.payment_service.provider.PaymentProvider;
+import com.msb.ecom.payment_service.service.AdminFinanceAuthorizationClient;
+import com.msb.ecom.payment_service.service.AdminFinanceGovernanceClient;
+import com.msb.ecom.payment_service.service.AdminFinanceOrderClient;
+import com.msb.ecom.payment_service.service.AdminFinanceService;
+import com.msb.ecom.payment_service.service.PaymentUlidGenerator;
 import com.msb.ecom.payment_service.service.PaymentIntentService;
 import com.msb.ecom.payment_service.service.PaymentWebhookService;
 import com.msb.ecom.payment_service.service.PaymentRefundService;
 import com.msb.ecom.payment_service.service.PaymentReturnRefundService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.msb.ecom.common.web.security.CurrentActor;
+import com.msb.ecom.common.web.security.CurrentActorProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +35,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 
@@ -35,12 +47,16 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -83,6 +99,18 @@ class PaymentIntentMySqlIntegrationTests {
     private PaymentIntentRepository repository;
 
     @Autowired
+    private AdminFinanceRepository adminFinanceRepository;
+
+    @Autowired
+    private List<PaymentProvider> paymentProviders;
+
+    @Autowired
+    private PaymentUlidGenerator paymentIds;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @Autowired
@@ -97,6 +125,7 @@ class PaymentIntentMySqlIntegrationTests {
     @BeforeEach
     void clean() {
         jdbc.update("DELETE FROM payment_outbox_events");
+        jdbc.update("DELETE FROM payment_admin_refund_commands");
         jdbc.update("DELETE FROM payment_return_refund_attempts");
         jdbc.update("DELETE FROM payment_return_refunds");
         jdbc.update("DELETE FROM payment_provider_events");
@@ -688,6 +717,162 @@ class PaymentIntentMySqlIntegrationTests {
                 .isEqualTo(1);
     }
 
+    @Test
+    void refundCeilingIsSharedAcrossAdminReturnAndCancellationSources() {
+        PaymentIntentResponse firstIntent = service.create(TOKEN, "payment-key-shared-refund-0140",
+                request(id(140), id(141), List.of(id(142)), "50.0000"), "correlation-shared-create-1");
+        byte[] firstSucceeded = webhookBody("fake_evt_shared_refund_0140", "payment_intent.succeeded",
+                firstIntent.providerReference(), null);
+        webhookService.process(signature(firstSucceeded), firstSucceeded, "correlation-shared-success-1");
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        jdbc.update("""
+                INSERT INTO payment_refunds (
+                  id,payment_intent_id,cancellation_request_id,order_id,dispute_id,source,refund_type,
+                  reason_code,reason,initiated_by_admin_id,initiated_by_admin_name,idempotency_key,
+                  amount,currency,provider,provider_reference,status,version,reconciliation_state,
+                  safe_failure_code,safe_failure_summary,created_at,updated_at,completed_at)
+                VALUES (?,?,NULL,?,NULL,'HUMAN_ADMIN','PARTIAL','CUSTOMER_REMEDIATION','Test boundary',
+                  ?, 'Finance Admin', ?, 30.0000,'USD','FAKE_LOCAL_DEMO_V1',?,'SUCCEEDED',0,'IN_SYNC',
+                  NULL,NULL,?,?,?)
+                """, id(143), firstIntent.id(), id(144), id(145), "admin-refund-boundary-0140",
+                "fake_refund_boundary_0140", now, now, now);
+        CreateReturnRefundRequest excessiveReturn = new CreateReturnRefundRequest(
+                id(144), id(147), id(146), new BigDecimal("21.0000"), "USD");
+        assertThatThrownBy(() -> returnRefundService.refund(TOKEN, firstIntent.id(),
+                "return-after-admin-0140", excessiveReturn, "correlation-shared-return"))
+                .isInstanceOfSatisfying(PaymentIntentException.class,
+                        error -> assertThat(error.code()).isEqualTo("PAYMENT_RETURN_REFUND_STATE_CONFLICT"));
+
+        PaymentIntentResponse secondIntent = service.create(TOKEN, "payment-key-shared-refund-0150",
+                request(id(150), id(151), List.of(id(152)), "50.0000"), "correlation-shared-create-2");
+        byte[] secondSucceeded = webhookBody("fake_evt_shared_refund_0150", "payment_intent.succeeded",
+                secondIntent.providerReference(), null);
+        webhookService.process(signature(secondSucceeded), secondSucceeded, "correlation-shared-success-2");
+        returnRefundService.refund(TOKEN, secondIntent.id(), "return-before-cancel-0150",
+                new CreateReturnRefundRequest(id(154), id(155), id(153), new BigDecimal("10.0000"), "USD"),
+                "correlation-shared-return-2");
+        assertThatThrownBy(() -> refundService.refund(TOKEN, secondIntent.id(), "cancel-after-return-0150",
+                new CreatePaymentRefundRequest(id(154), id(156)), "correlation-shared-cancel"))
+                .isInstanceOfSatisfying(PaymentIntentException.class,
+                        error -> assertThat(error.code()).isEqualTo("PAYMENT_REFUND_STATE_CONFLICT"));
+    }
+
+    @Test
+    void concurrentAdminAndReturnRefundsCannotExceedTheSharedPaymentCeiling() throws Exception {
+        PaymentIntentResponse intent = service.create(TOKEN, "payment-key-concurrent-refund-0160",
+                request(id(160), id(161), List.of(id(162)), "50.0000"),
+                "correlation-concurrent-refund-create");
+        byte[] succeeded = webhookBody("fake_evt_concurrent_refund_0160", "payment_intent.succeeded",
+                intent.providerReference(), null);
+        webhookService.process(signature(succeeded), succeeded, "correlation-concurrent-refund-success");
+
+        String orderId = id(164);
+        long paymentVersion = adminFinanceRepository.payment(intent.id(), false).orElseThrow().version();
+        AdminFinanceService adminFinance = adminFinance(intent.id(), orderId);
+        RefundRequest adminRequest = new RefundRequest(
+                "PARTIAL", new BigDecimal("30.0000"), "USD", "CUSTOMER_REMEDIATION",
+                "Concurrent ceiling test", null, paymentVersion, "admin-concurrent-refund-0160");
+        CreateReturnRefundRequest returnRequest = new CreateReturnRefundRequest(
+                orderId, id(165), id(163), new BigDecimal("30.0000"), "USD");
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var admin = executor.submit(() -> adminRefundOutcomeAfter(
+                    start, adminFinance, intent.id(), adminRequest));
+            var returned = executor.submit(() -> returnRefundOutcomeAfter(
+                    start, intent.id(), returnRequest));
+            start.countDown();
+
+            List<ConcurrentRefundOutcome> outcomes = List.of(
+                    admin.get(20, TimeUnit.SECONDS),
+                    returned.get(20, TimeUnit.SECONDS));
+
+            assertThat(outcomes).filteredOn(ConcurrentRefundOutcome::succeeded).hasSize(1);
+            assertThat(outcomes).filteredOn(outcome -> !outcome.succeeded()).hasSize(1);
+            assertThat(outcomes).filteredOn(outcome -> !outcome.succeeded())
+                    .extracting(ConcurrentRefundOutcome::code)
+                    .allMatch(code -> code != null && !code.isBlank());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        BigDecimal adminRefunded = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(amount), 0) FROM payment_refunds
+                WHERE payment_intent_id = ? AND status = 'SUCCEEDED'
+                """, BigDecimal.class, intent.id());
+        BigDecimal returnRefunded = jdbc.queryForObject("""
+                SELECT COALESCE(SUM(amount), 0) FROM payment_return_refunds
+                WHERE payment_intent_id = ? AND status = 'SUCCEEDED'
+                """, BigDecimal.class, intent.id());
+        assertThat(adminRefunded.add(returnRefunded)).isEqualByComparingTo("30.0000");
+        assertThat(jdbc.queryForObject("""
+                SELECT (SELECT COUNT(*) FROM payment_refunds WHERE payment_intent_id = ?)
+                     + (SELECT COUNT(*) FROM payment_return_refunds WHERE payment_intent_id = ?)
+                """, Integer.class, intent.id(), intent.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT (SELECT COUNT(*) FROM payment_refund_attempts a
+                          JOIN payment_refunds r ON r.id = a.refund_id
+                         WHERE r.payment_intent_id = ?)
+                     + (SELECT COUNT(*) FROM payment_return_refund_attempts a
+                          JOIN payment_return_refunds r ON r.id = a.refund_id
+                         WHERE r.payment_intent_id = ?)
+                """, Integer.class, intent.id(), intent.id())).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentSameKeyAdminRefundsExecuteOnceAndReplayTheStoredResult() throws Exception {
+        PaymentIntentResponse intent = service.create(TOKEN, "payment-key-admin-replay-0170",
+                request(id(170), id(171), List.of(id(172)), "50.0000"),
+                "correlation-admin-replay-create");
+        byte[] succeeded = webhookBody("fake_evt_admin_replay_0170", "payment_intent.succeeded",
+                intent.providerReference(), null);
+        webhookService.process(signature(succeeded), succeeded, "correlation-admin-replay-success");
+
+        String orderId = id(174);
+        long paymentVersion = adminFinanceRepository.payment(intent.id(), false).orElseThrow().version();
+        AdminFinanceService adminFinance = adminFinance(intent.id(), orderId);
+        RefundRequest request = new RefundRequest(
+                "PARTIAL", new BigDecimal("10.0000"), "USD", "CUSTOMER_REMEDIATION",
+                "Concurrent idempotency test", null, paymentVersion, "admin-same-key-refund-0170");
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> adminRefundAfter(
+                    start, adminFinance, intent.id(), request, "correlation-admin-replay-1"));
+            var second = executor.submit(() -> adminRefundAfter(
+                    start, adminFinance, intent.id(), request, "correlation-admin-replay-2"));
+            start.countDown();
+
+            RefundExecution firstResult = first.get(20, TimeUnit.SECONDS);
+            RefundExecution secondResult = second.get(20, TimeUnit.SECONDS);
+            assertThat(secondResult.refundId()).isEqualTo(firstResult.refundId());
+            assertThat(List.of(firstResult.replayed(), secondResult.replayed()))
+                    .containsExactlyInAnyOrder(false, true);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds WHERE payment_intent_id = ?",
+                Integer.class, intent.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM payment_refund_attempts a
+                JOIN payment_refunds r ON r.id = a.refund_id
+                WHERE r.payment_intent_id = ?
+                """,
+                Integer.class, intent.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment_admin_refund_commands WHERE payment_intent_id = ?",
+                Integer.class, intent.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM payment_outbox_events
+                WHERE aggregate_id = ? AND event_type = 'payment.refunded'
+                """, Integer.class, intent.id())).isEqualTo(1);
+    }
+
     private int transitionAfter(
             CountDownLatch start,
             PaymentIntent current,
@@ -724,6 +909,71 @@ class PaymentIntentMySqlIntegrationTests {
                 body,
                 "correlation-webhook-concurrent");
     }
+
+    private RefundExecution adminRefundAfter(
+            CountDownLatch start,
+            AdminFinanceService adminFinance,
+            String paymentId,
+            RefundRequest request,
+            String correlation) throws InterruptedException {
+        start.await();
+        return adminFinance.execute(paymentId, request, correlation);
+    }
+
+    private ConcurrentRefundOutcome adminRefundOutcomeAfter(
+            CountDownLatch start,
+            AdminFinanceService adminFinance,
+            String paymentId,
+            RefundRequest request) throws InterruptedException {
+        start.await();
+        try {
+            adminFinance.execute(
+                    paymentId, request, "correlation-concurrent-admin");
+            return new ConcurrentRefundOutcome(true, null);
+        } catch (PaymentIntentException exception) {
+            return new ConcurrentRefundOutcome(false, exception.code());
+        }
+    }
+
+    private ConcurrentRefundOutcome returnRefundOutcomeAfter(
+            CountDownLatch start,
+            String paymentId,
+            CreateReturnRefundRequest request) throws InterruptedException {
+        start.await();
+        try {
+            returnRefundService.refund(
+                    TOKEN, paymentId, "return-concurrent-refund-0160", request,
+                    "correlation-concurrent-return");
+            return new ConcurrentRefundOutcome(true, null);
+        } catch (PaymentIntentException exception) {
+            return new ConcurrentRefundOutcome(false, exception.code());
+        }
+    }
+
+    private AdminFinanceService adminFinance(String paymentId, String orderId) {
+        CurrentActorProvider actors = mock(CurrentActorProvider.class);
+        AdminFinanceAuthorizationClient authorization = mock(AdminFinanceAuthorizationClient.class);
+        AdminFinanceOrderClient orders = mock(AdminFinanceOrderClient.class);
+        AdminFinanceGovernanceClient governance = mock(AdminFinanceGovernanceClient.class);
+        when(actors.currentActor()).thenReturn(new CurrentActor(
+                "finance-subject", "finance-token", "finance@msb.local", "Finance Admin", true));
+        when(authorization.requireAdmin("finance-token")).thenReturn(
+                new AdminFinanceAuthorizationClient.Access(
+                        id(180), List.of("PLATFORM_ADMIN"),
+                        List.of(AdminFinanceService.FINANCE_READ, AdminFinanceService.REFUND_READ,
+                                AdminFinanceService.REFUND_EXECUTE),
+                        "ACTIVE"));
+        when(orders.contexts(Set.of(paymentId))).thenReturn(Map.of(paymentId,
+                new AdminFinanceOrderClient.Context(
+                        paymentId, orderId, "MSB-CONCURRENCY", id(161),
+                        new BigDecimal("50.0000"), "USD", Instant.now(),
+                        List.of(), List.of(), List.of())));
+        return new AdminFinanceService(
+                actors, authorization, orders, governance, adminFinanceRepository,
+                paymentProviders, paymentIds, objectMapper, transactionManager);
+    }
+
+    private record ConcurrentRefundOutcome(boolean succeeded, String code) { }
 
     private byte[] webhookBody(
             String eventId,

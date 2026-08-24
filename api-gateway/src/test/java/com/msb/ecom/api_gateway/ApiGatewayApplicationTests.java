@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -17,6 +20,7 @@ import org.springframework.test.context.ActiveProfiles;
 import io.restassured.RestAssured;
 
 import java.time.Instant;
+import java.net.URI;
 
 import static org.hamcrest.Matchers.*;
 
@@ -29,6 +33,9 @@ class ApiGatewayApplicationTests {
 
 	@Autowired
 	private Environment environment;
+
+	@Autowired
+	private ClientHttpRequestFactory clientHttpRequestFactory;
 
 	@MockitoBean
 	private JwtDecoder jwtDecoder;
@@ -89,6 +96,16 @@ class ApiGatewayApplicationTests {
 	}
 
 	@Test
+	void shouldProvidePatchCapableProxyClientWhenCartFeatureIsDisabled() throws Exception {
+		org.assertj.core.api.Assertions.assertThat(environment.getProperty("msb.gateway.features.cart"))
+				.isEqualTo("false");
+		org.assertj.core.api.Assertions.assertThat(clientHttpRequestFactory)
+				.isNotInstanceOf(SimpleClientHttpRequestFactory.class);
+		var request = clientHttpRequestFactory.createRequest(URI.create("http://127.0.0.1:1"), HttpMethod.PATCH);
+		org.assertj.core.api.Assertions.assertThat(request.getMethod()).isEqualTo(HttpMethod.PATCH);
+	}
+
+	@Test
 	void shouldKeepMarketplaceDiscoveryTimeoutSeparateFromListingAgentTimeout() {
 		org.assertj.core.api.Assertions.assertThat(
 				environment.getProperty(
@@ -141,6 +158,47 @@ class ApiGatewayApplicationTests {
 				.header("Authorization", "Bearer token")
 				.when()
 				.get("/api/v1/admin/dashboard-summary")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteAdminGovernanceEndpointsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/admin/governance/approvals")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteAdminAnalyticsEndpointsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/admin/analytics/overview")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void shouldRouteAuthOwnedSupportEndpointsThroughGateway() {
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/support/tickets/mine")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+
+		RestAssured.given()
+				.header("Authorization", "Bearer token")
+				.when()
+				.get("/api/v1/admin/support/tickets")
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
@@ -496,6 +554,55 @@ class ApiGatewayApplicationTests {
 				.then()
 				.statusCode(503)
 				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void authenticatedReportRoutesAreOwnedByAuthService() {
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.contentType("application/json")
+				.body("{\"targetType\":\"LISTING\",\"targetId\":\"01L00000000000000000000001\",\"reasonCode\":\"SPAM\"}")
+				.when()
+				.post("/api/v1/reports")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/admin/reports")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+
+		RestAssured.given()
+				.header("Authorization", "Bearer valid-token")
+				.when()
+				.get("/api/v1/admin/cases")
+				.then()
+				.statusCode(503)
+				.body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void authenticatedDisputeRoutesAreOwnedByOrderService() {
+		RestAssured.given().header("Authorization", "Bearer valid-token")
+				.when().get("/api/v1/admin/disputes")
+				.then().statusCode(503).body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+		RestAssured.given().header("Authorization", "Bearer valid-token")
+				.when().get("/api/v1/disputes/01D00000000000000000000001")
+				.then().statusCode(503).body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+	}
+
+	@Test
+	void authenticatedFinanceRoutesAreOwnedByPaymentService() {
+		RestAssured.given().header("Authorization", "Bearer valid-token")
+				.when().get("/api/v1/admin/payments")
+				.then().statusCode(503).body("error.code", equalTo("SERVICE_UNAVAILABLE"));
+		RestAssured.given().header("Authorization", "Bearer valid-token")
+				.when().get("/api/v1/admin/refunds")
+				.then().statusCode(503).body("error.code", equalTo("SERVICE_UNAVAILABLE"));
 	}
 
 	@Test

@@ -71,6 +71,17 @@ public class S3ListingMediaStorage implements ListingMediaStorage, AutoCloseable
     }
 
     @Override
+    public void verifyReadable(String objectKey) {
+        try {
+            storageClient.verifyReadable(objectKey);
+        } catch (ObjectStorageAccessDeniedException exception) {
+            throw new StorageObjectAccessDeniedException("Stored media object could not be verified.");
+        } catch (ObjectStorageNotFoundException exception) {
+            throw new StorageObjectNotFoundException("Stored media object could not be verified.");
+        }
+    }
+
+    @Override
     public void close() {
         storageClient.close();
     }

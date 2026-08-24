@@ -5,6 +5,8 @@ import com.msb.ecom.common.core.validation.TextInputs;
 import com.msb.ecom.common.web.correlation.CorrelationIdFilter;
 import com.msb.ecom.common.web.security.CurrentActor;
 import com.msb.ecom.common.web.security.CurrentActorProvider;
+import com.msb.ecom.product_service.catalog.ListingCatalogPolicyService;
+import com.msb.ecom.product_service.catalog.ListingCatalogPolicyService.ValidatedCatalogValues;
 import com.msb.ecom.product_service.model.BusinessSkuConflictException;
 import com.msb.ecom.product_service.model.CategoryNotFoundException;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
@@ -59,6 +61,7 @@ import com.msb.ecom.product_service.dto.ChatTradeCompletionRequest;
 import com.msb.ecom.product_service.dto.CreateListingDraftRequest;
 import com.msb.ecom.product_service.dto.ListingEngagementResponse;
 import com.msb.ecom.product_service.dto.ListingDraftResponse;
+import com.msb.ecom.product_service.dto.ListingCatalogValuesResponse;
 import com.msb.ecom.product_service.dto.ListingImageRequest;
 import com.msb.ecom.product_service.dto.ListingImageResponse;
 import com.msb.ecom.product_service.dto.ListingMediaConfirmRequest;
@@ -116,6 +119,7 @@ public class ListingService {
             "image/webp");
 
     private final CategoryRepository categoryRepository;
+    private final ListingCatalogPolicyService listingCatalogPolicyService;
     private final ListingDraftRepository listingDraftRepository;
     private final ListingEngagementRepository listingEngagementRepository;
     private final ListingMediaRepository listingMediaRepository;
@@ -140,14 +144,14 @@ public class ListingService {
 
     @Transactional
     public ListingDraftResponse createDraft(CreateListingDraftRequest request) {
-        if (!categoryRepository.activeCategoryExists(request.categoryId())) {
-            throw new CategoryNotFoundException();
-        }
+        ValidatedCatalogValues catalogValues = listingCatalogPolicyService.validateDraft(
+                request.categoryId(), request.sellerType(), request.categoryRuleVersion(), request.attributes());
 
         ListingDraftResponse response = switch (request.sellerType()) {
-            case INDIVIDUAL -> createIndividualDraft(request);
-            case BUSINESS -> createBusinessDraft(request);
+            case INDIVIDUAL -> createIndividualDraft(request, catalogValues);
+            case BUSINESS -> createBusinessDraft(request, catalogValues);
         };
+        listingCatalogPolicyService.replaceAttributes(response.id(), catalogValues, Instant.now());
 
         log.info("Created listing draft id={} sellerType={}", response.id(), response.sellerType());
         return withSellerLabels(response);
@@ -173,6 +177,12 @@ public class ListingService {
         BusinessMembershipAuthorization membership =
                 authServiceClient.requireBusinessListingPermission(actor.accessToken(), normalizedBusinessId);
         return withSellerLabels(withImages(listingDraftRepository.findByBusinessId(membership.businessId())));
+    }
+
+    @Transactional(readOnly = true)
+    public ListingCatalogValuesResponse getOwnedListingCatalogValues(String listingId) {
+        ListingOwnerSnapshot listing = ownedListing(normalizedRequiredId("Listing ID", listingId));
+        return listingCatalogPolicyService.values(listing.id());
     }
 
     @Transactional(readOnly = true)
@@ -239,12 +249,11 @@ public class ListingService {
         if (!canBusinessSellerEdit(listing.status())) {
             throw new IllegalArgumentException("Pause an active store item before editing it.");
         }
-        if (!categoryRepository.activeCategoryExists(request.categoryId())) {
-            throw new CategoryNotFoundException();
-        }
-
         CreateListingDraftRequest normalizedRequest =
                 businessStoreItemRequest(normalizedRequiredId("Business ID", businessId), request);
+        ValidatedCatalogValues catalogValues = listingCatalogPolicyService.validateDraft(
+                normalizedRequest.categoryId(), ListingSellerType.BUSINESS,
+                normalizedRequest.categoryRuleVersion(), normalizedRequest.attributes());
         ListingDraftUpdate update = businessUpdate(
                 new ListingOwnerSnapshot(
                         listing.id(),
@@ -257,14 +266,17 @@ public class ListingService {
         int updated;
         try {
             updated = "PAUSED".equals(listing.status())
-                    ? listingDraftRepository.updatePausedBusinessStoreItem(listing.id(), expectedVersion, update, now)
-                    : listingDraftRepository.updateDraft(listing.id(), expectedVersion, update, now);
+                    ? listingDraftRepository.updatePausedBusinessStoreItem(
+                            listing.id(), expectedVersion, update, catalogValues.ruleVersion(), now)
+                    : listingDraftRepository.updateDraft(
+                            listing.id(), expectedVersion, update, catalogValues.ruleVersion(), now);
         } catch (DuplicateKeyException exception) {
             throw duplicateBusinessSku(listing.businessId(), update.sku());
         }
         if (updated == 0) {
             throw new ListingVersionConflictException();
         }
+        listingCatalogPolicyService.replaceAttributes(listing.id(), catalogValues, now);
 
         log.info("Updated business store item listingId={} businessId={} status={}",
                 listing.id(), listing.businessId(), listing.status());
@@ -283,6 +295,7 @@ public class ListingService {
             throw new IllegalArgumentException("Only draft store items can be published.");
         }
         requirePublishableBusinessStoreItem(listing);
+        listingCatalogPolicyService.validateSubmission(listing.id(), ListingSellerType.BUSINESS);
 
         Instant now = Instant.now();
         int updated = listingDraftRepository.publishBusinessStoreItem(listing.id(), expectedVersion, now);
@@ -319,6 +332,7 @@ public class ListingService {
             throw new IllegalArgumentException("Only paused store items can be relisted.");
         }
         requirePublishableBusinessStoreItem(listing);
+        listingCatalogPolicyService.validateSubmission(listing.id(), ListingSellerType.BUSINESS);
 
         Instant now = Instant.now();
         int updated = listingDraftRepository.relistBusinessStoreItem(listing.id(), expectedVersion, now);
@@ -731,12 +745,11 @@ public class ListingService {
         if (!canSellerEdit(listing.status())) {
             throw new IllegalArgumentException("Listing cannot be edited in its current state.");
         }
-        if (!categoryRepository.activeCategoryExists(request.categoryId())) {
-            throw new CategoryNotFoundException();
-        }
         if (request.sellerType() != listing.sellerType()) {
             throw new IllegalArgumentException("Listing seller type cannot be changed.");
         }
+        ValidatedCatalogValues catalogValues = listingCatalogPolicyService.validateDraft(
+                request.categoryId(), listing.sellerType(), request.categoryRuleVersion(), request.attributes());
 
         ListingDraftUpdate update = switch (listing.sellerType()) {
             case INDIVIDUAL -> individualUpdate(listing, request);
@@ -746,7 +759,8 @@ public class ListingService {
         Instant now = Instant.now();
         int updated;
         try {
-            updated = listingDraftRepository.updateDraft(listing.id(), expectedVersion, update, now);
+            updated = listingDraftRepository.updateDraft(
+                    listing.id(), expectedVersion, update, catalogValues.ruleVersion(), now);
         } catch (DuplicateKeyException exception) {
             if (listing.sellerType() == ListingSellerType.BUSINESS) {
                 throw duplicateBusinessSku(listing.businessId(), update.sku());
@@ -757,6 +771,7 @@ public class ListingService {
             throw new ListingVersionConflictException();
         }
 
+        listingCatalogPolicyService.replaceAttributes(listing.id(), catalogValues, now);
         log.info("Updated listing draft id={} sellerType={}", listing.id(), listing.sellerType());
         ListingDraftResponse updatedListing = reconcileListingKnowledge(before, now);
         recordListingSearchProjection(listing.id(), now);
@@ -800,6 +815,7 @@ public class ListingService {
         if (!listingMediaRepository.hasAttachedUploadedImage(listing.id())) {
             throw new IllegalArgumentException("At least one attached image is required before review submission.");
         }
+        listingCatalogPolicyService.validateSubmission(listing.id(), listing.sellerType());
 
         Instant now = Instant.now();
         int updated = listingDraftRepository.submitForReview(listing.id(), expectedVersion, now);
@@ -1513,7 +1529,8 @@ public class ListingService {
         listingSearchProjectionIntentService.recordCurrentState(listingId, occurredAt);
     }
 
-    private ListingDraftResponse createIndividualDraft(CreateListingDraftRequest request) {
+    private ListingDraftResponse createIndividualDraft(
+            CreateListingDraftRequest request, ValidatedCatalogValues catalogValues) {
         if (request.businessId() != null && !request.businessId().isBlank()) {
             throw new IllegalArgumentException("Individual listing must not include a business.");
         }
@@ -1544,6 +1561,7 @@ public class ListingService {
                 listingQuantity(request.quantity()),
                 location.city(),
                 location.region(),
+                catalogValues.ruleVersion(),
                 Instant.now()));
     }
 
@@ -1754,7 +1772,8 @@ public class ListingService {
                 listingModerationDecisionRepository.findByListingId(listing.id()));
     }
 
-    private ListingDraftResponse createBusinessDraft(CreateListingDraftRequest request) {
+    private ListingDraftResponse createBusinessDraft(
+            CreateListingDraftRequest request, ValidatedCatalogValues catalogValues) {
         String businessId = normalizedRequiredId("Business ID", request.businessId());
         if (Boolean.TRUE.equals(request.negotiable())) {
             throw new IllegalArgumentException("Business listings are not negotiable.");
@@ -1788,6 +1807,7 @@ public class ListingService {
                 request.quantity(),
                 null,
                 null,
+                catalogValues.ruleVersion(),
                 Instant.now());
         try {
             return listingDraftRepository.insertDraft(draft);
@@ -2241,7 +2261,9 @@ public class ListingService {
                 false,
                 null,
                 request.sku(),
-                request.quantity());
+                request.quantity(),
+                request.categoryRuleVersion(),
+                request.attributes());
     }
 
     private PublicListingResponse publicListingForEngagement(String listingId) {

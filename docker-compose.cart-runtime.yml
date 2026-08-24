@@ -173,6 +173,9 @@ services:
       PAYMENT_FAKE_WEBHOOK_SECRET: ${PAYMENT_FAKE_WEBHOOK_SECRET:-local-demo-webhook-secret}
       PAYMENT_DEMO_COMPLETION_ENABLED: "true"
       PAYMENT_REFUNDS_ENABLED: "true"
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_BROWSER_ISSUER_URI:-http://localhost:8181/realms/msb-local}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/msb-local/protocol/openid-connect/certs
+      AUTH_SERVICE_URL: http://auth-service:8085
       PAYMENT_OUTBOX_TRANSPORT: HTTP_LOCAL_DEMO
       PAYMENT_OUTBOX_DISPATCH_ENABLED: "true"
       PAYMENT_OUTBOX_WORKER_ENABLED: "true"
@@ -217,13 +220,17 @@ services:
     environment:
       COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
       CART_DEMO_SECOND_BUSINESS_FIXTURE_ENABLED: "true"
+      ORDER_SERVICE_URL: http://order-service:8081
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      INVENTORY_SERVICE_URL: http://inventory-service:8082
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
       COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
 
   product-service:
     environment:
       COMMERCE_RUNTIME_PROFILE: V2_COMMERCE_RC_01
       COMMERCE_INTERNAL_SERVICE_TOKEN: ${COMMERCE_INTERNAL_SERVICE_TOKEN:-local-commerce-service-token}
-      LISTING_MEDIA_STORAGE: local-demo
+      LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
 
   frontend:
     environment:

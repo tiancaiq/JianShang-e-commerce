@@ -163,10 +163,18 @@ async function keycloakAdminToken(baseUrl: string): Promise<string> {
   throw new Error('Could not authenticate to local Keycloak. Set E2E_KEYCLOAK_ADMIN_PASSWORD.');
 }
 
-// Resets only fixed browser-fixture records; no user-created marketplace data is touched.
+// Resets the disposable browser-demo schemas, including the global appeal ledger.
+// An explicit opt-in and Compose identity check prevent accidental use on shared data.
 function resetDemoData(subjects: Map<string, string>): void {
   const configuredContainer = process.env['E2E_MYSQL_CONTAINER'];
-  const containers = configuredContainer ? [configuredContainer] : ['mysql', 'msb-demo-mysql'];
+  if (process.env['E2E_ALLOW_DESTRUCTIVE_DEMO_RESET'] !== 'true') {
+    throw new Error('Set E2E_ALLOW_DESTRUCTIVE_DEMO_RESET=true only for the disposable demo stack.');
+  }
+  if (!configuredContainer) {
+    throw new Error('E2E_MYSQL_CONTAINER must explicitly name the disposable demo MySQL container.');
+  }
+  assertDisposableDemoMysql(configuredContainer);
+  const containers = [configuredContainer];
   const sellerSubject = sqlValue(subjects.get(SELLER.email));
   const buyerSubject = sqlValue(subjects.get(BUYER.email));
   const adminOneSubject = sqlValue(subjects.get(ADMIN_ONE.email));
@@ -248,7 +256,8 @@ function resetDemoData(subjects: Map<string, string>): void {
           )
             AND role_id IN (
               'PLATFORM_ADMIN', 'SUPER_ADMIN', 'TRUST_AND_SAFETY_ADMIN', 'BUSINESS_REVIEWER',
-              'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR', 'AUDITOR', 'AI_ADMIN_AGENT'
+              'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR', 'BUSINESS_RESTRICTOR',
+              'CATALOG_ADMIN', 'OPERATIONS_ADMIN', 'GOVERNANCE_ADMIN', 'AUDITOR', 'AI_ADMIN_AGENT'
             );
           INSERT INTO identity.user_roles (user_id, role_id, granted_by, granted_at)
           VALUES
@@ -260,6 +269,93 @@ function resetDemoData(subjects: Map<string, string>): void {
             ('${SUPPORT_ADMIN.identityId}', 'SUPPORT_ADMIN', NULL, CURRENT_TIMESTAMP(6)),
             ('${USER_RESTRICTOR.identityId}', 'USER_RESTRICTOR', NULL, CURRENT_TIMESTAMP(6))
           ON DUPLICATE KEY UPDATE granted_at = VALUES(granted_at);
+
+          DELETE FROM identity.admin_role_assignments
+          WHERE admin_user_id IN (
+            '${ADMIN_ONE.identityId}', '${ADMIN_TWO.identityId}', '${BUSINESS_REVIEWER.identityId}',
+            '${LISTING_MODERATOR.identityId}', '${AUDITOR.identityId}', '${SUPPORT_ADMIN.identityId}',
+            '${USER_RESTRICTOR.identityId}'
+          );
+          INSERT INTO identity.admin_role_assignments (
+            id, admin_user_id, role_id, status, effective_at, expires_at,
+            granted_by_admin_id, reason, request_idempotency_key, request_hash,
+            correlation_id, version, created_at, updated_at
+          ) VALUES
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${ADMIN_ONE.identityId}', '|SUPER_ADMIN'), 256), 1, 25))), '${ADMIN_ONE.identityId}', 'SUPER_ADMIN', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${ADMIN_TWO.identityId}', '|SUPER_ADMIN'), 256), 1, 25))), '${ADMIN_TWO.identityId}', 'SUPER_ADMIN', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${BUSINESS_REVIEWER.identityId}', '|BUSINESS_REVIEWER'), 256), 1, 25))), '${BUSINESS_REVIEWER.identityId}', 'BUSINESS_REVIEWER', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${LISTING_MODERATOR.identityId}', '|LISTING_MODERATOR'), 256), 1, 25))), '${LISTING_MODERATOR.identityId}', 'LISTING_MODERATOR', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${AUDITOR.identityId}', '|AUDITOR'), 256), 1, 25))), '${AUDITOR.identityId}', 'AUDITOR', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${SUPPORT_ADMIN.identityId}', '|SUPPORT_ADMIN'), 256), 1, 25))), '${SUPPORT_ADMIN.identityId}', 'SUPPORT_ADMIN', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)),
+            (CONCAT('0', UPPER(SUBSTRING(SHA2(CONCAT('${USER_RESTRICTOR.identityId}', '|USER_RESTRICTOR'), 256), 1, 25))), '${USER_RESTRICTOR.identityId}', 'USER_RESTRICTOR', 'ACTIVE', CURRENT_TIMESTAMP(6), NULL, NULL, 'Deterministic E2E fixture', NULL, NULL, 'e2e-governance-fixture', 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6));
+
+          -- Appeal analytics is global. Reset the disposable appeal domain so the
+          -- live 2/1/1 fixture has no hidden manual or prior-run denominator.
+          DELETE FROM identity.appeal_resolution_commands;
+          DELETE FROM identity.appeal_resolution_previews;
+          DELETE FROM identity.appeal_replacement_scopes;
+          DELETE FROM identity.appeal_review_notes;
+          DELETE FROM identity.appeal_events;
+          DELETE FROM identity.appeals;
+
+          -- Workflow 2 temporarily grants this seller a staff membership. Make
+          -- the disposable fixture authoritative and leave no prior membership
+          -- for the test's upsert/finally cleanup to overwrite.
+          DELETE FROM identity.business_memberships
+          WHERE business_id = '01KZCARTB00000000000000002'
+            AND user_id = '01D00000000000000000000001';
+
+          DELETE link
+          FROM identity.case_enforcement_links link
+          JOIN identity.investigation_cases investigation ON investigation.id = link.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE scope
+          FROM identity.case_enforcement_proposal_scopes scope
+          JOIN identity.case_enforcement_proposals proposal ON proposal.id = scope.proposal_id
+          JOIN identity.investigation_cases investigation ON investigation.id = proposal.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE proposal
+          FROM identity.case_enforcement_proposals proposal
+          JOIN identity.investigation_cases investigation ON investigation.id = proposal.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE event
+          FROM identity.investigation_case_events event
+          JOIN identity.investigation_cases investigation ON investigation.id = event.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE evidence
+          FROM identity.investigation_case_evidence evidence
+          JOIN identity.investigation_cases investigation ON investigation.id = evidence.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE note
+          FROM identity.investigation_case_notes note
+          JOIN identity.investigation_cases investigation ON investigation.id = note.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE target
+          FROM identity.investigation_case_targets target
+          JOIN identity.investigation_cases investigation ON investigation.id = target.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE case_report
+          FROM identity.investigation_case_reports case_report
+          JOIN identity.investigation_cases investigation ON investigation.id = case_report.case_id
+          WHERE investigation.title LIKE '[E2E]%';
+          DELETE FROM identity.investigation_cases WHERE title LIKE '[E2E]%';
+
+          DELETE event
+          FROM identity.report_events event
+          JOIN identity.reports report ON report.id = event.report_id
+          WHERE report.description LIKE '[E2E]%';
+          DELETE dedup
+          FROM identity.report_submission_dedup dedup
+          JOIN identity.reports report ON report.id = dedup.report_id
+          WHERE report.description LIKE '[E2E]%';
+          DELETE FROM identity.reports WHERE description LIKE '[E2E]%';
+          DELETE FROM identity.report_rate_limit_buckets
+          WHERE reporter_user_id IN (
+            '01D00000000000000000000001', '01D00000000000000000000002',
+            '${ADMIN_ONE.identityId}', '${ADMIN_TWO.identityId}', '${BUSINESS_REVIEWER.identityId}',
+            '${LISTING_MODERATOR.identityId}', '${AUDITOR.identityId}', '${SUPPORT_ADMIN.identityId}',
+            '${USER_RESTRICTOR.identityId}'
+          );
 
           DELETE idempotency
           FROM identity.enforcement_command_idempotency idempotency
@@ -353,6 +449,23 @@ function resetDemoData(subjects: Map<string, string>): void {
           WHERE listing_id IN (
             '01E00000000000000000000201', '01E00000000000000000000204'
           );
+          DELETE resolution
+          FROM catalog.listing_appeal_resolution_commands resolution
+          JOIN catalog.enforcement_actions action
+            ON action.id = resolution.original_enforcement_action_id
+            OR action.id = resolution.replacement_enforcement_action_id
+          WHERE action.target_type = 'LISTING'
+            AND action.target_id IN (
+              '01E00000000000000000000201', '01E00000000000000000000204',
+              '01KZ3CF59Z42DG2M0AZ8FQ1729'
+            );
+          UPDATE catalog.enforcement_actions
+          SET parent_enforcement_action_id = NULL
+          WHERE target_type = 'LISTING'
+            AND target_id IN (
+              '01E00000000000000000000201', '01E00000000000000000000204',
+              '01KZ3CF59Z42DG2M0AZ8FQ1729'
+            );
           DELETE idempotency
           FROM catalog.enforcement_command_idempotency idempotency
           JOIN catalog.enforcement_actions action
@@ -524,6 +637,33 @@ function resetDemoData(subjects: Map<string, string>): void {
             CURRENT_TIMESTAMP(6)
           );
 
+          INSERT INTO catalog.listings (
+            id, seller_type, individual_seller_user_id, business_id, store_id,
+            category_id, title, description, condition_code, condition_notes,
+            price_amount, currency, negotiable, sku, quantity, public_city,
+            public_region, payment_preferences_json, delivery_preferences_json,
+            status, moderation_status, publication_source, published_at, version,
+            created_at, updated_at
+          ) VALUES (
+            '01E00000000000000000000207', 'INDIVIDUAL',
+            '01D00000000000000000000001', NULL, NULL, @admin_category_id,
+            'Reporting workflow fixture',
+            'An active fixed listing reserved for report submission and triage verification.',
+            'GOOD', 'Fixed browser fixture.', 110.00, 'USD', FALSE,
+            NULL, 1, 'Seattle', 'WA', JSON_ARRAY('CASH'),
+            JSON_ARRAY('LOCAL_PICKUP'), 'ACTIVE', 'APPROVED', 'ADMIN_REVIEW',
+            CURRENT_TIMESTAMP(6), 0, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+          )
+          ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            description = VALUES(description),
+            status = 'ACTIVE',
+            moderation_status = 'APPROVED',
+            publication_source = 'ADMIN_REVIEW',
+            published_at = CURRENT_TIMESTAMP(6),
+            version = 0,
+            updated_at = CURRENT_TIMESTAMP(6);
+
           DELETE m FROM chat.messages m
           JOIN chat.conversations c ON c.id = m.conversation_id
           WHERE c.subject_listing_id = '01D00000000000000000000101';
@@ -552,6 +692,22 @@ function resetDemoData(subjects: Map<string, string>): void {
   throw new Error(
     `Could not reset the browser demo data in MySQL. Set E2E_MYSQL_CONTAINER and E2E_MYSQL_PASSWORD. ${String(lastError)}`,
   );
+}
+
+function assertDisposableDemoMysql(container: string): void {
+  if (container !== 'msb-demo-mysql') {
+    throw new Error(`Refusing destructive reset for non-demo container ${container}.`);
+  }
+  const identity = execFileSync('docker', [
+    'inspect', '--format',
+    '{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project.config_files"}}',
+    container,
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const [name, service, configFiles] = identity.split('|');
+  if (name !== '/msb-demo-mysql' || service !== 'mysql'
+      || !configFiles.toLowerCase().includes('docker-compose.demo.yml')) {
+    throw new Error(`Refusing destructive reset: ${container} is not the verified disposable demo MySQL service.`);
+  }
 }
 
 function sqlValue(value: string | undefined): string {

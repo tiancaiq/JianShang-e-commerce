@@ -47,6 +47,11 @@ import { BusinessStoreService } from '../../core/services/business-store.service
           <span>Store catalog</span>
           <strong>Store items</strong>
         </a>
+
+        <a routerLink="/account/appeals" class="account-action">
+          <span>Decision review</span>
+          <strong>Enforcement appeals</strong>
+        </a>
       </div>
     </section>
   `,

@@ -133,6 +133,16 @@ public class LocalCartDemoFixtureService {
                 values (?, 'PLATFORM_ADMIN', null, ?)
                 on duplicate key update granted_at = granted_at
                 """, REVIEWER_USER_ID, now);
+        jdbcTemplate.update("""
+                insert into admin_role_assignments (
+                    id, admin_user_id, role_id, status, effective_at, expires_at,
+                    granted_by_admin_id, reason, correlation_id, version, created_at, updated_at
+                ) values ('01CARTF1XTUREP1ATF0RMADM01', ?, 'SUPER_ADMIN', 'ACTIVE', ?, null,
+                          null, 'Local cart demo fixture', 'local-cart-demo-fixture', 0, ?, ?)
+                on duplicate key update status = 'ACTIVE', expires_at = null,
+                    revoked_at = null, revoked_by_admin_id = null, revocation_reason = null,
+                    updated_at = values(updated_at)
+                """, REVIEWER_USER_ID, now, now, now);
         if (shenOwnerSubject != null && !shenOwnerSubject.isBlank()) {
             ensureShenBusiness(now);
         }

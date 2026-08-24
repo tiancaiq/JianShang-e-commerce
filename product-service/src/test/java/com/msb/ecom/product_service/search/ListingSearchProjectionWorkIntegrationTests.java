@@ -1,5 +1,6 @@
 package com.msb.ecom.product_service.search;
 
+import com.msb.ecom.product_service.operations.ProductOperationsRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,9 @@ class ListingSearchProjectionWorkIntegrationTests {
     @Autowired
     ListingSearchProjectionWorkRepository repository;
 
+    @Autowired
+    ProductOperationsRepository operationsRepository;
+
     @BeforeEach
     void reset() {
         jdbcTemplate.update("delete from listing_search_projection_work");
@@ -89,6 +93,34 @@ class ListingSearchProjectionWorkIntegrationTests {
 
         assertThatThrownBy(() -> repository.insert(
                 "01W00000000000000000000253", LISTING_ID, 1, "UPSERT", NOW))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    void boundedAdminReindexKeepsNormalIntentFenceAndPreservesReplayHistory() {
+        transactionTemplate.executeWithoutResult(status -> {
+            ProductOperationsRepository.ListingState listing = operationsRepository
+                    .listingForUpdate(LISTING_ID).orElseThrow();
+            operationsRepository.reindex(
+                    listing, "01W00000000000000000000255", "correlation-one", NOW);
+        });
+        transactionTemplate.executeWithoutResult(status -> {
+            ProductOperationsRepository.ListingState listing = operationsRepository
+                    .listingForUpdate(LISTING_ID).orElseThrow();
+            operationsRepository.reindex(
+                    listing, "01W00000000000000000000256", "correlation-two", NOW.plusSeconds(1));
+        });
+
+        assertThat(jdbcTemplate.queryForList("""
+                select replay_sequence
+                from listing_search_projection_work
+                where listing_id = ? and listing_version = 0
+                order by replay_sequence
+                """, Integer.class, LISTING_ID)).containsExactly(1, 2);
+
+        repository.insert("01W00000000000000000000257", LISTING_ID, 0, "DELETE", NOW.plusSeconds(2));
+        assertThatThrownBy(() -> repository.insert(
+                "01W00000000000000000000258", LISTING_ID, 0, "UPSERT", NOW.plusSeconds(3)))
                 .isInstanceOf(DuplicateKeyException.class);
     }
 

@@ -32,10 +32,18 @@ describe('AdminLayoutComponent', () => {
     fixture.detectChanges();
   });
 
-  it('shows only MVP admin navigation', () => {
+  it('shows the approved admin navigation including order operations', () => {
     const text = fixture.nativeElement.textContent;
 
     expect(text).toContain('Dashboard');
+    expect(text).toContain('Analytics');
+    expect(text).toContain('Overview');
+    expect(text).toContain('Marketplace');
+    expect(text).toContain('Trust & Safety');
+    expect(text).toContain('Commerce');
+    expect(text).toContain('Customer Operations');
+    expect(text).toContain('Operations');
+    expect(text).toContain('Governance');
     expect(text).toContain('Users');
     expect(text).not.toContain('User Control');
     expect(text).toContain('Business Review');
@@ -43,15 +51,23 @@ describe('AdminLayoutComponent', () => {
     expect(text).not.toContain('Category Guidance');
     expect(text).not.toContain('Search Maintenance');
     expect(text).not.toContain('Reports');
-    expect(text).not.toContain('Support');
+    expect(text).toContain('Support');
+    expect(text).toContain('System');
     expect(text).not.toContain('Suspensions');
     expect(text).not.toContain('Cart');
     expect(text).not.toContain('Checkout');
-    expect(text).not.toContain('Orders');
-    expect(text).not.toContain('Payments');
+    expect(text).toContain('Orders');
+    expect(text).toContain('Payments');
+    expect(text).toContain('Refunds');
     expect(text).not.toContain('Inventory');
     expect(text).not.toContain('Wallet');
     expect(text).not.toContain('Notifications');
+
+    const navigation = (fixture.nativeElement as HTMLElement).querySelector('nav')?.textContent ?? '';
+    expect(navigation.indexOf('Marketplace')).toBeLessThan(navigation.indexOf('Trust & Safety'));
+    expect(navigation.indexOf('Trust & Safety')).toBeLessThan(navigation.indexOf('Commerce'));
+    expect(navigation.indexOf('Orders')).toBeLessThan(navigation.indexOf('Disputes'));
+    expect(navigation.indexOf('Disputes')).toBeLessThan(navigation.indexOf('Payments'));
   });
 
   it('shows search maintenance navigation only after explicit capability opt-in', async () => {
@@ -86,8 +102,17 @@ describe('AdminLayoutComponent', () => {
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Dashboard');
     expect(text).toContain('Business Review');
+    expect(text).toContain('Overview');
+    expect(text).toContain('Marketplace');
+    expect(text).not.toContain('Analytics');
     expect(text).not.toContain('Listing Review');
+    expect(text).not.toContain('Orders');
+    expect(text).not.toContain('System');
     expect(text).not.toContain('Search Maintenance');
+    expect(text).not.toContain('Trust & Safety');
+    expect(text).not.toContain('Commerce');
+    expect(text).not.toContain('Customer Operations');
+    expect(text).not.toContain('Governance');
   });
 
   it('logs out through the admin portal surface', () => {

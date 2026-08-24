@@ -18,11 +18,12 @@ import { ProfileCardUser, UserProfileCardComponent } from '../account/user-profi
 import { AGENT_CUSTOMER_SERVICE_ENABLED } from '../agent/agent-customer-service.capability';
 import { toAgentListingSelection } from '../agent/agent-listing-context.model';
 import { CART_ENABLED } from '../cart/cart.capability';
+import { ReportDialogComponent } from '../../shared/components/report-dialog.component';
 
 @Component({
   selector: 'app-public-listing-detail',
   standalone: true,
-  imports: [DecimalPipe, ListingImageGalleryComponent, RouterLink, UserProfileCardComponent],
+  imports: [DecimalPipe, ListingImageGalleryComponent, RouterLink, UserProfileCardComponent, ReportDialogComponent],
   template: `
     <section class="listing-detail">
       @if (loading()) {
@@ -200,6 +201,7 @@ import { CART_ENABLED } from '../cart/cart.capability';
                 <strong>Safety note</strong>
                 <p>{{ marketplaceNotice(listing()) }}</p>
               </aside>
+              <button type="button" class="report-link" (click)="openReport()">Report listing</button>
             </article>
 
             @if (listing()?.sellerType === 'INDIVIDUAL') {
@@ -230,6 +232,9 @@ import { CART_ENABLED } from '../cart/cart.capability';
             </div>
           }
         </section>
+        @if (reportOpen() && listing(); as current) {
+          <app-report-dialog targetType="LISTING" [targetId]="current.id" targetLabel="this listing" (close)="reportOpen.set(false)" />
+        }
 
         @if (chatOpen() && conversation()) {
           <div class="chat-backdrop" (click)="closeChat()"></div>
@@ -599,6 +604,9 @@ import { CART_ENABLED } from '../cart/cart.capability';
       background: #effbf8;
       color: #246558;
     }
+
+    .report-link { justify-self:start;border:0;background:transparent;color:var(--market-muted);padding:.35rem 0;font:inherit;font-weight:850;text-decoration:underline;text-underline-offset:3px;cursor:pointer }
+    .report-link:hover { color:#b4234f }
 
     .business-purchase-box {
       display: grid;
@@ -1139,6 +1147,7 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
   cartAdded = signal(false);
   cartStatus = signal('');
   cartStatusType = signal<'success' | 'error'>('success');
+  reportOpen = signal(false);
 
   ngOnInit(): void {
     const listingId = this.route.snapshot.paramMap.get('listingId') || '';
@@ -1165,6 +1174,14 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
 
   conditionLabel(condition: string): string {
     return publicListingConditionLabel(condition);
+  }
+
+  openReport(): void {
+    if (!this.authService.isAuthenticated()) {
+      this.authService.login('marketplace', this.router.url);
+      return;
+    }
+    this.reportOpen.set(true);
   }
 
   ngOnDestroy(): void {

@@ -122,12 +122,52 @@ public class AdminUserService {
 
     @Transactional
     public EnforcementPreview createPreview(String rawUserId, CreateEnforcementRequest request) {
-        return create(rawUserId, request, true);
+        return create(rawUserId, request, null, true);
     }
 
     @Transactional
     public Result createConfirmed(String rawUserId, CreateEnforcementRequest request) {
-        return create(rawUserId, request, false).proposedAction();
+        return create(rawUserId, request, null, false).proposedAction();
+    }
+
+    @Transactional
+    public EnforcementPreview createCasePreview(String rawUserId, CreateEnforcementRequest request, String caseId) {
+        return create(rawUserId, request, caseId, true);
+    }
+
+    @Transactional
+    public Result createCaseConfirmed(String rawUserId, CreateEnforcementRequest request, String caseId) {
+        return create(rawUserId, request, caseId, false).proposedAction();
+    }
+
+    @Transactional
+    // Previews an appeal replacement while treating its still-active original action as revoked.
+    public EnforcementPreview createAppealReplacementPreview(String rawUserId, String originalEnforcementId,
+                                                              CreateEnforcementRequest request, String caseId) {
+        User actor = authService.ensureUserEntity();
+        if (request == null || request.actionType() == null) {
+            throw new EnforcementExceptions.Validation("Action type is required.");
+        }
+        authorizationService.requirePermission(actor, switch (request.actionType()) {
+            case RESTRICT -> AdminPermission.USER_RESTRICT;
+            case SUSPEND -> AdminPermission.USER_SUSPEND;
+            case BAN -> AdminPermission.USER_BAN;
+        });
+        String userId = userId(rawUserId);
+        User target = protectedTarget(actor, userId);
+        Set<Scope> scopes = request.actionType() == ActionType.BAN
+                ? OPERATIONAL_SCOPES : operationalScopes(request.scopes());
+        List<Result> existing = enforcementService.actions(TargetType.USER, userId).stream()
+                .filter(this::active)
+                .filter(action -> !action.enforcementActionId().equals(originalEnforcementId))
+                .filter(action -> action.scopes().stream().anyMatch(scopes::contains)).toList();
+        Result proposed = enforcementService.previewReplacement(new CreateCommand(
+                TargetType.USER, userId, request.actionType(), scopes, request.reasonCode(), request.reason(), caseId,
+                request.effectiveAt(), request.expiresAt(), request.expectedUserVersion(), null,
+                safeMetadata(request.safeMetadata()), true), originalEnforcementId);
+        return new EnforcementPreview(proposed, existing, proposed.effectiveRestrictions(),
+                warnings(proposed, existing), request.expiresAt() == null,
+                request.expectedUserVersion() != null && target.getVersion() == request.expectedUserVersion());
     }
 
     @Transactional
@@ -156,7 +196,7 @@ public class AdminUserService {
         return enforcementService.timeline(TargetType.USER, userId);
     }
 
-    private EnforcementPreview create(String rawUserId, CreateEnforcementRequest request, boolean dryRun) {
+    private EnforcementPreview create(String rawUserId, CreateEnforcementRequest request, String caseId, boolean dryRun) {
         User actor = authService.ensureUserEntity();
         if (request == null || request.actionType() == null) {
             throw new EnforcementExceptions.Validation("Action type is required.");
@@ -176,7 +216,7 @@ public class AdminUserService {
                 .filter(action -> action.scopes().stream().anyMatch(scopes::contains))
                 .toList();
         Result proposed = enforcementService.create(new CreateCommand(
-                TargetType.USER, userId, request.actionType(), scopes, request.reasonCode(), request.reason(), null,
+                TargetType.USER, userId, request.actionType(), scopes, request.reasonCode(), request.reason(), caseId,
                 request.effectiveAt(), request.expiresAt(), request.expectedUserVersion(),
                 request.idempotencyKey(), safeMetadata(request.safeMetadata()), dryRun));
         return new EnforcementPreview(proposed, existing, proposed.effectiveRestrictions(),

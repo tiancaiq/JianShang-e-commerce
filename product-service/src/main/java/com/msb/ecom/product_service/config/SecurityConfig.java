@@ -18,6 +18,7 @@ public class SecurityConfig {
                                 "/api/v1/categories",
                                 "/api/v1/categories/**",
                                 "/api/v1/public/**",
+                                "/api/v1/internal/admin/analytics/**",
                                 "/api/v1/internal/**",
                                 "/actuator/health/**").permitAll()
                         .anyRequest().authenticated())

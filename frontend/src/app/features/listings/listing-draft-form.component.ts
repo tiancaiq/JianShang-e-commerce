@@ -69,7 +69,7 @@ interface PendingListingMedia {
 
           <label class="field">
             <span>Category</span>
-            <select name="categoryId" [(ngModel)]="categoryId" [class.invalid]="fieldInvalid('categoryId')" [disabled]="!canEditDraft() || loadingCategories() || saving()">
+            <select name="categoryId" [(ngModel)]="categoryId" (ngModelChange)="categoryChanged($event)" [class.invalid]="fieldInvalid('categoryId')" [disabled]="!canEditDraft() || loadingCategories() || saving()">
               <option value="">Select category</option>
               @for (category of categories(); track category.id) {
                 <option [value]="category.id">{{ category.name }}</option>
@@ -89,6 +89,37 @@ interface PendingListingMedia {
             </select>
           </label>
         </div>
+
+        @if (selectedCategory(); as category) {
+          @if ((category.guidance || []).length) {
+            <section class="catalog-guidance" aria-label="Category guidance">
+              <div class="catalog-guidance-heading"><strong>Seller guidance</strong><span>Helpful, not a submission rule</span></div>
+              @for (tip of category.guidance || []; track tip.id) {
+                <article [class.warning]="tip.guidanceType === 'WARNING' || tip.guidanceType === 'POLICY_NOTICE'">
+                  <small>{{ guidanceLabel(tip.guidanceType) }}</small><b>{{ tip.title }}</b><p>{{ tip.body }}</p>
+                </article>
+              }
+            </section>
+          }
+          @if (category.attributes.length) {
+            <section class="catalog-attributes">
+              <header><div><strong>Category details</strong><span>Fields marked required are checked again when you submit.</span></div><small>Rule v{{category.ruleVersion || 1}}</small></header>
+              <div class="form-grid">
+                @for (attribute of category.attributes; track attribute.id) {
+                  @if (attribute.dataType === 'BOOLEAN') {
+                    <label class="field catalog-checkbox"><input [name]="'attribute-'+attribute.key" type="checkbox" [(ngModel)]="attributeValues[attribute.key]" [disabled]="!canEditDraft() || saving()"><span>{{attribute.label}}{{attribute.required?' *':''}}</span><small>{{attribute.description}}</small></label>
+                  } @else if (attribute.dataType === 'ENUM') {
+                    <label class="field"><span>{{attribute.label}}{{attribute.required?' *':''}}</span><select [name]="'attribute-'+attribute.key" [(ngModel)]="attributeValues[attribute.key]" [disabled]="!canEditDraft() || saving()"><option value="">Select {{attribute.label}}</option>@for(option of attribute.options || [];track option.id){<option [value]="option.value">{{option.label}}</option>}</select><small>{{attribute.description}}</small></label>
+                  } @else if (attribute.dataType === 'MULTI_ENUM') {
+                    <label class="field"><span>{{attribute.label}}{{attribute.required?' *':''}}</span><select multiple [name]="'attribute-'+attribute.key" [(ngModel)]="attributeValues[attribute.key]" [disabled]="!canEditDraft() || saving()">@for(option of attribute.options || [];track option.id){<option [value]="option.value">{{option.label}}</option>}</select><small>{{attribute.description}} Hold Ctrl or Command to select more than one.</small></label>
+                  } @else {
+                    <label class="field"><span>{{attribute.label}}{{attribute.required?' *':''}}</span><input [name]="'attribute-'+attribute.key" [type]="attribute.dataType==='NUMBER'?'number':'text'" [(ngModel)]="attributeValues[attribute.key]" [disabled]="!canEditDraft() || saving()"><small>{{attribute.description}}</small></label>
+                  }
+                }
+              </div>
+            </section>
+          }
+        }
 
         <label class="field">
           <span>Title</span>
@@ -339,6 +370,34 @@ interface PendingListingMedia {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1rem;
     }
+
+    .catalog-guidance,
+    .catalog-attributes {
+      display: grid;
+      gap: 0.75rem;
+      padding: 1rem;
+      border: 1px solid var(--listing-border);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--listing-field) 75%, transparent);
+    }
+
+    .catalog-guidance { border-left: 4px solid #34d399; }
+    .catalog-guidance-heading,
+    .catalog-attributes > header { display: flex; justify-content: space-between; gap: 1rem; }
+    .catalog-guidance-heading span,
+    .catalog-attributes header span,
+    .catalog-attributes header small,
+    .field small { color: var(--listing-subtle); font-size: 0.75rem; }
+    .catalog-guidance article { padding: 0.75rem; border-radius: var(--radius-md); background: var(--listing-surface); }
+    .catalog-guidance article.warning { border-left: 3px solid #f59e0b; }
+    .catalog-guidance article small,
+    .catalog-guidance article b { display: block; }
+    .catalog-guidance article small { color: #34d399; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .catalog-guidance article p { margin: .35rem 0 0; color: var(--listing-muted); }
+    .catalog-checkbox { flex-direction: row; flex-wrap: wrap; align-items: center; }
+    .catalog-checkbox input { width: auto; min-height: auto; }
+    .catalog-checkbox small { flex-basis: 100%; }
+    .catalog-attributes select[multiple] { min-height: 110px; }
 
     .field {
       display: flex;
@@ -651,6 +710,8 @@ export class ListingDraftFormComponent implements OnInit {
   negotiable = true;
   sku = '';
   quantity: number | null = 1;
+  categoryRuleVersion: number | null = null;
+  attributeValues: Record<string, any> = {};
 
   ngOnInit(): void {
     this.editListingId = this.route.snapshot.paramMap.get('listingId') || '';
@@ -679,6 +740,9 @@ export class ListingDraftFormComponent implements OnInit {
         this.categories.set(categories);
         if (!this.categoryId && categories.length > 0) {
           this.categoryId = categories[0].id;
+          this.categoryChanged(this.categoryId);
+        } else if (this.categoryId && this.categoryRuleVersion === null) {
+          this.categoryRuleVersion = this.selectedCategory()?.ruleVersion || 1;
         }
         this.loadingCategories.set(false);
       },
@@ -891,7 +955,7 @@ export class ListingDraftFormComponent implements OnInit {
       return;
     }
     this.formSubmitted.set(true);
-    if (!this.validate()) {
+    if (!this.validate(true)) {
       return;
     }
     if (this.pendingMediaItems().length > 0) {
@@ -926,6 +990,11 @@ export class ListingDraftFormComponent implements OnInit {
       },
       error: error => {
         this.submitting.set(false);
+        if (error.status === 409 && error.error?.error?.code === 'CATEGORY_RULE_CHANGED') {
+          this.errorMsg.set('Category requirements changed. The latest fields were loaded; review and save before submitting.');
+          this.reloadCategorySchema();
+          return;
+        }
         if (error.status === 409) {
           this.errorMsg.set('This listing changed elsewhere. Reload it before submitting.');
           return;
@@ -944,6 +1013,11 @@ export class ListingDraftFormComponent implements OnInit {
       },
       error: error => {
         this.submitting.set(false);
+        if (error.status === 409 && error.error?.error?.code === 'CATEGORY_RULE_CHANGED') {
+          this.errorMsg.set('Category requirements changed. The latest fields were loaded and compatible values were preserved.');
+          this.reloadCategorySchema();
+          return;
+        }
         if (error.status === 409) {
           this.errorMsg.set('This draft changed elsewhere. Reload it before submitting.');
           return;
@@ -1037,6 +1111,11 @@ export class ListingDraftFormComponent implements OnInit {
       },
       error: error => {
         this.submitting.set(false);
+        if (error.status === 409 && error.error?.error?.code === 'CATEGORY_RULE_CHANGED') {
+          this.errorMsg.set('Category requirements changed. The latest fields were loaded; review and save the listing before submitting again.');
+          this.reloadCategorySchema();
+          return;
+        }
         if (error.status === 409) {
           this.errorMsg.set('This store item changed elsewhere. Reload it before continuing.');
           return;
@@ -1237,6 +1316,11 @@ export class ListingDraftFormComponent implements OnInit {
       },
       error: error => {
         this.saving.set(false);
+        if (error.status === 409 && error.error?.error?.code === 'CATEGORY_RULE_CHANGED') {
+          this.errorMsg.set('Category requirements changed while you were editing. The latest fields were loaded and compatible values were preserved. Review them before saving.');
+          this.reloadCategorySchema();
+          return;
+        }
         if (error.status === 409) {
           this.proposalApplicationState.set('CONFLICT');
           this.proposalApplicationMessage.set(
@@ -1348,7 +1432,66 @@ export class ListingDraftFormComponent implements OnInit {
     return [this.listingBasePath(), listingId, 'edit'];
   }
 
-  private validate(): boolean {
+  selectedCategory(): Category | null {
+    return this.categories().find(category => category.id === this.categoryId) || null;
+  }
+
+  categoryChanged(categoryId: string): void {
+    this.categoryId = categoryId;
+    const category = this.selectedCategory();
+    if (!category) {
+      this.categoryRuleVersion = null;
+      return;
+    }
+    const compatible: Record<string, any> = {};
+    for (const attribute of category.attributes || []) {
+      if (Object.prototype.hasOwnProperty.call(this.attributeValues, attribute.key)) {
+        compatible[attribute.key] = this.attributeValues[attribute.key];
+      } else if (attribute.dataType === 'MULTI_ENUM') {
+        compatible[attribute.key] = [];
+      } else if (attribute.dataType === 'BOOLEAN') {
+        compatible[attribute.key] = false;
+      } else {
+        compatible[attribute.key] = '';
+      }
+    }
+    this.attributeValues = compatible;
+    this.categoryRuleVersion = category.ruleVersion || 1;
+  }
+
+  guidanceLabel(value: string): string {
+    return value.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
+  }
+
+  private loadCatalogValues(listingId: string): void {
+    this.listingService.getListingCatalogValues(listingId).subscribe({
+      next: values => {
+        this.categoryRuleVersion = values.categoryRuleVersion;
+        this.attributeValues = { ...values.attributes };
+        this.rememberCurrentFormSnapshot();
+      },
+      error: () => this.errorMsg.set('Saved category fields could not be loaded.'),
+    });
+  }
+
+  private reloadCategorySchema(): void {
+    const existingValues = { ...this.attributeValues };
+    this.loadingCategories.set(true);
+    this.listingService.getCategories().subscribe({
+      next: categories => {
+        this.categories.set(categories);
+        this.attributeValues = existingValues;
+        this.categoryChanged(this.categoryId);
+        this.loadingCategories.set(false);
+      },
+      error: () => {
+        this.loadingCategories.set(false);
+        this.errorMsg.set('Category requirements changed, but the latest schema could not be loaded. Reload the page before continuing.');
+      },
+    });
+  }
+
+  private validate(requireCategoryFields = false): boolean {
     if (this.marketplaceAccountMode()) {
       this.sellerType = 'INDIVIDUAL';
       this.businessId = '';
@@ -1370,6 +1513,19 @@ export class ListingDraftFormComponent implements OnInit {
     if (!result.valid) {
       this.errorMsg.set(result.message);
       return false;
+    }
+
+    const category = this.selectedCategory();
+    if (category && requireCategoryFields) {
+      for (const attribute of category.attributes || []) {
+        const value = this.attributeValues[attribute.key];
+        const empty = value === null || value === undefined || value === ''
+          || Array.isArray(value) && value.length === 0;
+        if (attribute.required && empty) {
+          this.errorMsg.set(`${attribute.label} is required for this category.`);
+          return false;
+        }
+      }
     }
 
     return true;
@@ -1437,6 +1593,7 @@ export class ListingDraftFormComponent implements OnInit {
     this.clearSelectedMedia();
     this.formSubmitted.set(false);
     this.rememberCurrentFormSnapshot();
+    this.loadCatalogValues(listing.id);
   }
 
   private formState(): ListingDraftFormState {
@@ -1456,6 +1613,8 @@ export class ListingDraftFormComponent implements OnInit {
       negotiable: this.businessStoreMode() ? false : this.negotiable,
       sku: this.sku,
       quantity: this.quantity,
+      categoryRuleVersion: this.categoryRuleVersion,
+      attributes: this.attributeValues,
     };
   }
 
@@ -1474,6 +1633,8 @@ export class ListingDraftFormComponent implements OnInit {
     this.negotiable = this.businessStoreMode() ? false : state.negotiable;
     this.sku = state.sku;
     this.quantity = state.quantity || 1;
+    this.categoryRuleVersion = state.categoryRuleVersion ?? this.selectedCategory()?.ruleVersion ?? null;
+    this.attributeValues = {...(state.attributes || this.attributeValues)};
   }
 
   private refreshDraftAfterMediaChange(listingId: string): void {

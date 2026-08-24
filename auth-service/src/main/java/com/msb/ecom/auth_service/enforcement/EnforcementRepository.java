@@ -139,6 +139,10 @@ class EnforcementRepository {
     }
 
     List<Action> actions(TargetType targetType, String targetId) {
+        return actions(targetType, targetId, false);
+    }
+
+    List<Action> actions(TargetType targetType, String targetId, boolean lock) {
         return jdbcTemplate.query("""
                 select id, target_type, target_id, action_type, version, effective_at, expires_at,
                        reason_code, reason, case_id, target_version_at_decision, source,
@@ -148,7 +152,8 @@ class EnforcementRepository {
                 from enforcement_actions
                 where target_type = ? and target_id = ?
                 order by created_at desc, id desc
-                """, this::action, targetType.name(), targetId).stream().map(this::withScopes).toList();
+                """ + (lock ? " for update" : ""), this::action, targetType.name(), targetId)
+                .stream().map(this::withScopes).toList();
     }
 
     void revoke(Action action, EnforcementPolicy.NormalizedRevoke command, Actor actor,

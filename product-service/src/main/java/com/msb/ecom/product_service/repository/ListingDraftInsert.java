@@ -24,6 +24,7 @@ public record ListingDraftInsert(
         int quantity,
         String publicCity,
         String publicRegion,
+        long categoryRuleVersion,
         Instant now
 ) {
 }

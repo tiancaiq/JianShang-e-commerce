@@ -160,6 +160,21 @@ describe('listing draft form helpers', () => {
     expect(isEditableListingStatus('SOLD')).toBeFalse();
   });
 
+  it('carries the selected category rule version and dynamic attributes into draft requests', () => {
+    const request = buildListingDraftRequest({
+      ...baseState,
+      categoryRuleVersion: 7,
+      attributes: { frameSize: 'M', electric: false, colors: ['blue', 'black'] },
+    });
+
+    expect(request.categoryRuleVersion).toBe(7);
+    expect(request.attributes).toEqual({
+      frameSize: 'M',
+      electric: false,
+      colors: ['blue', 'black'],
+    });
+  });
+
   it('identifies statuses that seller close actions can still close', () => {
     expect(isClosableListingStatus('DRAFT')).toBeTrue();
     expect(isClosableListingStatus('PENDING_REVIEW')).toBeFalse();

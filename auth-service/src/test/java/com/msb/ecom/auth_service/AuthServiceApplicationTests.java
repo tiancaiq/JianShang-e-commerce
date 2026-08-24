@@ -26,7 +26,9 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -86,7 +88,7 @@ class AuthServiceApplicationTests {
     @Test
     void cleanMysqlDatabaseMigratesSuccessfully() {
         assertThat(flyway.info().current().getScript())
-                .isEqualTo("V202608150300__activate_listing_enforcement_permissions.sql");
+                .isEqualTo("V202608260200__reserve_appeal_resolution_commands.sql");
         Integer tableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'users'",
                 Integer.class);
@@ -99,6 +101,9 @@ class AuthServiceApplicationTests {
                 "select count(*) from roles where id in ('BUYER', 'INDIVIDUAL_SELLER')",
                 Integer.class);
         assertThat(roleCount).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables where table_schema = database() and table_name in ('admin_role_assignments','sensitive_action_policies','admin_approval_requests','admin_approval_decisions','admin_governance_events')",
+                Integer.class)).isEqualTo(5);
         Integer businessApplicationTableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'business_applications'",
                 Integer.class);
@@ -114,14 +119,20 @@ class AuthServiceApplicationTests {
         Integer adminPermissionCount = jdbcTemplate.queryForObject(
                 "select count(*) from admin_permissions",
                 Integer.class);
-        assertThat(adminPermissionCount).isEqualTo(27);
+        assertThat(adminPermissionCount).isEqualTo(65);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_role_permissions
+                where permission_id = 'admin.analytics.read'
+                  and role_id in ('SUPER_ADMIN','PLATFORM_ADMIN','OPERATIONS_ADMIN','AUDITOR')
+                """, Integer.class)).isEqualTo(4);
         Integer adminRoleCount = jdbcTemplate.queryForObject("""
                 select count(*) from roles
                 where id in ('SUPER_ADMIN', 'TRUST_AND_SAFETY_ADMIN', 'BUSINESS_REVIEWER',
                              'LISTING_MODERATOR', 'SUPPORT_ADMIN', 'USER_RESTRICTOR',
-                             'BUSINESS_RESTRICTOR', 'AUDITOR', 'AI_ADMIN_AGENT')
+                             'BUSINESS_RESTRICTOR', 'AUDITOR', 'AI_ADMIN_AGENT', 'CATALOG_ADMIN',
+                             'OPERATIONS_ADMIN', 'GOVERNANCE_ADMIN')
                 """, Integer.class);
-        assertThat(adminRoleCount).isEqualTo(9);
+        assertThat(adminRoleCount).isEqualTo(12);
         Integer storeTableCount = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables where table_schema = database() and table_name = 'stores'",
                 Integer.class);
@@ -148,6 +159,94 @@ class AuthServiceApplicationTests {
                 where id in ('admin.listing.suspend', 'admin.listing.reinstate') and reserved = false
                 """, Integer.class);
         assertThat(activeListingEnforcementPermissionCount).isEqualTo(2);
+        Integer reportingTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('reports', 'report_events', 'report_submission_dedup', 'report_rate_limit_buckets')
+                """, Integer.class);
+        assertThat(reportingTableCount).isEqualTo(4);
+        Integer activeReportPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.report.read', 'admin.report.assign', 'admin.report.investigate', 'admin.report.resolve') and reserved = false
+                """, Integer.class);
+        assertThat(activeReportPermissionCount).isEqualTo(4);
+        Integer investigationTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('investigation_cases', 'investigation_case_reports',
+                    'investigation_case_targets', 'investigation_case_notes',
+                    'investigation_case_evidence', 'investigation_case_events')
+                """, Integer.class);
+        assertThat(investigationTableCount).isEqualTo(6);
+        Integer caseEnforcementTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('case_enforcement_proposals',
+                    'case_enforcement_proposal_scopes', 'case_enforcement_links')
+                """, Integer.class);
+        assertThat(caseEnforcementTableCount).isEqualTo(3);
+        Integer appealTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('appeals', 'appeal_replacement_scopes',
+                    'appeal_review_notes', 'appeal_events')
+                """, Integer.class);
+        assertThat(appealTableCount).isEqualTo(4);
+        Integer activeAppealPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.appeal.read', 'admin.appeal.assign', 'admin.appeal.review')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeAppealPermissionCount).isEqualTo(3);
+        Integer activeDisputePermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.dispute.read', 'admin.dispute.assign',
+                             'admin.dispute.investigate', 'admin.dispute.resolve')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeDisputePermissionCount).isEqualTo(4);
+        Integer activeFinancePermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.finance.read', 'admin.refund.read', 'admin.refund.execute')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeFinancePermissionCount).isEqualTo(3);
+        Integer financeRoleGrantCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_role_permissions
+                where (role_id in ('SUPER_ADMIN', 'PLATFORM_ADMIN')
+                       and permission_id in ('admin.finance.read', 'admin.refund.read', 'admin.refund.execute'))
+                   or (role_id in ('SUPPORT_ADMIN', 'AUDITOR')
+                       and permission_id in ('admin.finance.read', 'admin.refund.read'))
+                """, Integer.class);
+        assertThat(financeRoleGrantCount).isEqualTo(10);
+        Integer supportTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('support_tickets', 'support_messages', 'support_internal_notes',
+                    'support_ticket_links', 'support_escalations', 'support_ticket_events',
+                    'support_command_idempotency')
+                """, Integer.class);
+        assertThat(supportTableCount).isEqualTo(7);
+        Integer activeSupportPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.support.read', 'admin.support.assign', 'admin.support.respond',
+                             'admin.support.resolve', 'admin.support.escalate')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeSupportPermissionCount).isEqualTo(5);
+        Integer activeSystemPermissionCount = jdbcTemplate.queryForObject("""
+                select count(*) from admin_permissions
+                where id in ('admin.system.read', 'admin.system.retry',
+                             'admin.search.maintenance', 'admin.feature.read')
+                  and reserved = false
+                """, Integer.class);
+        assertThat(activeSystemPermissionCount).isEqualTo(4);
+        Integer systemOperationsTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                where table_schema = database()
+                  and table_name in ('system_operation_commands', 'system_operation_events')
+                """, Integer.class);
+        assertThat(systemOperationsTableCount).isEqualTo(2);
         Integer activeBusinessAccountIndexCount = jdbcTemplate.queryForObject("""
                 select count(*)
                 from information_schema.statistics
@@ -1791,6 +1890,281 @@ class AuthServiceApplicationTests {
     }
 
     @Test
+    void expiredAdminAssignmentStopsGrantingPermissionsWithoutCleanup() throws Exception {
+        String subject = "keycloak-sub-expired-admin-assignment";
+        grantAdminRole(subject, "SUPPORT_ADMIN");
+        String userId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, subject);
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                update admin_role_assignments
+                set effective_at = ?, expires_at = ?, updated_at = ?
+                where admin_user_id = ? and role_id = 'SUPPORT_ADMIN'
+                """, Timestamp.from(now.minusSeconds(7200)), Timestamp.from(now.minusSeconds(3600)),
+                Timestamp.from(now), userId);
+
+        mockMvc.perform(get("/api/v1/admin/me")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isForbidden());
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_role_assignments
+                where admin_user_id = ? and role_id = 'SUPPORT_ADMIN' and status = 'ACTIVE'
+                """, Integer.class, userId)).isEqualTo(1);
+    }
+
+    @Test
+    void governanceGrantCreatesTimeBoundAssignmentAndAuditHistory() throws Exception {
+        String actorSubject = "keycloak-sub-governance-role-manager";
+        grantPlatformAdmin(actorSubject);
+        String actorId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, actorSubject);
+        String targetSubject = "keycloak-sub-governance-temporary-target";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token
+                        .subject(targetSubject).claim("name", "Temporary Admin"))))
+                .andExpect(status().isOk());
+        String targetId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, targetSubject);
+        long governanceVersion = jdbcTemplate.queryForObject(
+                "select version from admin_governance_state where id = 'ADMIN_AUTHORITY'", Long.class);
+        Instant effective = Instant.now().plusSeconds(60);
+        Instant expires = effective.plusSeconds(3600);
+
+        mockMvc.perform(post("/api/v1/admin/governance/admins/{adminId}/roles", targetId)
+                        .with(jwt().jwt(token -> token.subject(actorSubject)))
+                        .header("Idempotency-Key", "temporary-elevation-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"OPERATIONS_ADMIN","effectiveAt":"%s","expiresAt":"%s",
+                                 "reason":"Production incident INC-123","expectedAdminGovernanceVersion":%d}
+                                """.formatted(effective, expires, governanceVersion)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.outcome").value("ROLE_GRANTED"))
+                .andExpect(jsonPath("$.assignment.adminUserId").value(targetId))
+                .andExpect(jsonPath("$.assignment.role").value("OPERATIONS_ADMIN"))
+                .andExpect(jsonPath("$.assignment.status").value("SCHEDULED"));
+
+        mockMvc.perform(post("/api/v1/admin/governance/admins/{adminId}/roles", targetId)
+                        .with(jwt().jwt(token -> token.subject(actorSubject)))
+                        .header("Idempotency-Key", "temporary-elevation-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"OPERATIONS_ADMIN","effectiveAt":"%s","expiresAt":"%s",
+                                 "reason":"Production incident INC-123","expectedAdminGovernanceVersion":%d}
+                                """.formatted(effective, expires, governanceVersion)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.replayed").value(true));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_role_assignments
+                where admin_user_id = ? and role_id = 'OPERATIONS_ADMIN'
+                  and expires_at is not null and granted_by_admin_id = ?
+                """, Integer.class, targetId, actorId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_governance_events
+                where subject_admin_id = ? and event_type = 'ADMIN_ELEVATION_GRANTED'
+                """, Integer.class, targetId)).isEqualTo(1);
+    }
+
+    @Test
+    void superAdminGrantRequiresTwoIndependentReviewersBeforeTypedExecution() throws Exception {
+        String requesterSubject = "keycloak-sub-governance-requester";
+        String reviewerOneSubject = "keycloak-sub-governance-reviewer-one";
+        String reviewerTwoSubject = "keycloak-sub-governance-reviewer-two";
+        grantPlatformAdmin(requesterSubject);
+        grantPlatformAdmin(reviewerOneSubject);
+        grantPlatformAdmin(reviewerTwoSubject);
+        String requesterId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, requesterSubject);
+        String targetSubject = "keycloak-sub-governance-super-target";
+        mockMvc.perform(get("/api/v1/users/me").with(jwt().jwt(token -> token.subject(targetSubject))))
+                .andExpect(status().isOk());
+        String targetId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, targetSubject);
+        long governanceVersion = jdbcTemplate.queryForObject(
+                "select version from admin_governance_state where id = 'ADMIN_AUTHORITY'", Long.class);
+
+        mockMvc.perform(post("/api/v1/admin/governance/admins/{adminId}/roles", targetId)
+                        .with(jwt().jwt(token -> token.subject(requesterSubject)))
+                        .header("Idempotency-Key", "dual-super-grant-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"SUPER_ADMIN","reason":"Approved governance coverage",
+                                 "expectedAdminGovernanceVersion":%d}
+                                """.formatted(governanceVersion)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.outcome").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.approval.requiredApprovals").value(2));
+        String approvalId = jdbcTemplate.queryForObject("""
+                select id from admin_approval_requests
+                where requester_admin_id = ? and request_idempotency_key = 'dual-super-grant-request'
+                """, String.class, requesterId);
+
+        String decisionBody = """
+                {"expectedVersion":0,"reason":"Independent governance review"}
+                """;
+        mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/approve", approvalId)
+                        .with(jwt().jwt(token -> token.subject(requesterSubject)))
+                        .header("Idempotency-Key", "dual-super-self-review")
+                        .contentType(MediaType.APPLICATION_JSON).content(decisionBody))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("GOVERNANCE_SELF_APPROVAL_PROHIBITED"));
+
+        mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/approve", approvalId)
+                        .with(jwt().jwt(token -> token.subject(reviewerOneSubject)))
+                        .header("Idempotency-Key", "dual-super-review-one")
+                        .contentType(MediaType.APPLICATION_JSON).content(decisionBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.approval.status").value("PENDING"))
+                .andExpect(jsonPath("$.approval.currentApprovals").value(1));
+
+        mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/approve", approvalId)
+                        .with(jwt().jwt(token -> token.subject(reviewerTwoSubject)))
+                        .header("Idempotency-Key", "dual-super-review-two")
+                        .contentType(MediaType.APPLICATION_JSON).content(decisionBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.approval.status").value("APPROVED"))
+                .andExpect(jsonPath("$.approval.currentApprovals").value(2))
+                .andExpect(jsonPath("$.approval.version").value(1));
+
+        mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/execute", approvalId)
+                        .with(jwt().jwt(token -> token.subject(reviewerOneSubject)))
+                        .header("Idempotency-Key", "dual-super-execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedApprovalVersion\":1}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.approval.status").value("EXECUTED"));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_role_assignments
+                where admin_user_id = ? and role_id = 'SUPER_ADMIN' and status = 'ACTIVE'
+                """, Integer.class, targetId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from admin_governance_events
+                where approval_request_id = ? and event_type in (
+                    'ADMIN_ROLE_GRANT_REQUESTED','SENSITIVE_ACTION_APPROVED',
+                    'SENSITIVE_ACTION_EXECUTION_STARTED','SENSITIVE_ACTION_EXECUTED')
+                """, Integer.class, approvalId)).isEqualTo(5);
+    }
+
+    @Test
+    void concurrentApprovedSuperAdminRevocationsCannotRemoveFinalAuthority() throws Exception {
+        String superOneSubject = "keycloak-sub-governance-concurrent-super-one";
+        String superTwoSubject = "keycloak-sub-governance-concurrent-super-two";
+        String requesterSubject = "keycloak-sub-governance-concurrent-requester";
+        String reviewerOneSubject = "keycloak-sub-governance-concurrent-reviewer-one";
+        String reviewerTwoSubject = "keycloak-sub-governance-concurrent-reviewer-two";
+        grantAdminRole(superOneSubject, "SUPER_ADMIN");
+        grantAdminRole(superTwoSubject, "SUPER_ADMIN");
+        grantAdminRole(requesterSubject, "GOVERNANCE_ADMIN");
+        grantAdminRole(reviewerOneSubject, "GOVERNANCE_ADMIN");
+        grantAdminRole(reviewerTwoSubject, "GOVERNANCE_ADMIN");
+        String superOneId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, superOneSubject);
+        String superTwoId = jdbcTemplate.queryForObject(
+                "select id from users where keycloak_sub = ?", String.class, superTwoSubject);
+        String assignmentOne = jdbcTemplate.queryForObject("""
+                select id from admin_role_assignments
+                where admin_user_id = ? and role_id = 'SUPER_ADMIN' and status = 'ACTIVE'
+                """, String.class, superOneId);
+        String assignmentTwo = jdbcTemplate.queryForObject("""
+                select id from admin_role_assignments
+                where admin_user_id = ? and role_id = 'SUPER_ADMIN' and status = 'ACTIVE'
+                """, String.class, superTwoId);
+
+        try {
+            Timestamp comparisonNow = Timestamp.from(Instant.now().plusSeconds(1));
+            jdbcTemplate.update("""
+                    update admin_role_assignments
+                    set expires_at = date_add(effective_at, interval 1 microsecond), updated_at = current_timestamp(6)
+                    where role_id = 'SUPER_ADMIN' and status = 'ACTIVE' and expires_at is null
+                      and id not in (?, ?) and effective_at <= ?
+                    """, assignmentOne, assignmentTwo, comparisonNow);
+            assertThat(jdbcTemplate.queryForObject("""
+                    select count(*) from admin_role_assignments
+                    where role_id = 'SUPER_ADMIN' and status = 'ACTIVE' and effective_at <= ?
+                      and (expires_at is null or expires_at > ?)
+                    """, Integer.class, comparisonNow, comparisonNow)).isEqualTo(2);
+
+            createSuperRevokeApproval(requesterSubject, superOneId, assignmentOne,
+                    "concurrent-super-revoke-one");
+            createSuperRevokeApproval(requesterSubject, superTwoId, assignmentTwo,
+                    "concurrent-super-revoke-two");
+            String approvalOne = jdbcTemplate.queryForObject("""
+                    select id from admin_approval_requests where request_idempotency_key = ?
+                    """, String.class, "concurrent-super-revoke-one");
+            String approvalTwo = jdbcTemplate.queryForObject("""
+                    select id from admin_approval_requests where request_idempotency_key = ?
+                    """, String.class, "concurrent-super-revoke-two");
+            approveTwice(approvalOne, reviewerOneSubject, reviewerTwoSubject, "one");
+            approveTwice(approvalTwo, reviewerOneSubject, reviewerTwoSubject, "two");
+
+            CompletableFuture<Integer> first = CompletableFuture.supplyAsync(() -> executeApprovalStatus(
+                    approvalOne, requesterSubject, "concurrent-execute-one"));
+            CompletableFuture<Integer> second = CompletableFuture.supplyAsync(() -> executeApprovalStatus(
+                    approvalTwo, reviewerOneSubject, "concurrent-execute-two"));
+            List<Integer> statuses = List.of(first.join(), second.join());
+
+            assertThat(statuses).contains(202);
+            assertThat(jdbcTemplate.queryForObject("""
+                    select count(distinct admin_user_id) from admin_role_assignments
+                    where role_id = 'SUPER_ADMIN' and status = 'ACTIVE' and effective_at <= ?
+                      and (expires_at is null or expires_at > ?)
+                    """, Integer.class, comparisonNow, comparisonNow)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForList("""
+                    select status from admin_approval_requests where id in (?, ?)
+                    """, String.class, approvalOne, approvalTwo))
+                    .contains("EXECUTED")
+                    .allMatch(status -> List.of("EXECUTED", "FAILED", "INVALIDATED").contains(status));
+        } finally {
+            jdbcTemplate.update("""
+                    update admin_role_assignments set status = 'ACTIVE', expires_at = null,
+                        revoked_at = null, revoked_by_admin_id = null, revocation_reason = null,
+                        revocation_idempotency_key = null, revocation_request_hash = null,
+                        updated_at = current_timestamp(6)
+                    where id in (?, ?) or (role_id = 'SUPER_ADMIN' and status = 'ACTIVE'
+                        and expires_at = date_add(effective_at, interval 1 microsecond))
+                    """, assignmentOne, assignmentTwo);
+        }
+    }
+
+    private void createSuperRevokeApproval(String requesterSubject, String adminId,
+                                            String assignmentId, String key) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/governance/admins/{adminId}/roles/{assignmentId}/revoke",
+                        adminId, assignmentId)
+                        .with(jwt().jwt(token -> token.subject(requesterSubject)))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedAssignmentVersion\":0,\"reason\":\"Concurrency safety test\"}"))
+                .andExpect(status().isAccepted());
+    }
+
+    private void approveTwice(String approvalId, String reviewerOne, String reviewerTwo,
+                              String suffix) throws Exception {
+        for (String reviewer : List.of(reviewerOne, reviewerTwo)) {
+            mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/approve", approvalId)
+                            .with(jwt().jwt(token -> token.subject(reviewer)))
+                            .header("Idempotency-Key", "concurrent-review-" + suffix + "-" + reviewer.hashCode())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"expectedVersion\":0,\"reason\":\"Independent concurrency review\"}"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    private int executeApprovalStatus(String approvalId, String executorSubject, String key) {
+        try {
+            return mockMvc.perform(post("/api/v1/admin/governance/approvals/{approvalId}/execute", approvalId)
+                            .with(jwt().jwt(token -> token.subject(executorSubject)))
+                            .header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"expectedApprovalVersion\":1}"))
+                    .andReturn().getResponse().getStatus();
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    @Test
     void businessReviewerCanReadAndDecideBusinessApplications() throws Exception {
         String applicationId = createAndSubmitBusinessApplication(
                 "keycloak-sub-business-reviewer-owner",
@@ -2593,6 +2967,21 @@ class AuthServiceApplicationTests {
                 values (?, ?, null, ?)
                 on duplicate key update granted_at = granted_at
                 """, userId, role, Timestamp.from(Instant.now()));
+        jdbcTemplate.update("""
+                insert into admin_role_assignments (
+                    id, admin_user_id, role_id, status, effective_at, expires_at,
+                    granted_by_admin_id, reason, request_idempotency_key, request_hash,
+                    correlation_id, version, created_at, updated_at
+                ) values (
+                    concat('0', upper(substring(sha2(concat(?, '|', ?), 256), 1, 25))),
+                    ?, ?, 'ACTIVE', ?, null, null, 'Test role fixture', null, null,
+                    'auth-test-fixture', 0, ?, ?
+                ) on duplicate key update status = 'ACTIVE', expires_at = null,
+                    revoked_at = null, revoked_by_admin_id = null, revocation_reason = null,
+                    updated_at = values(updated_at)
+                """, userId, role, userId, "PLATFORM_ADMIN".equals(role) ? "SUPER_ADMIN" : role,
+                Timestamp.from(Instant.now()),
+                Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
     }
 
     private String hmacSha256(String body) throws Exception {
