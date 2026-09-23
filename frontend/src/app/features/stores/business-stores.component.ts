@@ -1,10 +1,10 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, ParamMap, Router, RouterLink } from '@angular/router';
 import { Category, ListingCondition, PublicListing, PublicListingSort } from '../../core/models/listing.model';
 import { ListingService } from '../../core/services/listing.service';
 import { BrandLoadingScreenComponent } from '../../shared/components/ui/brand-loading-screen.component';
-import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
+import { EditorialArtworkComponent } from '../../shared/components/ui/editorial-artwork.component';
 import {
   publicListingConditionLabel,
   publicListingLocationLabel,
@@ -15,17 +15,45 @@ import {
 type BusinessConditionFilter = ListingCondition | 'ALL';
 type BusinessSortFilter = PublicListingSort;
 
+type FeaturedBusinessStore = {
+  slug: string;
+  name: string;
+  category: string;
+  location: string;
+  coverUrl: string;
+  itemCount: number;
+  verified: boolean;
+};
+
 @Component({
   selector: 'app-business-stores',
   standalone: true,
-  imports: [BrandLoadingScreenComponent, BrandMascotComponent, FormsModule, RouterLink],
+  imports: [BrandLoadingScreenComponent, EditorialArtworkComponent, FormsModule, RouterLink],
   template: `
     <section class="business-items-page">
+      <div class="stores-page-art" aria-hidden="true"></div>
+
       <header class="business-hero">
+        <app-editorial-artwork
+          class="hero-artwork"
+          src="/assets/brand/anime/stores-fox-boutique-hero-v1.webp"
+          alt=""
+          [decorative]="true"
+          focalPoint="66% center"
+          mobileFocalPoint="67% 24%"
+          mobileComposition="full"
+          overlay="none"
+          overlayStrength="0.18"
+        />
+        <div class="hero-ornament" aria-hidden="true">
+          <span>Moonlit market</span>
+          <i></i>
+          <span>Objects with spirit</span>
+        </div>
         <div class="hero-copy">
-          <p class="eyebrow">Business catalog</p>
-          <h1>Shop verified business items</h1>
-          <p>Browse catalog items published by approved business sellers.</p>
+          <p class="eyebrow">Curated stores</p>
+          <h1>Shop <em>verified</em><br /> business items</h1>
+          <p>Browse catalog items published by approved business sellers. Discover distinctive collections from trusted independent shops.</p>
           <form class="business-search" role="search" (submit)="runSearch(); $event.preventDefault()">
             <label>
               <span>Search business items</span>
@@ -37,12 +65,77 @@ type BusinessSortFilter = PublicListingSort;
               />
             </label>
             <button type="submit">Search</button>
-            <a routerLink="/business/apply" class="hero-store-link">Become a business seller</a>
           </form>
+          <div class="hero-actions">
+            <a href="#business-items" class="browse-items-link">Browse business items <span aria-hidden="true">→</span></a>
+            <a routerLink="/business/apply" class="hero-store-link">Become a business seller</a>
+          </div>
+          <div class="hero-trust" aria-label="Store catalog qualities">
+            <span><i aria-hidden="true"></i> Approved businesses</span>
+            <span><i aria-hidden="true"></i> Clear checkout paths</span>
+          </div>
         </div>
+        @if (featuredStores()[0]; as spotlight) {
+          <aside class="hero-spotlight" aria-label="Featured store spotlight">
+            <span>Shop spotlight</span>
+            <div class="spotlight-store">
+              <div class="spotlight-mark" aria-hidden="true">{{ storeInitials(spotlight.name) }}</div>
+              <div>
+                <strong>{{ spotlight.name }}</strong>
+                <small>{{ spotlight.category }}</small>
+              </div>
+            </div>
+            <p>{{ spotlight.itemCount }} {{ spotlight.itemCount === 1 ? 'piece' : 'pieces' }} in this collection</p>
+            <a [routerLink]="['/stores', spotlight.slug]">Explore the boutique <span aria-hidden="true">→</span></a>
+          </aside>
+        } @else {
+          <div class="hero-spotlight hero-spotlight-placeholder" aria-hidden="true">
+            <span>Shop spotlight</span>
+            <strong>Beautiful stores.<br />Thoughtful collections.</strong>
+            <small>Verified business sellers</small>
+          </div>
+        }
       </header>
 
-      <section class="business-layout" aria-labelledby="business-items-title">
+      <div class="stores-content-flow">
+          @if (featuredStores().length > 0) {
+            <section class="featured-stores" aria-labelledby="featured-stores-title">
+          <div class="featured-stores-head">
+            <div>
+              <p class="eyebrow">Boutique directory</p>
+              <h2 id="featured-stores-title">Featured stores</h2>
+              <p>Meet the approved businesses behind this collection.</p>
+            </div>
+            <a href="#business-items">Browse every business item <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="store-grid">
+            @for (store of featuredStores(); track store.slug; let index = $index) {
+              <article class="store-card">
+                <a [routerLink]="['/stores', store.slug]" class="store-card-art" [attr.aria-label]="'Explore ' + store.name">
+                  @if (store.coverUrl) {
+                    <img [src]="store.coverUrl" [alt]="store.name + ' collection cover'" (error)="useStoreCoverFallback($event)" />
+                  } @else {
+                    <img src="/assets/brand/anime/stores-fox-boutique-hero-v1.webp" alt="" aria-hidden="true" />
+                  }
+                  <span class="store-number" aria-hidden="true">0{{ index + 1 }}</span>
+                  <span class="store-mark" aria-hidden="true">{{ storeInitials(store.name) }}</span>
+                </a>
+                <div class="store-card-body">
+                  <div class="store-card-kicker">
+                    <span>{{ store.verified ? 'Verified boutique' : 'Business store' }}</span>
+                    <span>{{ store.itemCount }} {{ store.itemCount === 1 ? 'item' : 'items' }}</span>
+                  </div>
+                  <h3>{{ store.name }}</h3>
+                  <p>{{ store.category }} <span aria-hidden="true">·</span> {{ store.location }}</p>
+                  <a [routerLink]="['/stores', store.slug]">Explore boutique <span aria-hidden="true">→</span></a>
+                </div>
+              </article>
+            }
+          </div>
+            </section>
+          }
+
+          <section id="business-items" class="business-layout" aria-labelledby="business-items-title">
         <main class="business-main">
           <div class="items-panel">
             <div class="section-head">
@@ -50,9 +143,18 @@ type BusinessSortFilter = PublicListingSort;
                 <p class="eyebrow">Approved business items</p>
                 <h2 id="business-items-title">Business Items</h2>
               </div>
-              <span class="result-count">
-                {{ listings().length }} {{ listings().length === 1 ? 'item found' : 'items found' }}
-              </span>
+              <div class="result-actions">
+                <span class="result-count">
+                  {{ listings().length }} {{ listings().length === 1 ? 'item found' : 'items found' }}
+                </span>
+                <button
+                  type="button"
+                  class="mobile-filter-trigger"
+                  aria-controls="business-item-filters"
+                  [attr.aria-expanded]="filterOpen()"
+                  (click)="filterOpen.set(true)"
+                >Filters</button>
+              </div>
             </div>
 
             @if (loading()) {
@@ -62,7 +164,6 @@ type BusinessSortFilter = PublicListingSort;
               />
             } @else if (errorMsg()) {
               <div class="empty-state error-state">
-                <app-brand-mascot variant="badge" alt="Business item loading error" />
                 <div>
                   <strong>{{ errorMsg() }}</strong>
                   <p>Refresh the search to try loading business items again.</p>
@@ -71,7 +172,7 @@ type BusinessSortFilter = PublicListingSort;
               </div>
             } @else if (listings().length === 0) {
               <div class="empty-state">
-                <app-brand-mascot variant="badge" alt="No business items found" />
+                <img src="/assets/brand/anime/seller-studio-anime.webp" alt="" aria-hidden="true" />
                 <div>
                   <strong>No business items found</strong>
                   <p>{{ hasActiveSearch() ? activeFilterSummary() : 'Approved business items will appear here once stores publish them.' }}</p>
@@ -90,7 +191,7 @@ type BusinessSortFilter = PublicListingSort;
                   <article class="item-card">
                     <a [routerLink]="['/listings', item.id]" class="item-image-link" [attr.aria-label]="'View ' + item.title">
                       @if (imageUrl(item)) {
-                        <img [src]="imageUrl(item)" [alt]="primaryImageAlt(item)" />
+                        <img [src]="imageUrl(item)" [alt]="primaryImageAlt(item)" (error)="useListingImageFallback($event)" />
                       } @else {
                         <div class="image-fallback">
                           <span>{{ item.categoryName }}</span>
@@ -143,15 +244,23 @@ type BusinessSortFilter = PublicListingSort;
           </div>
         </main>
 
-        <aside class="filter-panel" aria-label="Filter business items">
+        <aside
+          id="business-item-filters"
+          class="filter-panel"
+          [class.open]="filterOpen()"
+          aria-label="Filter business items"
+        >
           <div class="filter-heading">
             <div>
               <span>Item filters</span>
               <small>Approved business listings only</small>
             </div>
-            @if (hasActiveSearch()) {
-              <button type="button" class="clear-button" (click)="clearFilters()">Clear</button>
-            }
+            <div class="filter-heading-actions">
+              @if (hasActiveSearch()) {
+                <button type="button" class="clear-button" (click)="clearFilters()">Clear</button>
+              }
+              <button type="button" class="drawer-close" (click)="filterOpen.set(false)">Close</button>
+            </div>
           </div>
 
           <form class="filter-stack" (submit)="runSearch(); $event.preventDefault()">
@@ -215,7 +324,11 @@ type BusinessSortFilter = PublicListingSort;
             </div>
           </form>
         </aside>
-      </section>
+        @if (filterOpen()) {
+          <button type="button" class="filter-backdrop" aria-label="Close business item filters" (click)="filterOpen.set(false)"></button>
+        }
+          </section>
+      </div>
     </section>
   `,
   styles: [`
@@ -342,6 +455,19 @@ type BusinessSortFilter = PublicListingSort;
       font-size: 0.92rem;
       font-weight: 900;
       white-space: nowrap;
+    }
+
+    .result-actions,
+    .filter-heading-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .mobile-filter-trigger,
+    .drawer-close,
+    .filter-backdrop {
+      display: none;
     }
 
     .filter-heading {
@@ -708,6 +834,272 @@ type BusinessSortFilter = PublicListingSort;
         text-align: center;
       }
     }
+
+    .business-items-page {
+      gap: 1.5rem;
+    }
+
+    .business-hero,
+    .items-panel,
+    .filter-panel,
+    .item-card,
+    .empty-state {
+      border-color: var(--market-line);
+      border-radius: var(--market-radius-md);
+      background: var(--market-surface);
+      box-shadow: var(--market-shadow-sm);
+    }
+
+    .business-hero {
+      min-height: 220px;
+      padding: clamp(1.5rem, 4vw, 3rem);
+      border-radius: var(--market-radius-lg);
+      background:
+        linear-gradient(115deg, #fff 0 68%, var(--market-accent-soft) 68% 100%);
+    }
+
+    .eyebrow {
+      color: var(--market-accent-dark);
+      font-weight: 800;
+      letter-spacing: 0.1em;
+    }
+
+    h1 {
+      color: var(--market-ink);
+      font-size: clamp(2.4rem, 4.5vw, 4rem);
+      font-weight: 820;
+      letter-spacing: -0.05em;
+    }
+
+    .business-hero p:not(.eyebrow) {
+      color: var(--market-muted);
+      font-weight: 500;
+    }
+
+    input,
+    select {
+      border-color: var(--market-line-strong);
+      border-radius: var(--market-radius-sm);
+      background: #fbfcfc;
+      font-weight: 600;
+    }
+
+    button,
+    .hero-store-link,
+    .view-item-link {
+      border-color: var(--market-line-strong);
+      border-radius: var(--market-radius-sm);
+      color: var(--market-accent-dark);
+      font-weight: 750;
+    }
+
+    .business-search button,
+    .hero-store-link,
+    .filter-actions button:first-child,
+    .view-item-link,
+    .load-more-row button {
+      background: var(--market-accent);
+      color: #fff;
+      box-shadow: none;
+    }
+
+    .business-layout {
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 1.25rem;
+    }
+
+    .items-panel {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .section-head,
+    .filter-heading {
+      border-color: var(--market-line);
+    }
+
+    .item-grid {
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .item-card:hover {
+      box-shadow: var(--market-shadow-md);
+    }
+
+    .item-image-link {
+      aspect-ratio: 4 / 3;
+      background: linear-gradient(135deg, #dcefeb, #eef4f2);
+    }
+
+    .business-badge {
+      background: rgba(13, 124, 117, 0.92);
+      color: #fff;
+      box-shadow: none;
+    }
+
+    .item-meta-row span,
+    .item-meta-row span + span {
+      background: var(--market-surface-subtle);
+      color: var(--market-muted);
+      font-weight: 750;
+    }
+
+    .price-row strong {
+      color: var(--market-ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty-state {
+      grid-template-columns: minmax(0, 440px);
+      justify-content: center;
+      text-align: center;
+    }
+
+    @media (max-width: 980px) {
+      .business-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .filter-panel {
+        position: fixed;
+        inset: 118px 0 0 auto;
+        z-index: 61;
+        width: min(360px, calc(100vw - 24px));
+        max-height: calc(100dvh - 118px);
+        display: none;
+        overflow-y: auto;
+        order: initial;
+        border-radius: var(--market-radius-md) 0 0 0;
+        box-shadow: var(--market-shadow-lg);
+      }
+
+      .filter-panel.open {
+        display: flex;
+      }
+
+      .filter-heading {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--market-surface);
+      }
+
+      .mobile-filter-trigger,
+      .drawer-close {
+        min-height: 40px;
+        display: inline-flex;
+      }
+
+      .filter-backdrop {
+        position: fixed;
+        inset: 118px 0 0;
+        z-index: 60;
+        display: block;
+        width: 100%;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: rgba(20, 47, 50, 0.36);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .business-search {
+        grid-template-columns: 1fr;
+      }
+      .business-hero {
+        background: linear-gradient(155deg, #fff 0 76%, var(--market-accent-soft) 76% 100%);
+      }
+    }
+
+    /* Storefront variant: the same market language with a calmer merchant emphasis. */
+    .business-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
+      gap: 1.5rem;
+      overflow: hidden;
+      min-height: 310px;
+      border-radius: 30px 12px 30px 12px;
+      background:
+        radial-gradient(circle at 8% 16%, rgba(184, 223, 244, .46) 0 5rem, transparent 5.1rem),
+        linear-gradient(118deg, #fffdfb 0 64%, #e1f3ee 64% 100%);
+    }
+
+    .hero-copy { position: relative; z-index: 2; }
+
+    .business-hero-art {
+      position: relative;
+      min-height: 250px;
+      align-self: stretch;
+    }
+
+    .business-hero-art img {
+      position: absolute;
+      inset: -12% -12% -12% -4%;
+      width: 118%;
+      height: 124%;
+      object-fit: contain;
+      filter: drop-shadow(0 16px 20px rgba(78, 66, 89, .09));
+    }
+
+    .business-hero-art span {
+      position: absolute;
+      right: 5%;
+      bottom: 10%;
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(78, 66, 89, .12);
+      border-radius: 999px;
+      background: rgba(255, 253, 251, .94);
+      color: var(--market-mint);
+      padding: 0 .85rem;
+      box-shadow: var(--market-shadow-md);
+      font-size: .76rem;
+      font-weight: 850;
+      transform: rotate(2deg);
+    }
+
+    .item-card {
+      border-radius: 18px 7px 18px 7px;
+      box-shadow: 0 7px 20px rgba(78, 66, 89, .07);
+    }
+
+    .item-image-link { margin: .45rem .45rem 0; border-radius: 13px 4px 13px 4px; }
+    .business-badge { background: rgba(55, 125, 107, .94); }
+    .price-row strong { color: var(--market-mint); }
+
+    .empty-state > img {
+      width: min(230px, 100%);
+      max-height: 170px;
+      object-fit: contain;
+    }
+
+    .empty-state:not(.error-state) {
+      grid-template-columns: minmax(150px, 230px) minmax(0, 420px);
+      gap: 1.5rem;
+      text-align: left;
+      background: linear-gradient(145deg, #fffdfb, #eef8f5);
+    }
+
+    @media (max-width: 900px) {
+      .business-hero { grid-template-columns: 1fr; }
+      .business-hero-art { min-height: 220px; }
+      .business-hero-art img { inset: -18% 5% -12% auto; width: min(100%, 440px); }
+    }
+
+    @media (max-width: 720px) {
+      .business-hero { min-height: auto; padding: 1.1rem; border-radius: 24px 9px 24px 9px; }
+      .business-hero-art { min-height: 170px; }
+      .business-hero-art span { display: none; }
+      .empty-state:not(.error-state) { grid-template-columns: 1fr; text-align: center; }
+    }
+
   `],
 })
 export class BusinessStoresComponent implements OnInit {
@@ -721,7 +1113,36 @@ export class BusinessStoresComponent implements OnInit {
   readonly loadingMore = signal(false);
   readonly hasMore = signal(false);
   readonly errorMsg = signal('');
+  readonly filterOpen = signal(false);
   readonly nextCursor = signal<string | null>(null);
+  readonly featuredStores = computed<FeaturedBusinessStore[]>(() => {
+    const stores = new Map<string, FeaturedBusinessStore>();
+
+    for (const listing of this.listings()) {
+      if (!listing.storeSlug) {
+        continue;
+      }
+      const current = stores.get(listing.storeSlug);
+      if (current) {
+        current.itemCount += 1;
+        if (!current.coverUrl) {
+          current.coverUrl = this.imageUrl(listing);
+        }
+        continue;
+      }
+      stores.set(listing.storeSlug, {
+        slug: listing.storeSlug,
+        name: listing.storeName || this.ownerLabel(listing),
+        category: listing.categoryName || 'Curated collection',
+        location: this.locationLabel(listing),
+        coverUrl: this.imageUrl(listing),
+        itemCount: 1,
+        verified: Boolean(listing.businessVerified),
+      });
+    }
+
+    return [...stores.values()].slice(0, 3);
+  });
 
   searchTerm = '';
   selectedCategoryId = 'ALL';
@@ -748,6 +1169,7 @@ export class BusinessStoresComponent implements OnInit {
   }
 
   runSearch(): void {
+    this.filterOpen.set(false);
     this.fetchFirstPage();
     this.syncUrlSearchState();
   }
@@ -891,6 +1313,28 @@ export class BusinessStoresComponent implements OnInit {
       style: 'currency',
       currency: listing.currency || 'USD',
     }).format(listing.priceAmount);
+  }
+
+  storeInitials(name: string): string {
+    return name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(part => part[0])
+      .join('')
+      .toUpperCase();
+  }
+
+  useStoreCoverFallback(event: Event): void {
+    const image = event.currentTarget as HTMLImageElement;
+    image.onerror = null;
+    image.src = '/assets/brand/anime/stores-fox-boutique-hero-v1.webp';
+  }
+
+  useListingImageFallback(event: Event): void {
+    const image = event.currentTarget as HTMLImageElement;
+    image.onerror = null;
+    image.src = '/assets/brand/anime/shopping-bag-fallback.svg';
   }
 
   private searchParams(cursor: string | null = null) {

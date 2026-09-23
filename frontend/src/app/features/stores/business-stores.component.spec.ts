@@ -58,7 +58,7 @@ describe('BusinessStoresComponent public business item regression', () => {
     fixture = TestBed.createComponent(BusinessStoresComponent);
   });
 
-  it('presents approved business listing items instead of storefront cards', () => {
+  it('presents approved business items with data-backed featured stores', () => {
     fixture.detectChanges();
 
     const host = fixture.nativeElement as HTMLElement;
@@ -89,6 +89,11 @@ describe('BusinessStoresComponent public business item regression', () => {
     expect(text).toContain(businessListing.categoryName);
     expect(text).toContain('View item');
     expect(text).toContain('Become a business seller');
+    expect(text).toContain('Featured stores');
+    expect(text).toContain('Explore boutique');
+    expect(host.querySelectorAll('.store-card').length).toBe(1);
+    expect(host.querySelector('.stores-page-art')).not.toBeNull();
+    expect(host.querySelectorAll('.hero-extension, .decorative-rail').length).toBe(0);
     expect(text).not.toContain('Individual bike');
     expect(text).not.toContain('Business Storefronts');
     expect(text).not.toContain('Visit store');
@@ -117,6 +122,7 @@ describe('BusinessStoresComponent public business item regression', () => {
     expect(text).toContain('No business items found');
     expect(text).toContain('Approved business items will appear here once stores publish them.');
     expect(text).toContain('Clear filters');
+    expect(text).not.toContain('Featured stores');
     expect(text).not.toContain('No approved business storefront listings yet');
   });
 

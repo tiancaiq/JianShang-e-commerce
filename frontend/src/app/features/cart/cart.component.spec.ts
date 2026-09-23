@@ -105,6 +105,8 @@ describe('CartComponent', () => {
     expect(text).toContain('Checkout is not enabled yet.');
     expect(fixture.nativeElement.querySelector('.packing-card')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.receipt-rail')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.cart-page-populated')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.cart-page-art')?.getAttribute('aria-hidden')).toBe('true');
     expect(fixture.nativeElement.querySelector('a[href="/stores/mochi-store"]')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('img')?.getAttribute('alt')).toBe('Store plush');
     expect(fixture.nativeElement.querySelector('img')?.getAttribute('src')).toBe(
@@ -440,6 +442,9 @@ describe('CartComponent', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Your cart is empty');
     expect(text).toContain('Browse business items');
+    expect(text).toContain('Good things travel far.');
+    expect(fixture.nativeElement.querySelector('.cart-page-empty')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.cart-empty-art')?.getAttribute('aria-hidden')).toBe('true');
     expect(fixture.nativeElement.querySelector('a[href="/stores"]')).not.toBeNull();
     expect(cartService.validate).not.toHaveBeenCalled();
   });

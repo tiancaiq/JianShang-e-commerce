@@ -1,4 +1,4 @@
-import { Component, Injector, OnDestroy, OnInit, effect, inject, signal } from '@angular/core';
+import { Component, HostListener, Injector, OnDestroy, OnInit, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterOutlet } from '@angular/router';
 import { take } from 'rxjs';
@@ -8,7 +8,6 @@ import { FloatingChatComponent } from '../../features/chat/floating-chat.compone
 import { MarketplaceNavbarComponent } from '../../features/marketplace/components/marketplace-navbar.component';
 import { ToastContainerComponent } from '../../shared/components/toast/toast-container.component';
 import { ToastService } from '../../core/services/toast.service';
-import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
 import { CART_ENABLED } from '../../features/cart/cart.capability';
 import { NOTIFICATION_CENTER_ENABLED } from '../../features/account/notification-center.capability';
 import { NotificationService } from '../../core/services/notification.service';
@@ -16,7 +15,7 @@ import { NotificationService } from '../../core/services/notification.service';
 @Component({
   selector: 'app-marketplace-layout',
   standalone: true,
-  imports: [BrandMascotComponent, FloatingChatComponent, FormsModule, MarketplaceNavbarComponent, RouterOutlet, ToastContainerComponent],
+  imports: [FloatingChatComponent, FormsModule, MarketplaceNavbarComponent, RouterOutlet, ToastContainerComponent],
   template: `
     <div class="marketplace-shell" [class.account-dashboard-shell]="isAccountDashboardView()">
       <app-marketplace-navbar
@@ -33,16 +32,17 @@ import { NotificationService } from '../../core/services/notification.service';
       @if (authDialogOpen()) {
         <section class="auth-overlay" aria-label="Marketplace sign in">
           <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-auth-title">
-            <button type="button" class="auth-close" aria-label="Close sign in" (click)="closeAuthDialog()">x</button>
-            <div class="auth-illustration">
-              <app-brand-mascot variant="login" alt="MSB marketplace mascot sign in illustration" />
-            </div>
+            <button type="button" class="auth-close" aria-label="Close sign in" (click)="closeAuthDialog()">×</button>
+            <aside class="auth-visual" aria-hidden="true">
+              <img src="/assets/brand/anime/auth-shopping-scene.webp" alt="" />
+              <div><span>Welcome back</span><strong>Your next favorite find is waiting.</strong></div>
+            </aside>
             <div class="auth-content">
-              <div class="auth-mark">M</div>
+              <div class="auth-mark" aria-hidden="true">★</div>
               <p class="auth-kicker">MSB marketplace account</p>
               <h2 id="marketplace-auth-title">Sign in to keep trading local.</h2>
               <p class="auth-copy">
-                Create listings, manage your profile, and return to saved marketplace flows.
+                Return to saved listings, messages, purchases, and selling tools.
               </p>
               <div class="auth-tabs" role="tablist" aria-label="Account action">
                 <button type="button" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')">Sign in</button>
@@ -94,60 +94,31 @@ import { NotificationService } from '../../core/services/notification.service';
     .marketplace-shell {
       min-height: 100vh;
       position: relative;
-      --kawaii-bg: #fff7fb;
-      --kawaii-bg-2: #f7f0ff;
-      --kawaii-surface: #ffffff;
-      --kawaii-pink: #f472b6;
-      --kawaii-pink-light: #fbcfe8;
-      --kawaii-pink-soft: #fff0f7;
-      --kawaii-purple: #8b6fe8;
-      --kawaii-purple-light: #c7b7ff;
-      --kawaii-lavender: #ede7ff;
-      --kawaii-ink: #382648;
-      --kawaii-muted: #827194;
-      --kawaii-border: #ead7f2;
-      --kawaii-success: #38a895;
-      --kawaii-warning: #f7b84b;
-      --market-bg: var(--kawaii-bg);
-      --market-surface: var(--kawaii-surface);
-      --market-soft: var(--kawaii-pink-soft);
-      --market-ink: var(--kawaii-ink);
-      --market-muted: var(--kawaii-muted);
-      --market-line: var(--kawaii-border);
-      --market-accent: var(--kawaii-pink);
-      --market-accent-dark: #be3a83;
-      --market-lavender: var(--kawaii-purple);
-      --market-purple: var(--kawaii-purple);
-      --market-mint: var(--kawaii-success);
-      --market-success: var(--kawaii-success);
-      --market-yellow: var(--kawaii-warning);
-      --market-blue: #5d98e8;
       background:
-        radial-gradient(circle at 12% 6%, rgba(255, 207, 228, 0.36) 0 18%, transparent 19%),
-        radial-gradient(circle at 92% 0%, rgba(206, 193, 255, 0.3) 0 14%, transparent 15%),
-        linear-gradient(180deg, #fff7fb 0%, #f9f2ff 52%, #fffaf0 100%);
+        radial-gradient(circle at 92% 4%, rgba(255, 188, 216, .42) 0 18rem, transparent 34rem),
+        radial-gradient(circle at 2% 44%, rgba(255, 220, 235, .56) 0 12rem, transparent 28rem),
+        linear-gradient(180deg, #ffffff 0%, #fff8fb 48%, #fff2f8 100%),
+        var(--market-canvas);
       color: var(--market-ink);
     }
 
     .marketplace-shell::before {
-      content: '';
       position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.42;
-      background-image:
-        linear-gradient(45deg, rgba(244, 114, 182, 0.08) 25%, transparent 25%),
-        linear-gradient(-45deg, rgba(139, 111, 232, 0.07) 25%, transparent 25%);
-      background-size: 28px 28px;
       z-index: 0;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 74% 30%, rgba(255,255,255,.8), transparent 32%),
+        linear-gradient(120deg, transparent 0 68%, rgba(233,79,138,.035) 68% 68.2%, transparent 68.2%);
+      content: '';
+      pointer-events: none;
     }
 
     .marketplace-main {
       position: relative;
       z-index: 1;
-      max-width: 1560px;
+      max-width: var(--market-content);
       margin: 0 auto;
-      padding: 1.5rem clamp(1rem, 3vw, 2rem) 4rem;
+      padding: 1.25rem var(--market-page-pad) 4.5rem;
     }
 
     .marketplace-main.account-dashboard-main {
@@ -162,34 +133,59 @@ import { NotificationService } from '../../core/services/notification.service';
       display: grid;
       place-items: center;
       padding: 1rem;
-      background: rgba(56, 38, 72, 0.34);
+      background: rgba(51, 38, 62, 0.48);
       backdrop-filter: blur(12px);
     }
 
     .auth-dialog {
       position: relative;
-      width: min(100%, 860px);
+      width: min(100%, 880px);
       display: grid;
-      grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1fr);
+      grid-template-columns: minmax(300px, .9fr) minmax(0, 1.1fr);
       gap: 1rem;
-      padding: 1rem;
-      border: 1px solid rgba(234, 215, 242, 0.95);
-      border-radius: 24px;
+      padding: 1.25rem;
+      border: 1px solid var(--market-line);
+      border-radius: 34px 14px 34px 14px;
       background: rgba(255, 255, 255, 0.96);
       color: var(--market-ink);
-      box-shadow: 0 28px 70px rgba(98, 62, 108, 0.24);
+      box-shadow: var(--market-shadow-lg);
     }
 
     .auth-content {
-      padding: 1rem;
+      padding: 1rem .75rem;
     }
 
-    .auth-illustration {
-      min-width: 0;
+    .auth-visual {
+      position: relative;
+      min-height: 520px;
+      overflow: hidden;
+      border-radius: 25px 9px 25px 9px;
+      background: #eee9ff;
     }
+
+    .auth-visual img { width: 100%; height: 100%; object-fit: cover; object-position: 54% center; }
+
+    .auth-visual div {
+      position: absolute;
+      right: 1rem;
+      bottom: 1rem;
+      left: 1rem;
+      display: grid;
+      gap: .2rem;
+      padding: 1rem;
+      border: 1px solid rgba(255,255,255,.75);
+      border-radius: 18px 7px 18px 7px;
+      background: rgba(51,38,62,.78);
+      color: #fff;
+      backdrop-filter: blur(12px);
+    }
+
+    .auth-visual span { color: #ffb4cd; font-size: .72rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .auth-visual strong { font-family: var(--font-market-display); font-size: 1.25rem; line-height: 1.15; }
 
     .auth-close {
       position: absolute;
+      z-index: 6;
       top: 0.75rem;
       right: 0.75rem;
       width: 2rem;
@@ -198,7 +194,7 @@ import { NotificationService } from '../../core/services/notification.service';
       place-items: center;
       border: 0;
       border-radius: 999px;
-      background: var(--market-soft);
+      background: var(--market-surface-subtle);
       color: var(--market-muted);
       cursor: pointer;
       font-weight: 800;
@@ -213,11 +209,11 @@ import { NotificationService } from '../../core/services/notification.service';
       height: 2.6rem;
       display: grid;
       place-items: center;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #ff9fcb, #9476ee);
+      border-radius: 13px 5px 13px 5px;
+      background: linear-gradient(135deg, var(--market-accent), var(--market-lavender));
       color: #fff;
       font-weight: 850;
-      box-shadow: 0 12px 24px rgba(190, 58, 131, 0.22);
+      box-shadow: var(--market-shadow-sm);
     }
 
     .auth-kicker {
@@ -257,7 +253,7 @@ import { NotificationService } from '../../core/services/notification.service';
       padding: 0.3rem;
       border: 1px solid var(--market-line);
       border-radius: 8px;
-      background: #fff7fb;
+      background: var(--market-surface-subtle);
     }
 
     .auth-tabs button {
@@ -274,7 +270,7 @@ import { NotificationService } from '../../core/services/notification.service';
     .auth-tabs button.active {
       background: #fff;
       color: var(--market-accent-dark);
-      box-shadow: 0 8px 18px rgba(150, 96, 144, 0.12);
+      box-shadow: var(--market-shadow-sm);
     }
 
     .auth-form {
@@ -296,7 +292,7 @@ import { NotificationService } from '../../core/services/notification.service';
       min-height: 42px;
       padding: 0 0.75rem;
       border: 1px solid var(--market-line);
-      border-radius: 14px;
+      border-radius: var(--market-radius-sm);
       background: #fff;
       color: var(--market-ink);
       font: inherit;
@@ -306,7 +302,7 @@ import { NotificationService } from '../../core/services/notification.service';
 
     .auth-form input:focus {
       border-color: var(--market-accent);
-      box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.18);
+      box-shadow: 0 0 0 3px rgba(13, 124, 117, 0.18);
     }
 
     .auth-form button {
@@ -319,19 +315,19 @@ import { NotificationService } from '../../core/services/notification.service';
 
     .auth-primary {
       border: 0;
-      background: linear-gradient(135deg, #f472b6, #8b6fe8);
+      background: var(--market-accent);
       color: #fff;
-      box-shadow: 0 14px 26px rgba(190, 58, 131, 0.2);
+      box-shadow: var(--market-shadow-sm);
     }
 
     @media (max-width: 760px) {
       .auth-dialog {
         grid-template-columns: 1fr;
       }
-
-      .auth-illustration {
-        display: none;
-      }
+      .auth-visual { min-height: 170px; }
+      .auth-visual img { object-position: 50% 38%; }
+      .auth-visual div { padding: .75rem; }
+      .auth-visual strong { font-size: 1rem; }
     }
   `],
 })
@@ -400,6 +396,11 @@ export class MarketplaceLayoutComponent implements OnInit, OnDestroy {
     }
     this.authDialogOpen.set(false);
     this.authDialogError.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  dismissAuthDialogFromKeyboard(): void {
+    if (this.authDialogOpen()) this.closeAuthDialog();
   }
 
   startPopupLogin(): void {

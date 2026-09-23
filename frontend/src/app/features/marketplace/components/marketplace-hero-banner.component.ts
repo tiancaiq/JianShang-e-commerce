@@ -2,37 +2,42 @@ import { DecimalPipe } from '@angular/common';
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { BrandMascotComponent } from '../../../shared/components/ui/brand-mascot.component';
+import { EditorialArtworkComponent } from '../../../shared/components/ui/editorial-artwork.component';
 import { MarketplaceUiProduct } from './marketplace-ui.model';
 
 @Component({
   selector: 'app-marketplace-hero-banner',
   standalone: true,
-  imports: [BrandMascotComponent, DecimalPipe, FormsModule, RouterLink],
+  imports: [DecimalPipe, EditorialArtworkComponent, FormsModule, RouterLink],
   template: `
     <section class="hero-section" aria-labelledby="marketplace-title">
+      <app-editorial-artwork
+        class="hero-artwork"
+        src="/assets/brand/anime/marketplace-hero-moon-fox-v3.webp"
+        alt="Bright blossom marketplace scene with a snow-fox heroine, moon, and white fox companion"
+        focalPoint="72% center"
+        mobileFocalPoint="76% 26%"
+        mobileComposition="lower-panel"
+        overlay="left"
+        overlayStrength="0.92"
+      />
+
       <div class="hero-copy">
-        <p class="eyebrow">MSB cute market</p>
-        <h1 id="marketplace-title">Find it. List it. Trade locally.</h1>
-        <p class="summary">
-          Browse local listings with clear seller labels, image-forward cards, and public pickup areas.
-        </p>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> The blossom marketplace</p>
+        <h1 id="marketplace-title">Find something<br /><em>worth keeping.</em></h1>
+        <p class="summary">Discover beautiful objects, independent sellers, and local stories—clearly labeled and easy to explore.</p>
 
         <form class="hero-search" role="search" (submit)="submitSearch(); $event.preventDefault()">
           <label>
             <span>Search marketplace</span>
-            <input
-              name="heroMarketplaceSearch"
-              type="search"
-              [(ngModel)]="searchTerm"
-              placeholder="Search figures, manga, plushies, decor..."
-            />
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.7 19.3-4.1-4.1a7 7 0 1 0-1.4 1.4l4.1 4.1 1.4-1.4zM5 11a6 6 0 1 1 12 0 6 6 0 0 1-12 0z"/></svg>
+            <input name="heroMarketplaceSearch" type="search" [(ngModel)]="searchTerm" placeholder="Try ‘silver pendant’ or ‘vintage camera’" />
           </label>
           <button type="submit">Search</button>
         </form>
 
         <div class="hero-actions">
-          <a href="#listings" class="primary-link">Browse Listings</a>
+          <a href="#listings" class="primary-link">Browse Listings <span aria-hidden="true">→</span></a>
           @if (authenticated) {
             <a routerLink="/account/listings/new" class="secondary-link">Sell an Item</a>
           } @else {
@@ -40,332 +45,217 @@ import { MarketplaceUiProduct } from './marketplace-ui.model';
           }
         </div>
 
-      </div>
-
-      <div class="hero-art" aria-label="Marketplace mascot feature">
-        <div class="mascot-card">
-          <app-brand-mascot variant="hero" alt="MSB marketplace brand mascot in a pastel room" />
-          <span class="floating-badge badge-new">New finds</span>
-          <span class="floating-badge badge-trust">Seller labels</span>
-          <span class="floating-badge badge-local">Local pickup</span>
+        <div class="path-pills" aria-label="Marketplace purchase paths">
+          <span><i class="dot individual" aria-hidden="true"></i><strong>Individual</strong> arrange with the seller</span>
+          <span><i class="dot business" aria-hidden="true"></i><strong>Business</strong> checkout when available</span>
         </div>
-
-        <a class="featured-card" [routerLink]="featuredProduct ? ['/listings', featuredProduct.id] : '/marketplace'">
-          @if (featuredProduct) {
-            <div>
-              <span>Featured find</span>
-              <strong>{{ featuredProduct.title }}</strong>
-              <small>by {{ featuredProduct.sellerName }}</small>
-            </div>
-            <p>{{ featuredProduct.priceAmount | number: '1.2-2' }} {{ featuredProduct.currency }}</p>
-          } @else {
-            <div>
-              <span>Featured find</span>
-              <strong>Approved listings appear here</strong>
-              <small>Start with clear listing details</small>
-            </div>
-            <p>View Details</p>
-          }
-        </a>
       </div>
+
+      <a class="featured-card" [routerLink]="featuredProduct ? ['/listings', featuredProduct.id] : '/marketplace'">
+        <span class="featured-kicker">Today's featured find</span>
+        @if (featuredProduct) {
+          <strong>{{ featuredProduct.title }}</strong>
+          <small>Offered by {{ featuredProduct.sellerName }}</small>
+          <p>{{ featuredProduct.priceAmount | number: '1.2-2' }} {{ featuredProduct.currency }}</p>
+        } @else {
+          <strong>Fresh finds arrive here</strong>
+          <small>Browse approved local listings</small>
+          <p>Explore</p>
+        }
+      </a>
+
+      <span class="hero-frame hero-frame-top" aria-hidden="true"></span>
+      <span class="hero-frame hero-frame-bottom" aria-hidden="true"></span>
     </section>
   `,
   styles: [`
+    :host { display: block; }
+
     .hero-section {
       position: relative;
-      min-height: 480px;
-      display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
-      gap: clamp(1rem, 3vw, 2rem);
-      align-items: center;
+      min-height: clamp(560px, 44vw, 660px);
       overflow: hidden;
-      padding: clamp(1.25rem, 4vw, 2.5rem);
-      border: 1px solid rgba(234, 215, 242, 0.9);
-      border-radius: 28px;
-      background:
-        radial-gradient(circle at 12% 12%, rgba(244, 114, 182, 0.18) 0 16%, transparent 17%),
-        radial-gradient(circle at 86% 8%, rgba(139, 111, 232, 0.18) 0 14%, transparent 15%),
-        linear-gradient(135deg, rgba(255, 240, 247, 0.96), rgba(237, 231, 255, 0.92));
-      box-shadow: 0 18px 44px rgba(159, 91, 144, 0.14);
+      border: 1px solid rgba(143, 106, 127, .28);
+      border-radius: 34px 10px 34px 10px;
+      background: #fff4f9;
+      box-shadow: var(--market-shadow-lg);
+      isolation: isolate;
     }
 
-    .hero-section::after {
-      content: '';
+    .hero-artwork { position: absolute; inset: 0; z-index: 0; }
+
+    .hero-section::before {
       position: absolute;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.35;
-      background-image:
-        linear-gradient(45deg, rgba(244, 114, 182, 0.08) 25%, transparent 25%),
-        linear-gradient(-45deg, rgba(139, 111, 232, 0.07) 25%, transparent 25%);
-      background-size: 30px 30px;
-    }
-
-    .hero-copy,
-    .hero-art {
-      position: relative;
       z-index: 1;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.97) 0%, rgba(255,248,252,.9) 34%, rgba(255,244,250,.18) 59%, transparent 76%),
+        linear-gradient(180deg, transparent 70%, rgba(255,205,225,.13));
+      content: '';
+      pointer-events: none;
     }
 
     .hero-copy {
+      position: relative;
+      z-index: 3;
+      width: min(53%, 760px);
+      min-height: inherit;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: 1rem;
-      max-width: 780px;
+      gap: 1.05rem;
+      padding: clamp(2.4rem, 5vw, 5.5rem) clamp(1.5rem, 4.5vw, 4.75rem);
     }
 
     .eyebrow {
+      width: max-content;
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
       margin: 0;
       color: var(--market-accent-dark);
-      font-size: 0.78rem;
-      font-weight: 950;
-      letter-spacing: 0.1em;
+      font-family: var(--font-market-utility);
+      font-size: .72rem;
+      font-weight: 760;
+      letter-spacing: .18em;
       text-transform: uppercase;
     }
 
+    .eyebrow span { color: var(--market-rose-gold); font-size: .95rem; }
+
     h1 {
-      max-width: 780px;
       margin: 0;
       color: var(--market-ink);
-      font-size: clamp(2.5rem, 6.2vw, 5rem);
-      line-height: 0.95;
-      font-weight: 950;
-      letter-spacing: 0;
-      text-shadow: 0 2px 0 rgba(255, 255, 255, 0.88);
+      font-family: var(--font-market-display);
+      font-size: clamp(3.6rem, 6.2vw, 6.7rem);
+      font-weight: 500;
+      letter-spacing: -.055em;
+      line-height: .88;
+      text-wrap: balance;
     }
 
+    h1 em { color: var(--market-accent-dark); font-style: italic; font-weight: 500; letter-spacing: -.045em; }
+
     .summary {
-      max-width: 620px;
-      margin: 0;
+      max-width: 610px;
+      margin: .15rem 0 .1rem;
       color: var(--market-muted);
-      font-size: 1.08rem;
-      font-weight: 750;
-      line-height: 1.55;
+      font-size: clamp(.98rem, 1.4vw, 1.13rem);
+      line-height: 1.65;
     }
 
     .hero-search {
-      max-width: 760px;
+      width: min(100%, 690px);
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.75rem;
-      align-items: end;
-      padding: 0.45rem;
-      border: 1px solid rgba(234, 215, 242, 0.92);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.82);
-      box-shadow: 0 14px 32px rgba(143, 92, 144, 0.11);
+      gap: .5rem;
+      padding: .42rem;
+      border: 1px solid rgba(143,106,127,.36);
+      border-radius: var(--market-radius-control);
+      background: rgba(255,255,255,.93);
+      box-shadow: 0 16px 38px rgba(208,75,126,.12);
+      backdrop-filter: blur(14px);
     }
 
-    .hero-search label {
-      min-width: 0;
-      display: grid;
-    }
-
-    .hero-search label > span {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
-    }
-
-    .hero-search input {
-      width: 100%;
-      min-height: 46px;
-      border: 0;
-      border-radius: 999px;
-      background: transparent;
-      color: var(--market-ink);
-      padding: 0 1rem;
-      font: inherit;
-      font-weight: 750;
-      outline: none;
-    }
+    .hero-search:focus-within { border-color: var(--market-accent); box-shadow: 0 0 0 4px rgba(233,79,138,.14), 0 16px 38px rgba(208,75,126,.12); }
+    .hero-search label { min-width: 0; display: grid; grid-template-columns: 40px minmax(0,1fr); align-items: center; }
+    .hero-search label > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .hero-search svg { width: 1.1rem; height: 1.1rem; justify-self: center; fill: var(--market-accent-dark); }
+    .hero-search input, .hero-search button, .secondary-link { border: 0; font: inherit; }
+    .hero-search input { min-width: 0; min-height: 48px; padding: 0 .5rem 0 0; background: transparent; color: var(--market-ink); outline: none; }
+    .hero-search input::placeholder { color: #927f8a; }
 
     .hero-search button,
     .primary-link,
     .secondary-link {
-      min-height: 46px;
+      min-height: 48px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 999px;
-      font: inherit;
-      font-weight: 950;
-      text-decoration: none;
+      gap: .5rem;
+      padding: 0 1.35rem;
+      border-radius: var(--market-radius-control);
       cursor: pointer;
-      transition: transform 220ms ease, box-shadow 220ms ease;
-      white-space: nowrap;
+      font-weight: 760;
+      text-decoration: none;
+      transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
     }
 
-    .hero-search button,
-    .primary-link {
-      border: 0;
-      padding: 0 1.2rem;
-      background: linear-gradient(135deg, #f472b6, #8b6fe8);
-      color: #fff;
-      box-shadow: 0 14px 28px rgba(190, 58, 131, 0.22);
-    }
+    .hero-search button, .primary-link { background: linear-gradient(135deg, #d92e72, #c82062); color: #fff; box-shadow: 0 12px 26px rgba(220,54,119,.2); }
+    .hero-search button:hover, .primary-link:hover { transform: translateY(-2px); box-shadow: 0 16px 30px rgba(220,54,119,.26); }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: .7rem; }
+    .secondary-link { border: 1px solid rgba(143,106,127,.38); background: rgba(255,253,249,.78); color: var(--market-accent-dark); }
+    .secondary-link:hover { background: var(--market-accent-soft); transform: translateY(-2px); }
 
-    .secondary-link {
-      border: 1px solid rgba(234, 215, 242, 0.95);
-      padding: 0 1.1rem;
-      background: rgba(255, 255, 255, 0.92);
-      color: var(--market-accent-dark);
-    }
-
-    .hero-search button:hover,
-    .primary-link:hover,
-    .secondary-link:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 18px 38px rgba(190, 58, 131, 0.2);
-    }
-
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .hero-art {
-      display: grid;
-      gap: 0.85rem;
-      align-self: stretch;
-      align-content: center;
-    }
-
-    .mascot-card {
-      position: relative;
-      min-height: 340px;
-      border-radius: 24px;
-      animation: float 6s ease-in-out infinite;
-    }
-
-    .floating-badge {
-      position: absolute;
-      min-height: 34px;
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid rgba(255, 255, 255, 0.82);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.88);
-      color: var(--market-accent-dark);
-      font-size: 0.78rem;
-      font-weight: 950;
-      padding: 0 0.85rem;
-      box-shadow: 0 12px 28px rgba(132, 83, 143, 0.16);
-      backdrop-filter: blur(14px);
-    }
-
-    .badge-new {
-      top: 1rem;
-      left: -0.35rem;
-    }
-
-    .badge-trust {
-      right: -0.45rem;
-      top: 28%;
-    }
-
-    .badge-local {
-      left: 1rem;
-      bottom: 1rem;
-    }
+    .path-pills { display: flex; flex-wrap: wrap; gap: .85rem 1.2rem; margin-top: .2rem; }
+    .path-pills span { display: inline-flex; align-items: center; gap: .38rem; color: var(--market-muted); font-size: .74rem; }
+    .path-pills strong { color: var(--market-ink); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot.individual { background: var(--market-accent); }
+    .dot.business { background: var(--market-jade); }
 
     .featured-card {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-      padding: 1rem;
-      border: 1px solid rgba(234, 215, 242, 0.95);
-      border-radius: 20px;
-      background: rgba(255, 255, 255, 0.9);
-      color: inherit;
-      text-decoration: none;
-      box-shadow: 0 16px 38px rgba(100, 63, 120, 0.14);
-      backdrop-filter: blur(16px);
-    }
-
-    .featured-card div {
-      min-width: 0;
+      position: absolute;
+      z-index: 4;
+      right: clamp(1rem, 3vw, 2.5rem);
+      bottom: clamp(1rem, 3vw, 2.5rem);
+      width: min(340px, 34%);
       display: grid;
-      gap: 0.15rem;
-    }
-
-    .featured-card span,
-    .featured-card small {
-      color: var(--market-muted);
-      font-size: 0.75rem;
-      font-weight: 900;
-    }
-
-    .featured-card strong {
+      grid-template-columns: 1fr auto;
+      gap: .2rem .8rem;
+      padding: 1rem 1.1rem;
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 22px 6px 22px 6px;
+      border-color: rgba(233,79,138,.2);
+      background: rgba(255,255,255,.88);
       color: var(--market-ink);
-      font-weight: 950;
-      overflow-wrap: anywhere;
+      text-decoration: none;
+      box-shadow: 0 20px 48px rgba(208,75,126,.18);
+      backdrop-filter: blur(18px);
     }
 
-    .featured-card p {
-      margin: 0;
-      color: var(--market-accent-dark);
-      font-weight: 950;
-      white-space: nowrap;
+    .featured-kicker { grid-column: 1 / -1; color: var(--market-accent-dark); font-size: .65rem; font-weight: 760; letter-spacing: .12em; text-transform: uppercase; }
+    .featured-card strong, .featured-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .featured-card strong { color: var(--market-ink); font-family: var(--font-market-display); font-size: 1.05rem; font-weight: 600; }
+    .featured-card small { color: var(--market-muted); }
+    .featured-card p { grid-column: 2; grid-row: 2 / 4; align-self: center; margin: 0; color: var(--market-accent-dark); font-weight: 780; }
+
+    .hero-frame { position: absolute; z-index: 3; width: 86px; height: 86px; pointer-events: none; }
+    .hero-frame-top { top: 20px; right: 20px; border-top: 1px solid rgba(255,255,255,.58); border-right: 1px solid rgba(255,255,255,.58); }
+    .hero-frame-bottom { bottom: 20px; left: 20px; border-bottom: 1px solid rgba(143,106,127,.32); border-left: 1px solid rgba(143,106,127,.32); }
+
+    @media (max-width: 1050px) {
+      .hero-copy { width: 62%; }
+      .hero-section::before { background: linear-gradient(90deg, rgba(255,255,255,.98) 0%, rgba(255,247,251,.9) 43%, rgba(255,242,248,.14) 72%); }
+      .featured-card { width: min(300px, 31%); }
     }
 
-    @keyframes float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-8px); }
+    @media (max-width: 760px) {
+      .hero-section { min-height: 770px; border-radius: 26px 8px 26px 8px; }
+      .hero-section::before { background: linear-gradient(180deg, rgba(255,255,255,.99) 0%, rgba(255,247,251,.96) 43%, rgba(255,239,247,.16) 68%, rgba(255,206,226,.1) 100%); }
+      .hero-copy { width: 100%; min-height: auto; justify-content: flex-start; padding: 1.7rem 1.25rem; }
+      h1 { font-size: clamp(3rem, 13vw, 4.5rem); }
+      .summary { max-width: 520px; }
+      .hero-search { grid-template-columns: 1fr; }
+      .hero-search button { width: 100%; }
+      .hero-actions > * { flex: 1 1 145px; padding-inline: .8rem; }
+      .path-pills { display: none; }
+      .featured-card { display: none; }
+      .hero-frame { display: none; }
+    }
+
+    @media (max-width: 430px) {
+      .hero-section { min-height: 745px; }
+      .hero-copy { gap: .82rem; padding: 1.35rem 1rem; }
+      .eyebrow { font-size: .62rem; }
+      h1 { font-size: clamp(2.7rem, 14vw, 3.65rem); }
+      .summary { font-size: .92rem; line-height: 1.5; }
+      .hero-search input { font-size: .9rem; }
+      .featured-card { padding: .78rem .85rem; }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .mascot-card {
-        animation: none;
-      }
-    }
-
-    @media (max-width: 980px) {
-      .hero-section {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .hero-section {
-        min-height: auto;
-        padding: 1rem;
-        border-radius: 20px;
-      }
-
-      .hero-search,
-      .hero-actions {
-        grid-template-columns: 1fr;
-      }
-
-      .hero-search {
-        border-radius: 20px;
-      }
-
-      .hero-search button,
-      .primary-link,
-      .secondary-link {
-        width: 100%;
-      }
-
-      .mascot-card {
-        min-height: 250px;
-      }
-
-      .floating-badge {
-        display: none;
-      }
-
-      .featured-card {
-        align-items: flex-start;
-        flex-direction: column;
-      }
+      .hero-search button, .primary-link, .secondary-link { transition: none; }
     }
   `],
 })
@@ -374,7 +264,6 @@ export class MarketplaceHeroBannerComponent {
   @Input() authenticated = false;
   @Output() searchRequested = new EventEmitter<string>();
   @Output() loginRequested = new EventEmitter<void>();
-
   searchTerm = '';
 
   submitSearch(): void {

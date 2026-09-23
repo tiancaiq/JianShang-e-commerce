@@ -10,8 +10,8 @@ import { ListingCondition } from '../../../core/models/listing.model';
     <section class="filter-panel" aria-label="Filter marketplace listings">
       <div class="filter-heading">
         <div>
-          <span>Filter by</span>
-          <strong>Cute finds</strong>
+          <span>Marketplace</span>
+          <strong>Refine your search</strong>
         </div>
         @if (hasActiveSearch) {
           <button type="button" class="clear-button" (click)="clearFilters.emit()">Clear</button>
@@ -191,6 +191,77 @@ import { ListingCondition } from '../../../core/models/listing.model';
       .price-fields {
         grid-template-columns: 1fr;
       }
+    }
+
+    .filter-panel {
+      gap: 1rem;
+      padding: 1.15rem;
+      border-color: rgba(233,184,205,.84);
+      border-radius: 24px 7px 24px 7px;
+      background:
+        radial-gradient(circle at 100% 0, rgba(255,220,235,.82), transparent 9rem),
+        rgba(255,255,255,.94);
+      box-shadow: var(--market-shadow-md);
+    }
+
+    .filter-heading {
+      border-color: var(--market-line);
+    }
+
+    .filter-heading span,
+    legend,
+    label span {
+      color: var(--market-muted);
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .filter-heading strong {
+      color: var(--market-ink);
+      font-family: var(--font-market-display);
+      font-size: 1.22rem;
+      font-weight: 620;
+    }
+
+    input,
+    select {
+      min-height: 42px;
+      border-color: var(--market-line-strong);
+      border-radius: var(--market-radius-control);
+      background: rgba(255,255,255,.96);
+      font-weight: 600;
+      box-shadow: none;
+    }
+
+    input:focus,
+    select:focus,
+    button:focus {
+      border-color: var(--market-accent);
+      box-shadow: 0 0 0 3px rgba(186,91,120,.12);
+    }
+
+    button {
+      border-color: var(--market-line-strong);
+      border-radius: var(--market-radius-control);
+      color: var(--market-accent-dark);
+      font-weight: 750;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+
+    button:hover {
+      border-color: var(--market-accent);
+      background: var(--market-accent-soft);
+      transform: none;
+    }
+
+    .apply-button {
+      background: linear-gradient(135deg, #d92e72, #c82062);
+      color: #fff;
+      box-shadow: 0 12px 24px rgba(220,54,119,.18);
+    }
+
+    .apply-button:hover {
+      background: #c92f6d;
     }
   `],
 })

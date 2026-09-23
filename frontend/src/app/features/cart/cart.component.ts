@@ -27,13 +27,19 @@ interface CartStoreGroup {
   standalone: true,
   imports: [DecimalPipe, RouterLink],
   template: `
-    <section class="cart-page">
+    <section
+      class="cart-page"
+      [class.cart-page-empty]="!loading() && (cartService.cart()?.items?.length ?? 0) === 0"
+      [class.cart-page-populated]="(cartService.cart()?.items?.length ?? 0) > 0">
+      <div class="cart-page-art" aria-hidden="true"></div>
+
       <header class="cart-header">
-        <div>
+        <div class="cart-hero-copy">
           <p>Business purchases</p>
           <h1>Your cart</h1>
+          <span class="cart-tagline">Small treasures. Brighter days.</span>
         </div>
-        <a routerLink="/stores">Continue shopping</a>
+        <a routerLink="/stores">Continue shopping <span aria-hidden="true">→</span></a>
       </header>
 
       <p
@@ -49,12 +55,16 @@ interface CartStoreGroup {
       }
 
       @if (loading() && !cartService.cart()) {
-        <div class="cart-empty" aria-live="polite">Loading cart...</div>
+        <div class="cart-loading" aria-live="polite">Loading cart...</div>
       } @else if (!cartService.cart()?.items?.length) {
         <div class="cart-empty">
-          <strong>Your cart is empty</strong>
-          <p>Browse active business items and add one you like.</p>
-          <a routerLink="/stores">Browse business items</a>
+          <div class="cart-empty-art" aria-hidden="true"></div>
+          <div class="cart-empty-copy">
+            <strong>Your cart is empty</strong>
+            <p>Browse active business items and add one you like.</p>
+            <a routerLink="/stores">Browse business items <span aria-hidden="true">→</span></a>
+            <span class="empty-cart-note">Good things travel far.</span>
+          </div>
         </div>
       } @else {
         <div class="cart-layout">
@@ -773,10 +783,18 @@ interface CartStoreGroup {
     }
 
     .cart-empty {
+      min-height: 330px;
       display: grid;
-      justify-items: start;
-      gap: 0.55rem;
+      grid-template-columns: minmax(180px, 300px) minmax(0, 360px);
+      place-content: center;
+      align-items: center;
+      gap: clamp(1rem, 4vw, 2.5rem);
+      background: linear-gradient(145deg, #fffdfb, #f3eff8);
     }
+
+    .cart-empty > img { width: 100%; max-height: 220px; object-fit: contain; }
+    .cart-empty > div { display: grid; justify-items: start; gap: .55rem; }
+    .cart-empty strong { color: var(--market-ink); font-family: var(--font-market-display); font-size: 1.55rem; }
 
     .cart-empty p {
       margin: 0;
@@ -843,6 +861,9 @@ interface CartStoreGroup {
     }
 
     @media (max-width: 520px) {
+      .cart-empty { grid-template-columns: 1fr; text-align: center; }
+      .cart-empty > img { max-height: 150px; }
+      .cart-empty > div { justify-items: center; }
       .cart-header,
       .section-title,
       .store-group-header {

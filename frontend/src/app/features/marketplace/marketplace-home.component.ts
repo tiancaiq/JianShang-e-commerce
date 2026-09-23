@@ -18,7 +18,6 @@ import {
 } from '../../shared/listing/public-listing-display';
 import { AuthService } from '../../core/services/auth.service';
 import { BrandLoadingScreenComponent } from '../../shared/components/ui/brand-loading-screen.component';
-import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.component';
 import { MarketplaceFilterPanelComponent } from './components/marketplace-filter-panel.component';
 import { MarketplaceHeroBannerComponent } from './components/marketplace-hero-banner.component';
 import { MarketplaceProductCardComponent } from './components/marketplace-product-card.component';
@@ -31,7 +30,6 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
   standalone: true,
   imports: [
     BrandLoadingScreenComponent,
-    BrandMascotComponent,
     FormsModule,
     MarketplaceFilterPanelComponent,
     MarketplaceHeroBannerComponent,
@@ -42,6 +40,8 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
   ],
   template: `
     <section class="marketplace-home">
+      <div class="marketplace-page-art" aria-hidden="true"></div>
+
       <app-marketplace-hero-banner
         [featuredProduct]="featuredProduct()"
         [authenticated]="isSignedIn()"
@@ -49,19 +49,22 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
         (loginRequested)="startHeroSellFlow()"
       />
 
-      <section id="listings" class="browse-section" aria-labelledby="browse-title">
+      <section class="category-band" aria-label="Browse marketplace categories">
         <app-marketplace-sidebar
           [categories]="categoryOptions()"
           [selectedCategoryId]="selectedCategoryId"
           (categorySelected)="selectCategory($event)"
         />
+      </section>
 
+      <section id="listings" class="browse-section" aria-labelledby="browse-title">
         <main class="listing-area">
           <div class="browse-panel">
             <div class="browse-header">
               <div>
-                <p class="eyebrow">Fresh finds</p>
-                <h2 id="browse-title">Individual Marketplace</h2>
+                <p class="eyebrow">Current listings</p>
+                <h2 id="browse-title">Objects with a story</h2>
+                <p class="browse-intro">Explore approved finds from people near you.</p>
               </div>
               <div class="browse-tools">
                 <span>{{ marketplaceListings().length }} shown</span>
@@ -74,11 +77,18 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
                     <option value="price_desc">Price high to low</option>
                   </select>
                 </label>
+                <button
+                  type="button"
+                  class="mobile-filter-toggle"
+                  [attr.aria-expanded]="filtersOpen()"
+                  aria-controls="marketplace-filter-drawer"
+                  (click)="filtersOpen.set(true)"
+                >Filters</button>
               </div>
             </div>
 
             <div class="browse-tabs" role="list" aria-label="Marketplace browse shortcuts">
-              <button type="button" [class.active]="!hasActiveSearch()" (click)="clearFilters()">All Items</button>
+              <button type="button" [class.active]="!hasActiveSearch()" (click)="clearFilters()">All listings</button>
               <button type="button" [class.active]="sortMode === 'newest'" (click)="selectNewest()">New Arrivals</button>
               <button type="button" [class.active]="maxPrice === 50" (click)="selectBudgetFinds()">Under $50</button>
               <a routerLink="/account/listings">List an Item</a>
@@ -87,15 +97,19 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
             @if (loading()) {
               <app-brand-loading-screen
                 label="Loading approved listings"
-                detail="The marketplace mascot is arranging fresh local finds."
+                detail="Checking the latest active individual listings."
               />
             } @else if (errorMsg()) {
-              <div class="empty-list">{{ errorMsg() }}</div>
+              <div class="empty-list error-list" role="alert">
+                <strong>Listings are unavailable</strong>
+                <p>{{ errorMsg() }}</p>
+                <button type="button" (click)="runSearch()">Try again</button>
+              </div>
             } @else if (marketplaceListings().length === 0) {
-              <div class="empty-list cute-empty">
-                <app-brand-mascot variant="badge" alt="MSB marketplace mascot empty state" />
+              <div class="empty-list marketplace-empty">
+                <img src="/assets/brand/anime/assistant-mascot.webp" alt="" aria-hidden="true" />
                 <div>
-                  <strong>{{ hasActiveSearch() ? 'No sweet finds yet' : 'No approved individual listings yet' }}</strong>
+                  <strong>{{ hasActiveSearch() ? 'No listings match these filters' : 'No approved individual listings yet' }}</strong>
                   <p>{{ hasActiveSearch() ? activeFilterSummary() : 'Fresh local listings will appear here once approved.' }}</p>
                   @if (hasActiveSearch() && suggestedCategoryName()) {
                     <p class="suggestion">Suggested category: {{ suggestedCategoryName() }}</p>
@@ -126,7 +140,16 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
           </div>
         </main>
 
-        <aside class="marketplace-rail" aria-label="Marketplace account and filters">
+        <aside
+          id="marketplace-filter-drawer"
+          class="marketplace-rail"
+          [class.mobile-open]="filtersOpen()"
+          aria-label="Marketplace account and filters"
+        >
+          <div class="mobile-filter-head">
+            <strong>Filter listings</strong>
+            <button type="button" aria-label="Close filters" (click)="filtersOpen.set(false)">Close</button>
+          </div>
           @if (authService.user(); as user) {
             <app-marketplace-seller-card [user]="user" />
           }
@@ -147,6 +170,15 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
             (clearFilters)="clearFilters()"
           />
         </aside>
+        @if (filtersOpen()) {
+          <button type="button" class="filters-backdrop" aria-label="Close filters" (click)="filtersOpen.set(false)"></button>
+        }
+      </section>
+
+      <section class="market-values" aria-label="Marketplace values">
+        <div><span aria-hidden="true">✦</span><strong>Distinctive finds</strong><small>Objects selected by people, not an endless catalog.</small></div>
+        <div><span aria-hidden="true">◌</span><strong>Independent sellers</strong><small>Meet local individuals and clearly labeled stores.</small></div>
+        <div><span aria-hidden="true">◇</span><strong>Clear purchase paths</strong><small>Know whether you arrange a trade or use checkout.</small></div>
       </section>
     </section>
   `,
@@ -155,172 +187,6 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
-    }
-
-    .hero-section {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 470px);
-      gap: 1rem;
-      align-items: stretch;
-      min-height: 360px;
-      padding: clamp(1rem, 4vw, 2rem);
-      border: 1px solid rgba(234, 215, 242, 0.9);
-      border-radius: 8px;
-      background:
-        linear-gradient(135deg, rgba(255, 240, 247, 0.94), rgba(241, 235, 255, 0.92)),
-        var(--market-surface);
-      box-shadow: 0 18px 44px rgba(159, 91, 144, 0.13);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-copy,
-    .hero-art {
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero-copy {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 1rem;
-      max-width: 760px;
-    }
-
-    .eyebrow,
-    .mini-label {
-      margin: 0;
-      color: var(--market-accent-dark);
-      font-size: 0.78rem;
-      font-weight: 850;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    h1,
-    h2,
-    h3 {
-      margin: 0;
-      color: var(--market-ink);
-      letter-spacing: 0;
-    }
-
-    h1 {
-      max-width: 720px;
-      font-size: clamp(2.5rem, 6vw, 5rem);
-      line-height: 0.96;
-      font-weight: 900;
-      text-shadow: 0 2px 0 rgba(255, 255, 255, 0.9);
-    }
-
-    .summary {
-      max-width: 560px;
-      margin: 0;
-      color: var(--market-muted);
-      font-size: 1.05rem;
-      font-weight: 650;
-    }
-
-    .hero-search {
-      max-width: 760px;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.75rem;
-      align-items: end;
-    }
-
-    .hero-search label,
-    .filter-stack label,
-    .sort-control {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-
-    .hero-search span,
-    .filter-stack span,
-    .sort-control span {
-      color: var(--market-muted);
-      font-size: 0.78rem;
-      font-weight: 850;
-    }
-
-    input,
-    select {
-      width: 100%;
-      min-height: 46px;
-      border: 1px solid var(--market-line);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.92);
-      color: var(--market-ink);
-      padding: 0 0.9rem;
-      outline: none;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-    }
-
-    button {
-      min-height: 46px;
-      border: 1px solid var(--market-line);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.92);
-      color: var(--market-accent-dark);
-      padding: 0 1rem;
-      cursor: pointer;
-      font-weight: 900;
-    }
-
-    input:focus,
-    select:focus,
-    button:focus {
-      border-color: var(--market-accent);
-      box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.18);
-    }
-
-    .hero-art {
-      min-height: 320px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      border-radius: 8px;
-      box-shadow: 0 18px 42px rgba(132, 83, 143, 0.16);
-    }
-
-    .hero-art img {
-      width: 100%;
-      height: 100%;
-      min-height: inherit;
-      display: block;
-      object-fit: cover;
-      object-position: center;
-    }
-
-    .hero-art-card {
-      position: absolute;
-      right: 0.85rem;
-      bottom: 0.85rem;
-      width: min(78%, 270px);
-      display: grid;
-      gap: 0.18rem;
-      padding: 0.75rem;
-      border: 1px solid rgba(255, 255, 255, 0.78);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 14px 32px rgba(100, 63, 120, 0.18);
-      backdrop-filter: blur(16px);
-    }
-
-    .hero-art-card span,
-    .hero-art-card small {
-      color: var(--market-muted);
-      font-size: 0.75rem;
-      font-weight: 850;
-    }
-
-    .hero-art-card strong {
-      color: var(--market-ink);
-      font-weight: 950;
-      line-height: 1.2;
-      overflow-wrap: anywhere;
     }
 
     .browse-section {
@@ -762,6 +628,329 @@ import { MarketplaceUiProduct } from './components/marketplace-ui.model';
         flex-direction: column;
       }
     }
+
+    /* Inventory-first browse layout. */
+    .marketplace-home {
+      gap: 1.35rem;
+    }
+
+    .browse-section {
+      grid-template-columns: minmax(0, 1fr) 292px;
+      gap: clamp(1.1rem, 2vw, 1.7rem);
+      min-height: 0;
+    }
+
+    .category-band {
+      position: relative;
+      z-index: 5;
+      min-width: 0;
+      margin-top: -2.9rem;
+      padding: 0 clamp(.45rem, 1.5vw, 1.15rem);
+    }
+
+    .browse-panel {
+      gap: 1.05rem;
+      padding: clamp(1rem, 2vw, 1.5rem);
+      border: 1px solid rgba(207,188,195,.72);
+      border-radius: 26px 8px 26px 8px;
+      background: rgba(255,255,255,.9);
+      box-shadow: var(--market-shadow-sm);
+      backdrop-filter: blur(12px);
+    }
+
+    .browse-header {
+      align-items: end;
+      padding-bottom: 1rem;
+      border-color: var(--market-line);
+    }
+
+    .browse-header h2 {
+      font-family: var(--font-market-display);
+      font-size: clamp(2.05rem, 3.5vw, 3rem);
+      font-weight: 520;
+      letter-spacing: -.045em;
+      line-height: 1;
+    }
+
+    .browse-intro {
+      margin: .45rem 0 0;
+      color: var(--market-muted);
+      font-size: .92rem;
+    }
+
+    .eyebrow {
+      color: var(--market-accent-dark);
+      font-family: var(--font-market-utility);
+      font-size: 0.68rem;
+      font-weight: 720;
+      letter-spacing: 0.16em;
+    }
+
+    .sort-control select {
+      border-color: var(--market-line-strong);
+      border-radius: var(--market-radius-control);
+      background: var(--market-surface);
+      box-shadow: none;
+    }
+
+    .browse-tabs {
+      gap: 0.5rem;
+    }
+
+    .browse-tabs button,
+    .browse-tabs a {
+      border-color: var(--market-line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.9);
+      color: var(--market-muted);
+      font-weight: 680;
+    }
+
+    .browse-tabs button.active,
+    .browse-tabs button:hover,
+    .browse-tabs a:hover {
+      border-color: var(--market-accent);
+      background: var(--market-accent-soft);
+      color: var(--market-accent-dark);
+    }
+
+    .listing-grid {
+      grid-template-columns: repeat(auto-fill, minmax(226px, 1fr));
+      gap: clamp(.85rem, 1.4vw, 1.15rem);
+    }
+
+    .empty-list {
+      min-height: 260px;
+      border: 1px dashed var(--market-line-strong);
+      border-radius: var(--market-radius-md);
+      background: var(--market-surface);
+      color: var(--market-muted);
+      font-weight: 600;
+    }
+
+    .marketplace-empty,
+    .error-list {
+      grid-template-columns: minmax(0, 440px);
+      justify-content: center;
+    }
+
+    .marketplace-empty div,
+    .error-list {
+      justify-items: center;
+      gap: 0.5rem;
+      text-align: center;
+    }
+
+    .marketplace-empty strong,
+    .error-list strong {
+      color: var(--market-ink);
+      font-size: 1.1rem;
+    }
+
+    .marketplace-empty p,
+    .error-list p {
+      margin: 0;
+    }
+
+    .marketplace-empty button,
+    .error-list button,
+    .load-more-row button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--market-accent);
+      color: #fff;
+      box-shadow: none;
+    }
+
+    .mobile-filter-toggle,
+    .mobile-filter-head,
+    .filters-backdrop {
+      display: none;
+    }
+
+    .market-values {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--market-line);
+      border-radius: 24px 7px 24px 7px;
+      background: var(--market-line);
+      box-shadow: var(--market-shadow-sm);
+    }
+
+    .market-values div {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: .15rem .75rem;
+      align-items: center;
+      padding: 1.2rem 1.35rem;
+      background: rgba(255,255,255,.97);
+    }
+
+    .market-values span {
+      grid-row: 1 / 3;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(186,91,120,.2);
+      border-radius: 50% 50% 50% 18%;
+      background: var(--market-accent-soft);
+      color: var(--market-accent-dark);
+      font-size: 1.05rem;
+    }
+
+    .market-values strong { color: var(--market-ink); font-family: var(--font-market-display); font-size: 1.02rem; font-weight: 620; }
+    .market-values small { color: var(--market-muted); line-height: 1.35; }
+
+    @media (max-width: 1180px) {
+      .browse-section {
+        grid-template-columns: minmax(0, 1fr) 270px;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .browse-section {
+        grid-template-columns: 1fr;
+      }
+
+      .mobile-filter-toggle {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-color: var(--market-line-strong);
+        border-radius: var(--market-radius-sm);
+        color: var(--market-accent-dark);
+        background: var(--market-surface);
+      }
+
+      .marketplace-rail {
+        position: fixed;
+        z-index: 50;
+        inset: 118px 0 0 auto;
+        width: min(88vw, 360px);
+        max-height: calc(100dvh - 118px);
+        display: none;
+        overflow-y: auto;
+        padding: 1rem;
+        background: var(--market-canvas);
+        box-shadow: -18px 0 44px rgba(20, 47, 50, 0.18);
+      }
+
+      .market-values { grid-template-columns: 1fr; }
+
+      .marketplace-rail.mobile-open {
+        display: grid;
+        align-content: start;
+      }
+
+      .mobile-filter-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding-bottom: 0.75rem;
+        background: var(--market-canvas);
+      }
+
+      .mobile-filter-head strong {
+        color: var(--market-ink);
+      }
+
+      .mobile-filter-head button {
+        min-height: 36px;
+        border-radius: var(--market-radius-sm);
+      }
+
+      .filters-backdrop {
+        position: fixed;
+        z-index: 45;
+        inset: 0;
+        display: block;
+        border: 0;
+        border-radius: 0;
+        background: rgba(20, 47, 50, 0.36);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .category-band { margin-top: -1.25rem; padding-inline: .25rem; }
+
+      .browse-tools {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+      }
+
+      .browse-tools > span {
+        grid-column: 1 / -1;
+      }
+
+      .sort-control {
+        min-width: 0;
+      }
+
+      .listing-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+      }
+
+      .browse-panel { padding: .85rem; border-radius: 20px 6px 20px 6px; }
+      .market-values div { padding: 1rem; }
+    }
+
+    @media (max-width: 520px) {
+      .listing-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Keep every responsive grid child shrinkable; the category scroller must not move the page canvas. */
+    .marketplace-home,
+    .browse-section,
+    .listing-area,
+    .browse-panel {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .marketplace-empty {
+      grid-template-columns: minmax(140px, 210px) minmax(0, 420px);
+      gap: clamp(1rem, 4vw, 2.25rem);
+      border-style: solid;
+      background: linear-gradient(145deg, #ffffff, #fff0f7);
+    }
+
+    .marketplace-empty > img {
+      width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+    }
+
+    @media (max-width: 980px) {
+      app-marketplace-sidebar {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        overflow: hidden;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .marketplace-empty {
+        grid-template-columns: 1fr;
+      }
+
+      .marketplace-empty > img {
+        max-height: 140px;
+      }
+    }
   `],
 })
 export class MarketplaceHomeComponent implements OnInit {
@@ -776,6 +965,7 @@ export class MarketplaceHomeComponent implements OnInit {
   loadingMore = signal(false);
   hasMore = signal(false);
   errorMsg = signal('');
+  filtersOpen = signal(false);
   nextCursor = signal<string | null>(null);
 
   searchTerm = '';
@@ -803,6 +993,7 @@ export class MarketplaceHomeComponent implements OnInit {
   }
 
   runSearch(): void {
+    this.filtersOpen.set(false);
     this.fetchFirstPage();
     this.syncUrlSearchState();
   }

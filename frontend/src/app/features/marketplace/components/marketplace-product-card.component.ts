@@ -13,34 +13,34 @@ import { MarketplaceUiProduct } from './marketplace-ui.model';
         @if (product.imageUrl) {
           <img [src]="product.imageUrl" [alt]="product.imageAlt" />
         } @else {
-          <span>{{ product.categoryName }}</span>
+          <span class="no-image-state">
+            <img src="/assets/brand/anime/shopping-bag-fallback.svg" alt="" aria-hidden="true" />
+            <span>No image · {{ product.categoryName }}</span>
+          </span>
         }
+        <span class="seller-type-badge">Individual</span>
       </div>
 
       <div class="product-body">
-        <div class="product-pill-row" aria-label="Listing quick facts">
-          <span class="condition-pill" [class.hot]="product.badge === 'HOT'" [class.sale]="product.badge === 'SALE'">
-            {{ conditionPillLabel() }}
-          </span>
-          <span class="stat-pill" [attr.aria-label]="product.favoriteCount + ' likes'">♡ {{ product.favoriteCount }}</span>
-          <span class="stat-pill" [attr.aria-label]="product.visitCount + ' views'">👁 {{ product.visitCount }}</span>
+        <div class="product-pill-row" aria-label="Listing category and condition">
+          <span class="category-name">{{ product.categoryName }}</span>
+          <span class="condition-pill">{{ conditionPillLabel() }}</span>
         </div>
-
-        <div class="product-location-row">
-          <span class="local-badge">Local</span>
-          <span class="location-name" [attr.title]="product.locationLabel">📍 {{ product.locationLabel }}</span>
-        </div>
-
-        <p class="category-name">{{ product.categoryName }}</p>
         <h3>{{ product.title }}</h3>
         <p class="seller-name">by {{ product.sellerName }}</p>
+        <p class="location-name" [attr.title]="product.locationLabel">{{ product.locationLabel }}</p>
 
         <div class="product-foot">
           <strong>{{ product.priceAmount | number: '1.2-2' }} {{ product.currency }}</strong>
-          <span>Details</span>
+          <span>View listing</span>
         </div>
 
-        <p class="trade-note">Off-platform trade</p>
+        <div class="engagement-summary" aria-label="Listing engagement">
+          <span>{{ product.favoriteCount }} likes</span>
+          <span>{{ product.visitCount }} views</span>
+        </div>
+
+        <p class="trade-note">Payment arranged with seller</p>
       </div>
     </a>
   `,
@@ -248,6 +248,215 @@ import { MarketplaceUiProduct } from './marketplace-ui.model';
       font-size: 0.75rem;
       font-weight: 850;
     }
+
+    /* Shared individual-listing card system. */
+    .product-card {
+      border-color: var(--market-line);
+      border-radius: var(--market-radius-md);
+      background: var(--market-surface);
+      box-shadow: var(--market-shadow-sm);
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .product-card:hover {
+      border-color: var(--market-line-strong);
+      box-shadow: var(--market-shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .product-image {
+      aspect-ratio: 4 / 3;
+      margin: 0;
+      border-radius: 0;
+      background: var(--placeholder, linear-gradient(135deg, #e5eeeb, #f4f7f6));
+      color: var(--market-muted);
+      font-weight: 700;
+    }
+
+    .seller-type-badge {
+      position: absolute;
+      top: 0.7rem;
+      left: 0.7rem;
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 999px;
+      background: rgba(20, 47, 50, 0.9);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 0 0.65rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .product-body {
+      gap: 0.42rem;
+      padding: 0.9rem;
+    }
+
+    .product-pill-row {
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+
+    .category-name,
+    .condition-pill {
+      min-height: auto;
+      max-width: 55%;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      color: var(--market-muted);
+      font-size: 0.72rem;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .condition-pill {
+      max-width: 42%;
+      color: var(--market-accent-dark);
+    }
+
+    h3 {
+      min-height: 2.5em;
+      color: var(--market-ink);
+      font-size: 1rem;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+
+    .seller-name {
+      margin-top: 0;
+      color: var(--market-ink);
+      font-weight: 650;
+    }
+
+    .location-name {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--market-muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .product-foot {
+      align-items: center;
+      margin-top: 0.2rem;
+      padding-top: 0.7rem;
+      border-top-color: var(--market-line);
+    }
+
+    .product-foot strong {
+      color: var(--market-ink);
+      font-size: 1.1rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 820;
+    }
+
+    .product-foot span {
+      min-height: auto;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--market-accent-dark);
+      font-weight: 750;
+    }
+
+    .engagement-summary {
+      display: flex;
+      gap: 0.75rem;
+      color: var(--market-muted);
+      font-size: 0.72rem;
+    }
+
+    .trade-note {
+      margin-top: 0.25rem;
+      color: var(--market-coral);
+      font-size: 0.72rem;
+      font-weight: 750;
+    }
+
+    /* Paper-tag cards: expressive enough for browsing, restrained around product facts. */
+    .product-card {
+      border-color: rgba(233,184,205,.82);
+      border-radius: 22px 7px 22px 7px;
+      background: rgba(255,255,255,.97);
+      box-shadow: 0 10px 28px rgba(208,75,126,.08);
+    }
+
+    .product-card:hover {
+      border-color: rgba(233,79,138,.46);
+      box-shadow: 0 20px 42px rgba(208,75,126,.14);
+      transform: translateY(-4px);
+    }
+
+    .product-image {
+      aspect-ratio: 5 / 4;
+      margin: .55rem .55rem 0;
+      border-radius: 17px 5px 17px 5px;
+      background: var(--placeholder, linear-gradient(135deg, #fff0f6, #fce8f5));
+    }
+
+    .no-image-state {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: .1rem;
+      padding: .4rem;
+    }
+
+    .no-image-state img {
+      width: 58%;
+      height: 70%;
+      object-fit: contain;
+      opacity: .86;
+    }
+
+    .no-image-state span {
+      color: var(--market-muted);
+      font-size: .7rem;
+      font-weight: 750;
+    }
+
+    .seller-type-badge {
+      border-color: rgba(255,255,255,.66);
+      background: rgba(217,46,114,.94);
+      font-size: .66rem;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .product-foot strong {
+      color: var(--market-accent-dark);
+      font-family: var(--font-market-display);
+      font-size: 1.28rem;
+      font-weight: 650;
+    }
+
+    .product-foot span {
+      color: var(--market-accent-dark);
+    }
+
+    .product-body { padding: .95rem 1rem 1rem; }
+    .category-name, .condition-pill { font-family: var(--font-market-utility); letter-spacing: .08em; }
+    h3 { min-height: 2.55em; font-size: 1.02rem; font-weight: 690; line-height: 1.28; }
+    .seller-name { color: #7d5268; }
+    .trade-note { color: #a25072; font-weight: 650; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .product-card,
+      .product-image img { transition: none; }
+      .product-card:hover,
+      .product-card:hover .product-image img { transform: none; }
+    }
   `],
 })
 export class MarketplaceProductCardComponent {
@@ -255,16 +464,15 @@ export class MarketplaceProductCardComponent {
   @Input() detailLink: string | unknown[] = '/marketplace';
 
   conditionPillLabel(): string {
-    const allowed = new Set(['New', 'Like New', 'Open Box', 'Good']);
-    return allowed.has(this.product.conditionLabel) ? this.product.conditionLabel : 'Good';
+    return this.product.conditionLabel || 'Condition not provided';
   }
 
   placeholderGradient(): string {
     const gradients = [
-      'linear-gradient(135deg, #ffd5ea, #eee6ff)',
-      'linear-gradient(135deg, #ffe3f4, #dfeaff)',
-      'linear-gradient(135deg, #f8d8ff, #fff2c7)',
-      'linear-gradient(135deg, #ffd7e8, #ddfff4)',
+      'linear-gradient(135deg, #eadde1, #f5efed)',
+      'linear-gradient(135deg, #e7e4ec, #f7f1ee)',
+      'linear-gradient(135deg, #e5ece9, #f3ecec)',
+      'linear-gradient(135deg, #eee1e5, #e9e7ef)',
     ];
     return gradients[this.product.id.length % gradients.length];
   }

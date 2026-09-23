@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" role="img" aria-labelledby="title desc">
+  <title id="title">Cheerful marketplace parcel</title>
+  <desc id="desc">A cream parcel with a strawberry ribbon, mint star label, and small sakura petals.</desc>
+  <defs><linearGradient id="box" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff6dc"/><stop offset="1" stop-color="#f1d7aa"/></linearGradient></defs>
+  <path d="M93 367c74-61 147-67 227-30 86 40 164 31 227-15 24 36 35 73 32 112H70c-4-25 4-48 23-67Z" fill="#eee9ff"/>
+  <g transform="translate(149 74)">
+    <path d="M30 99 170 25l142 74-24 230H54L30 99Z" fill="url(#box)" stroke="#33263e" stroke-width="9" stroke-linejoin="round"/>
+    <path d="m31 100 140 71 141-71M171 171v158" fill="none" stroke="#33263e" stroke-width="9"/>
+    <path d="M127 48h88v282h-88z" fill="#ff8fb7" opacity=".9"/>
+    <path d="m171 32-37-26c-27-19-52 22-22 39l59 32 59-32c30-17 5-58-22-39l-37 26Z" fill="#e9427a" stroke="#33263e" stroke-width="7" stroke-linejoin="round"/>
+    <path d="m231 205 10 25 26 10-26 11-10 25-10-25-26-11 26-10 10-25Z" fill="#72d9bd" stroke="#fff" stroke-width="6"/>
+  </g>
+  <g fill="#ff8fb7"><path d="M99 160c30-14 50-3 55 21-23 13-43 6-55-21Z"/><path d="M535 220c-28-17-49-8-56 16 22 15 42 10 56-16Z"/></g>
+  <path d="m92 281 8 20 20 8-20 8-8 20-8-20-20-8 20-8 8-20Zm456-174 7 17 17 7-17 7-7 17-7-17-17-7 17-7 7-17Z" fill="#8b72e8"/>
+</svg>

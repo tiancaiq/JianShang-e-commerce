@@ -1112,6 +1112,7 @@ import { ReportDialogComponent } from '../../shared/components/report-dialog.com
       }
 
     }
+
   `],
 })
 export class PublicListingDetailComponent implements OnDestroy, OnInit {

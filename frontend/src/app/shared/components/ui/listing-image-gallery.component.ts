@@ -11,7 +11,15 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
       <figure class="primary-image">
         <div class="image-track" [style.transform]="trackTransform()">
           @for (image of images; track image.id) {
-            <img [src]="imageUrl(image)" [alt]="image.altText || fallbackAlt || 'Listing image'" />
+            @if (imageFailed(image.id)) {
+              <span class="failed-image" role="img" [attr.aria-label]="'Image unavailable. ' + (image.altText || fallbackAlt || 'Listing image')">
+                <img src="/assets/brand/anime/shopping-bag-fallback.svg" alt="" aria-hidden="true" />
+                <strong>Image unavailable</strong>
+                <small>Listing details are still available.</small>
+              </span>
+            } @else {
+              <img [src]="imageUrl(image)" [alt]="image.altText || fallbackAlt || 'Listing image'" (error)="markImageFailed(image.id)" />
+            }
           }
         </div>
         @if (hasMultipleImages()) {
@@ -32,13 +40,21 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
               [attr.aria-current]="selectedImageIndex() === index ? 'true' : null"
               (click)="selectImage(index)"
             >
-              <img [src]="imageUrl(image)" [alt]="image.altText || image.originalFileName || fallbackAlt || 'Listing image'" />
+              @if (imageFailed(image.id)) {
+                <img src="/assets/brand/anime/shopping-bag-fallback.svg" alt="" aria-hidden="true" />
+              } @else {
+                <img [src]="imageUrl(image)" [alt]="image.altText || image.originalFileName || fallbackAlt || 'Listing image'" (error)="markImageFailed(image.id)" />
+              }
             </button>
           }
         </div>
       }
     } @else {
-      <div class="image-placeholder">No public images</div>
+      <div class="image-placeholder">
+        <img src="/assets/brand/anime/shopping-bag-fallback.svg" alt="" aria-hidden="true" />
+        <span>No public images</span>
+        <small>Listing details are still available.</small>
+      </div>
     }
   `,
   styles: [`
@@ -78,6 +94,23 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
     .primary-image img {
       min-height: inherit;
     }
+
+    .failed-image {
+      min-width: 100%;
+      min-height: inherit;
+      flex: 0 0 100%;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: .4rem;
+      padding: 2rem;
+      color: var(--market-muted);
+      text-align: center;
+    }
+
+    .failed-image img { width: min(360px, 72%); min-height: 0; max-height: 300px; object-fit: contain; }
+    .failed-image strong { color: var(--market-ink); font-family: var(--font-market-display); }
+    .failed-image small { font-weight: 650; }
 
     .image-arrow {
       position: absolute;
@@ -138,9 +171,18 @@ import { publicListingImageUrl } from '../../listing/public-listing-display';
     .image-placeholder {
       display: grid;
       place-items: center;
+      align-content: center;
+      gap: .35rem;
+      padding: 2rem;
+      background: linear-gradient(145deg, #fffdfb, #f1ecff);
       color: var(--market-muted);
       font-weight: 850;
+      text-align: center;
     }
+
+    .image-placeholder img { width: min(360px, 78%); max-height: 300px; object-fit: contain; opacity: .86; }
+    .image-placeholder span { color: var(--market-ink); font-family: var(--font-market-display); font-size: 1.15rem; }
+    .image-placeholder small { color: var(--market-muted); font-weight: 650; }
 
     @media (max-width: 980px) {
       .primary-image,
@@ -175,6 +217,7 @@ export class ListingImageGalleryComponent implements OnChanges, OnDestroy, OnIni
   @Input() fallbackAlt = '';
 
   selectedImageIndex = signal(0);
+  failedImageIds = signal<Set<string>>(new Set());
 
   ngOnInit(): void {
     this.startImageCarousel();
@@ -183,6 +226,7 @@ export class ListingImageGalleryComponent implements OnChanges, OnDestroy, OnIni
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['images']) {
       this.selectedImageIndex.set(0);
+      this.failedImageIds.set(new Set());
       this.startImageCarousel();
     }
   }
@@ -193,6 +237,14 @@ export class ListingImageGalleryComponent implements OnChanges, OnDestroy, OnIni
 
   imageUrl(image: PublicListingImage | undefined): string {
     return publicListingImageUrl(image, url => this.listingService.mediaUrl(url));
+  }
+
+  imageFailed(imageId: string): boolean {
+    return this.failedImageIds().has(imageId);
+  }
+
+  markImageFailed(imageId: string): void {
+    this.failedImageIds.update(current => new Set(current).add(imageId));
   }
 
   selectedImage(): PublicListingImage | undefined {

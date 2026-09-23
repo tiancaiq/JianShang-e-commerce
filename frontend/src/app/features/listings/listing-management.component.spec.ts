@@ -60,7 +60,10 @@ describe('ListingManagementComponent', () => {
 
     expect(component.newListingLink()).toEqual(['/account/listings', 'new']);
     expect(component.editListingLink(draft.id)).toEqual(['/account/listings', draft.id, 'edit']);
-    expect(fixture.nativeElement.textContent).toContain('Marketplace account');
+    expect(fixture.nativeElement.textContent).toContain('Personal marketplace');
     expect(fixture.nativeElement.textContent).toContain('Used bicycle');
+    expect(fixture.nativeElement.querySelector('.trades-hero')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.listing-portfolio')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.listing-row')?.getAttribute('data-status')).toBe('DRAFT');
   });
 });

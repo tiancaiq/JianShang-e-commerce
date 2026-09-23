@@ -66,6 +66,19 @@ describe('ListingImageGalleryComponent', () => {
     expect(listingService.mediaUrl).not.toHaveBeenCalledWith('https://storage.googleapis.com/jianshang/listings/raw.jpg');
   });
 
+  it('replaces a broken public image with the branded unavailable state', () => {
+    component.images = [firstImage];
+    fixture.detectChanges();
+
+    const image = fixture.nativeElement.querySelector('.primary-image img') as HTMLImageElement;
+    image.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.failed-image')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Image unavailable');
+    expect(fixture.nativeElement.textContent).toContain('Listing details are still available.');
+  });
+
   it('slides the image track when the image changes', () => {
     component.images = [firstImage, secondImage];
     fixture.detectChanges();

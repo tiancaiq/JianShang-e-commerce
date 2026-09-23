@@ -8,8 +8,8 @@ import { environment } from '../../../../environments/environment';
   template: `
     <aside class="category-rail" aria-label="Marketplace categories">
       <div class="rail-title">
-        <span>Browse</span>
-        <strong>Categories</strong>
+        <span>Explore</span>
+        <strong>Collections</strong>
       </div>
       <button type="button" [class.active]="selectedCategoryId === 'ALL'" (click)="categorySelected.emit('ALL')">
         <span>All</span>
@@ -23,7 +23,7 @@ import { environment } from '../../../../environments/environment';
       }
       @if (aiAssistantEnabled) {
         <div class="help-card" aria-label="Marketplace support">
-          <img src="/marketplace/help-mascot.png" alt="MSB marketplace support mascot" />
+          <img src="/assets/brand/anime/assistant-avatar.webp" alt="MSB marketplace shopping guide" />
           <strong>Need help?</strong>
           <span>Support chat is coming soon.</span>
           <button type="button" disabled>Coming soon</button>
@@ -232,6 +232,187 @@ import { environment } from '../../../../environments/environment';
         max-height: none;
         overflow: visible;
       }
+    }
+
+    .category-rail {
+      top: 90px;
+      gap: 0.35rem;
+      padding: 0.65rem;
+      border-color: var(--market-line);
+      border-radius: var(--market-radius-md);
+      background: var(--market-surface);
+      box-shadow: var(--market-shadow-sm);
+      scrollbar-color: var(--market-line-strong) transparent;
+    }
+
+    .rail-title span,
+    .help-card span,
+    button span {
+      color: var(--market-muted);
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .rail-title strong,
+    .help-card strong,
+    button strong {
+      color: var(--market-ink);
+      font-weight: 760;
+    }
+
+    button {
+      min-height: 44px;
+      border-radius: var(--market-radius-sm);
+      padding: 0.5rem 0.65rem;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+
+    button.active,
+    button:hover {
+      border-color: var(--market-line);
+      background: var(--market-accent-soft);
+      transform: none;
+    }
+
+    button.active span,
+    button:hover span {
+      color: var(--market-accent-dark);
+    }
+
+    @media (max-width: 980px) {
+      .category-rail {
+        position: static;
+        width: 100%;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0.5rem;
+        scroll-snap-type: x proximity;
+      }
+
+      .rail-title {
+        min-width: 104px;
+        padding: 0.25rem 0.5rem;
+      }
+
+      .category-rail > button {
+        width: auto;
+        min-width: max-content;
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        scroll-snap-align: start;
+      }
+
+      .category-rail > button span {
+        display: none;
+      }
+
+      .help-card {
+        display: none;
+      }
+    }
+
+    /* Horizontal collection ribbon used beneath the illustrated hero. */
+    .category-rail {
+      position: static;
+      width: 100%;
+      max-height: none;
+      display: flex;
+      align-items: stretch;
+      gap: .35rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: .62rem;
+      border: 1px solid rgba(207,188,195,.75);
+      border-radius: 24px 7px 24px 7px;
+      background: rgba(255,253,249,.91);
+      box-shadow: 0 18px 42px rgba(76,46,63,.12);
+      backdrop-filter: blur(18px);
+      scroll-snap-type: x proximity;
+    }
+
+    .rail-title {
+      min-width: 118px;
+      flex: 0 0 118px;
+      align-content: center;
+      padding: .3rem .7rem;
+      border-right: 1px solid var(--market-line);
+    }
+
+    .rail-title span { color: var(--market-accent-dark); font-size: .62rem; letter-spacing: .14em; }
+    .rail-title strong { font-family: var(--font-market-display); font-size: 1.02rem; font-weight: 620; }
+
+    .category-rail > button {
+      width: auto;
+      min-width: 112px;
+      flex: 1 0 112px;
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      align-items: center;
+      gap: .55rem;
+      min-height: 58px;
+      padding: .42rem .62rem;
+      border-radius: var(--market-radius-control);
+      scroll-snap-align: start;
+    }
+
+    .category-rail > button span {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(143,106,127,.2);
+      border-radius: 50% 50% 50% 16%;
+      background: #f5edef;
+      color: var(--market-accent-dark);
+      font-family: var(--font-market-display);
+      font-size: .69rem;
+      font-weight: 620;
+      letter-spacing: .04em;
+    }
+
+    .category-rail > button strong {
+      overflow: hidden;
+      color: var(--market-muted);
+      font-size: .77rem;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .category-rail > button.active,
+    .category-rail > button:hover {
+      border-color: rgba(186,91,120,.24);
+      background: linear-gradient(135deg, #f8e9ed, #eee9f0);
+    }
+
+    .category-rail > button.active span,
+    .category-rail > button:hover span {
+      border-color: rgba(186,91,120,.35);
+      background: #fffaf8;
+    }
+
+    .category-rail > button.active strong,
+    .category-rail > button:hover strong { color: var(--market-accent-dark); }
+    .help-card { display: none; }
+
+    @media (max-width: 640px) {
+      .category-rail {
+        position: static;
+        display: flex;
+        grid-template-columns: none;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: .48rem;
+      }
+
+      .rail-title { min-width: 94px; flex-basis: 94px; padding-inline: .45rem; }
+      .category-rail > button { min-width: 102px; flex-basis: 102px; }
     }
   `],
 })

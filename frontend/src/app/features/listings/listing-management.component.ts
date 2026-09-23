@@ -10,43 +10,61 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
   standalone: true,
   imports: [EmptyStateComponent, RouterLink, StatusPillComponent],
   template: `
-    <section class="listing-page">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Marketplace account</p>
+    <section class="listing-page trades-listing-page">
+      <div class="trades-page-art" aria-hidden="true"></div>
+
+      <header class="page-header trades-hero">
+        <div class="trades-hero-copy">
+          <p class="eyebrow">Personal marketplace</p>
           <h1>My Listings</h1>
-          <p>Create, edit, and submit your marketplace listings for review.</p>
+          <p>Manage the things you’re offering to the marketplace. Create, edit, and submit your listings for review.</p>
+          <a [routerLink]="newListingLink()" class="primary-btn">New listing <span aria-hidden="true">→</span></a>
         </div>
-        <a [routerLink]="newListingLink()" class="primary-btn">New listing</a>
+        <p class="hero-motto" aria-hidden="true">Graceful exchanges.<br />Brighter tomorrows.</p>
       </header>
 
-      @if (loading()) {
-        <app-ui-empty-state>Loading listings...</app-ui-empty-state>
-      } @else if (errorMsg()) {
-        <div class="error-message">{{ errorMsg() }}</div>
-      } @else if (listings().length === 0) {
-        <app-ui-empty-state>
-          <h2>No drafts yet</h2>
-          <p>Start with an individual listing draft, add photos, then submit it for marketplace review.</p>
-          <a [routerLink]="newListingLink()" class="primary-btn">Create draft</a>
-        </app-ui-empty-state>
-      } @else {
-        <div class="listing-list">
-          @for (listing of listings(); track listing.id) {
-            <a class="listing-row" [routerLink]="editListingLink(listing.id)">
-              <div>
-                <strong>{{ listing.title }}</strong>
-                <span class="owner-line">Owner: {{ ownerLabel(listing) }}</span>
-                <span>{{ listing.sellerType }} / {{ listing.condition }} / {{ listing.currency }} {{ listing.priceAmount }}</span>
-              </div>
-              <div class="status">
-                <app-ui-status-pill>{{ listing.status }}</app-ui-status-pill>
-                <small>{{ listing.moderationStatus }} / v{{ listing.version }}</small>
-              </div>
-            </a>
+      <section class="listing-portfolio" aria-labelledby="listing-portfolio-title">
+        <header class="portfolio-heading">
+          <div>
+            <p class="eyebrow">Exchange portfolio</p>
+            <h2 id="listing-portfolio-title">Your marketplace pieces</h2>
+          </div>
+          @if (!loading() && !errorMsg() && listings().length > 0) {
+            <span>{{ listings().length }} {{ listings().length === 1 ? 'listing' : 'listings' }}</span>
           }
-        </div>
-      }
+        </header>
+
+        @if (loading()) {
+          <app-ui-empty-state>Loading listings...</app-ui-empty-state>
+        } @else if (errorMsg()) {
+          <div class="error-message">{{ errorMsg() }}</div>
+        } @else if (listings().length === 0) {
+          <app-ui-empty-state>
+            <h2>No drafts yet</h2>
+            <p>Start with an individual listing draft, add photos, then submit it for marketplace review.</p>
+            <a [routerLink]="newListingLink()" class="primary-btn">Create draft</a>
+          </app-ui-empty-state>
+        } @else {
+          <div class="listing-list">
+            @for (listing of listings(); track listing.id) {
+              <a class="listing-row" [attr.data-status]="listing.status" [routerLink]="editListingLink(listing.id)">
+                <span class="listing-mark" aria-hidden="true">{{ listing.title.charAt(0) }}</span>
+                <div class="listing-copy">
+                  <strong>{{ listing.title }}</strong>
+                  <span class="listing-meta">{{ listing.condition.replace('_', ' ') }} · {{ listing.sellerType }}</span>
+                  <span class="owner-line">Offered by {{ ownerLabel(listing) }}</span>
+                </div>
+                <strong class="listing-price">{{ formatPrice(listing) }}</strong>
+                <div class="status" [attr.data-moderation]="listing.moderationStatus">
+                  <app-ui-status-pill>{{ listing.status.replace('_', ' ') }}</app-ui-status-pill>
+                  <small>{{ listing.moderationStatus.replace('_', ' ') }} · v{{ listing.version }}</small>
+                </div>
+                <span class="listing-arrow" aria-hidden="true">→</span>
+              </a>
+            }
+          </div>
+        }
+      </section>
     </section>
   `,
   styles: [`
@@ -80,7 +98,7 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
     }
 
     .listing-page {
-      max-width: 960px;
+      max-width: 1420px;
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
@@ -97,6 +115,21 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       border-radius: var(--radius-lg);
       background: var(--listing-surface);
       box-shadow: var(--listing-shadow);
+    }
+
+    .portfolio-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .portfolio-heading h2 { margin: 0; }
+
+    .portfolio-heading > span {
+      color: var(--listing-muted);
+      font-size: .82rem;
+      font-weight: 800;
     }
 
     .eyebrow {
@@ -144,6 +177,11 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       box-shadow: var(--listing-shadow);
     }
 
+    .listing-portfolio {
+      display: grid;
+      gap: 1rem;
+    }
+
     .listing-row {
       min-height: 72px;
       display: flex;
@@ -155,6 +193,34 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       text-decoration: none;
       border-bottom: 1px solid var(--listing-border);
       background: var(--listing-row);
+    }
+
+    .listing-mark {
+      width: 52px;
+      height: 52px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--listing-hover);
+      color: var(--listing-accent);
+      font-family: var(--font-market-display, serif);
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+
+    .listing-copy { flex: 1 1 auto; }
+
+    .listing-price {
+      flex: 0 0 auto;
+      color: var(--listing-text);
+      font-family: var(--font-market-display, serif);
+      font-size: 1.05rem;
+    }
+
+    .listing-arrow {
+      color: var(--listing-accent);
+      font-size: 1.2rem;
     }
 
     .listing-row:last-child {
@@ -218,6 +284,14 @@ import { StatusPillComponent } from '../../shared/components/ui/status-pill.comp
       .status {
         align-items: flex-start;
       }
+
+      .listing-mark { display: none; }
+
+      .listing-price { order: 2; }
+
+      .status { order: 3; }
+
+      .listing-arrow { display: none; }
     }
   `],
 })
@@ -255,6 +329,18 @@ export class ListingManagementComponent implements OnInit {
   ownerLabel(listing: ListingDraft): string {
     return listing.sellerDisplayName?.trim()
       || (listing.sellerType === 'BUSINESS' ? 'Business seller' : 'Individual seller');
+  }
+
+  formatPrice(listing: ListingDraft): string {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: listing.currency,
+        maximumFractionDigits: 2,
+      }).format(listing.priceAmount);
+    } catch {
+      return `${listing.currency} ${listing.priceAmount}`;
+    }
   }
 
   // Centralizes the account listing route so legacy seller routes do not leak into templates.

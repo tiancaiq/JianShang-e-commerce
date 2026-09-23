@@ -302,6 +302,18 @@ describe('MarketplaceLayoutComponent', () => {
     expect(text).toContain('Create account');
   });
 
+  it('dismisses the sign-in dialog with Escape', () => {
+    fixture.detectChanges();
+    fixture.componentInstance.openAuthDialog();
+    fixture.detectChanges();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.authDialogOpen()).toBeFalse();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.auth-dialog')).toBeNull();
+  });
+
   it('submits marketplace-native registration from the auth dialog', () => {
     const authService = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
     fixture.detectChanges();

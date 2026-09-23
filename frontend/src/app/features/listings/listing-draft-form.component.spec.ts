@@ -270,6 +270,9 @@ describe('ListingDraftFormComponent', () => {
     expect(listingService.getCategories).toHaveBeenCalled();
     expect(component.categories()).toEqual([category]);
     expect(component.categoryId).toBe(category.id);
+    expect(fixture.nativeElement.querySelector('.draft-layout')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.listing-atelier-panel')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Listing notes');
   });
 
   it('saves an individual draft with seller-entered quantity', () => {

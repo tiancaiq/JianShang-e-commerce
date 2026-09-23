@@ -40,15 +40,19 @@ interface PendingListingMedia {
   standalone: true,
   imports: [FormsModule, AgentListingProposalReviewComponent],
   template: `
-    <section class="listing-page">
+    <section class="listing-page trades-draft-page">
+      <div class="trades-page-art" aria-hidden="true"></div>
       <header class="page-header">
         <div>
+          <p class="eyebrow">Personal exchange atelier</p>
           <h1>{{ pageTitle() }}</h1>
           <p>{{ pageDescription() }}</p>
         </div>
       </header>
 
+      <div class="draft-layout">
       <form class="draft-form" (ngSubmit)="saveDraft()">
+        <p class="form-section-label"><span>01</span> Basic details</p>
         <div class="form-grid">
           @if (!marketplaceAccountMode() && !businessStoreMode()) {
             <label class="field">
@@ -121,6 +125,7 @@ interface PendingListingMedia {
           }
         }
 
+        <p class="form-section-label"><span>02</span> Item story</p>
         <label class="field">
           <span>Title</span>
           <input name="title" [(ngModel)]="title" maxlength="160" [class.invalid]="fieldInvalid('title')" [disabled]="!canEditDraft() || saving()" />
@@ -136,6 +141,7 @@ interface PendingListingMedia {
           <textarea name="conditionNotes" [(ngModel)]="conditionNotes" maxlength="1000" rows="3" [disabled]="!canEditDraft() || saving()"></textarea>
         </label>
 
+        <p class="form-section-label"><span>03</span> Pricing &amp; location</p>
         <div class="form-grid">
           <label class="field">
             <span>Price</span>
@@ -195,6 +201,10 @@ interface PendingListingMedia {
         }
 
         <section class="media-panel" aria-label="Listing media">
+          <header class="media-panel-heading">
+            <p class="form-section-label"><span>04</span> Photos</p>
+            <small>Show the item clearly from more than one angle.</small>
+          </header>
           <label class="field">
             <span>Listing images</span>
             <input
@@ -313,6 +323,22 @@ interface PendingListingMedia {
         </div>
       </form>
 
+      <aside class="listing-atelier-panel" aria-label="Listing guidance">
+        <div class="atelier-motto" aria-hidden="true">Share beautiful things<br />with new stories</div>
+        <section class="atelier-notes">
+          <p class="eyebrow">Listing notes</p>
+          <h2>Clear details help your item find the right new home.</h2>
+          <ul>
+            <li><span aria-hidden="true">◇</span> Describe the condition honestly</li>
+            <li><span aria-hidden="true">◇</span> Add clear, well-lit photos</li>
+            <li><span aria-hidden="true">◇</span> Set a realistic price</li>
+            <li><span aria-hidden="true">◇</span> Confirm your public location</li>
+          </ul>
+          <p class="atelier-signoff" aria-hidden="true">Items travel far.<br />Kindness travels further.</p>
+        </section>
+      </aside>
+      </div>
+
       @if (listingProposalReviewEnabled && proposalReviewEligible()) {
         <app-agent-listing-proposal-review
           [listingId]="savedId()"
@@ -335,7 +361,7 @@ interface PendingListingMedia {
     }
 
     .listing-page {
-      max-width: 960px;
+      max-width: 1420px;
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
@@ -348,6 +374,22 @@ interface PendingListingMedia {
       color: var(--listing-text);
     }
 
+    .eyebrow {
+      margin: 0 0 .45rem;
+      color: var(--listing-accent);
+      font-size: .72rem;
+      font-weight: 850;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .draft-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 900px) minmax(300px, 1fr);
+      align-items: start;
+      gap: clamp(1rem, 2.5vw, 2rem);
+    }
+
     .page-header p {
       color: var(--listing-subtle);
       font-size: 0.875rem;
@@ -357,12 +399,113 @@ interface PendingListingMedia {
       display: flex;
       flex-direction: column;
       gap: 1rem;
-      max-width: 760px;
+      max-width: none;
       background: var(--listing-surface);
       border: 1px solid var(--listing-border);
       border-radius: var(--radius-lg);
       padding: 1.25rem;
       box-shadow: var(--listing-shadow);
+    }
+
+    .form-section-label {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      margin: .35rem 0 0;
+      color: var(--listing-accent);
+      font-size: .72rem;
+      font-weight: 850;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .form-section-label span {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--listing-border);
+      border-radius: 50%;
+      background: var(--listing-field);
+      font-size: .66rem;
+    }
+
+    .listing-atelier-panel {
+      min-height: min(760px, calc(100vh - 112px));
+      position: sticky;
+      top: 92px;
+      overflow: hidden;
+      border: 1px solid var(--listing-border);
+      border-radius: var(--radius-lg);
+      background: #ead9e1;
+      box-shadow: var(--listing-shadow);
+    }
+
+    .atelier-motto,
+    .atelier-notes {
+      position: absolute;
+      z-index: 1;
+    }
+
+    .atelier-motto {
+      top: 2rem;
+      right: 1.5rem;
+      color: rgba(72, 39, 54, .76);
+      font-family: var(--font-market-display, serif);
+      font-size: .72rem;
+      line-height: 1.65;
+      letter-spacing: .16em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .atelier-notes {
+      right: 1.1rem;
+      bottom: 1.1rem;
+      left: 1.1rem;
+      padding: 1.2rem;
+      border: 1px solid rgba(255,255,255,.75);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 250, 248, .88);
+      box-shadow: 0 18px 44px rgba(75, 45, 60, .16);
+      backdrop-filter: blur(15px);
+    }
+
+    .atelier-notes h2 {
+      margin: 0;
+      color: var(--listing-text);
+      font-size: 1.25rem;
+      line-height: 1.2;
+    }
+
+    .atelier-notes ul {
+      display: grid;
+      gap: .65rem;
+      margin: 1rem 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .atelier-notes li {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      color: var(--listing-muted);
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .atelier-notes li span { color: var(--listing-accent); }
+
+    .atelier-signoff {
+      margin: .9rem 0 0;
+      color: var(--listing-accent);
+      font-family: var(--font-market-display, serif);
+      font-size: .68rem;
+      line-height: 1.55;
+      letter-spacing: .13em;
+      text-align: center;
+      text-transform: uppercase;
     }
 
     .form-grid {
@@ -476,6 +619,18 @@ interface PendingListingMedia {
       gap: 0.75rem;
       border-top: 1px solid var(--listing-border);
       padding-top: 1rem;
+    }
+
+    .media-panel-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .media-panel-heading small {
+      color: var(--listing-subtle);
+      font-size: .75rem;
     }
 
     .media-hint {
@@ -650,10 +805,49 @@ interface PendingListingMedia {
       cursor: not-allowed;
     }
 
+    @media (max-width: 1080px) {
+      .draft-layout { grid-template-columns: 1fr; }
+
+      .listing-atelier-panel {
+        min-height: 360px;
+        position: relative;
+        top: auto;
+        grid-row: 1;
+      }
+
+      .atelier-notes { left: auto; width: min(390px, calc(100% - 2.2rem)); }
+    }
+
     @media (max-width: 760px) {
       .form-grid {
         grid-template-columns: 1fr;
       }
+
+      .listing-atelier-panel { min-height: 280px; }
+
+      .atelier-motto { display: none; }
+
+      .atelier-notes {
+        top: auto;
+        right: .75rem;
+        bottom: .75rem;
+        left: .75rem;
+        width: auto;
+        padding: .9rem;
+      }
+
+      .atelier-notes h2 { font-size: 1rem; }
+
+      .atelier-notes ul {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .45rem .75rem;
+      }
+
+      .atelier-notes li { font-size: .72rem; }
+
+      .atelier-signoff { display: none; }
+
+      .media-panel-heading { align-items: start; flex-direction: column; }
 
       .actions {
         flex-direction: column-reverse;

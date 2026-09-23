@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" role="img" aria-labelledby="title desc">
+  <title id="title">MSB Market shopping bag</title>
+  <desc id="desc">A pink and lavender shopping bag with a mint star charm.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff8fc"/><stop offset="1" stop-color="#eee9ff"/></linearGradient>
+    <linearGradient id="bag" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff8fb7"/><stop offset="1" stop-color="#e9427a"/></linearGradient>
+  </defs>
+  <rect width="640" height="480" rx="52" fill="url(#bg)"/>
+  <path d="M0 367c92-49 171-41 247-8 83 36 169 39 393-17v138H0V367Z" fill="#dff7ef"/>
+  <g transform="translate(183 82)">
+    <path d="M40 92h194l27 242H14L40 92Z" fill="url(#bag)" stroke="#33263e" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M79 105V67c0-55 116-55 116 0v38" fill="none" stroke="#33263e" stroke-width="13" stroke-linecap="round"/>
+    <path d="m137 148 13 33 34 13-34 13-13 34-13-34-34-13 34-13 13-33Z" fill="#72d9bd" stroke="#fff" stroke-width="7"/>
+    <path d="M216 116c31 17 40 42 29 73" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".8"/>
+  </g>
+  <g fill="#8b72e8"><circle cx="107" cy="126" r="10"/><circle cx="523" cy="300" r="8"/></g>
+  <g fill="#ff8fb7"><path d="m102 252 7 18 18 7-18 7-7 18-7-18-18-7 18-7 7-18Z"/><path d="m531 102 8 20 20 8-20 8-8 20-8-20-20-8 20-8 8-20Z"/></g>
+</svg>
