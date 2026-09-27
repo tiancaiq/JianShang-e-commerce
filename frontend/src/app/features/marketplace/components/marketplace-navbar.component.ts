@@ -1,6 +1,6 @@
 import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { CurrentUser } from '../../../core/models/user.model';
 import { environment } from '../../../../environments/environment';
 import { AuthService } from '../../../core/services/auth.service';
@@ -116,7 +116,10 @@ import { ToastService } from '../../../core/services/toast.service';
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8v2H7v12h6v2H5V4zm10.6 4.4L20.2 13l-4.6 4.6-1.4-1.4 2.2-2.2H10v-2h6.4l-2.2-2.2 1.4-1.4z"/></svg>
           </button>
         } @else {
-          <button type="button" class="login-link" (click)="requestLogin()">Login</button>
+          <a
+            class="login-link"
+            [attr.href]="marketplaceLoginHref()"
+          >Login</a>
         }
       </div>
 
@@ -626,6 +629,7 @@ import { ToastService } from '../../../core/services/toast.service';
   `],
 })
 export class MarketplaceNavbarComponent {
+  private router = inject(Router);
   private authService = inject(AuthService);
   private cartService = inject(CartService);
   private toastService = inject(ToastService);
@@ -715,5 +719,16 @@ export class MarketplaceNavbarComponent {
   requestLogin(): void {
     this.closeMenu();
     this.loginRequested.emit();
+  }
+
+  marketplaceLoginHref(): string {
+    const currentUrl = this.router.url || '/marketplace';
+    const returnUrl = currentUrl.startsWith('/')
+      && !currentUrl.startsWith('//')
+      && !currentUrl.startsWith('/login')
+      && !currentUrl.includes('\\')
+      ? currentUrl
+      : '/marketplace';
+    return `/login?client=marketplace&returnUrl=${encodeURIComponent(returnUrl)}`;
   }
 }

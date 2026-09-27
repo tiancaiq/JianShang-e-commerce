@@ -1,0 +1,254 @@
+<section class="account-page">
+  <div class="account-environment" aria-hidden="true"></div>
+
+  <main class="account-container">
+    <header class="account-hero" aria-labelledby="account-heading">
+      <div class="welcome-content">
+        <p class="eyebrow">Personal pavilion · Marketplace account</p>
+        <h1 id="account-heading">Welcome back, <span>{{ displayName() }}</span></h1>
+        <p class="welcome-copy">Your marketplace home for listings, conversations, and trades.</p>
+        <p class="account-email">{{ accountEmail() }}</p>
+
+        <ul class="account-signals" aria-label="Account summary">
+          <li class="seller-signal" [class.is-active]="sellerProfile()?.status === 'ACTIVE'">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5.8c0 4.8-3.4 8-8 9.2-4.6-1.2-8-4.4-8-9.2V6l8-3zm3.5 6.8-4.4 4.4-2-2-1.4 1.4 3.4 3.4 5.8-5.8-1.4-1.4z"/></svg>
+            <span>{{ sellerProfileLabel() }}</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 12 21.8 3.4 13.2 12 4.6l8.6 8.6z"/></svg>
+            <span><strong>{{ activeListingCount() }}</strong> active listings</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H8.8L5 18.5V5z"/></svg>
+            <span><strong>{{ unreadCount() }}</strong> unread messages</span>
+          </li>
+        </ul>
+
+        <div class="welcome-actions">
+          <a routerLink="/account/listings/new" class="primary-action">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z"/></svg>
+            Sell an Item
+          </a>
+          <span class="hero-motto">Create. Share. Trade.<em>A more beautiful tomorrow.</em></span>
+        </div>
+      </div>
+
+      <aside class="profile-card" aria-label="Profile summary">
+        <a routerLink="/account/profile" class="edit-profile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5 9.8-9.8 3.5 3.5-9.8 9.8H4v-3.5zM15.2 5.3l1.6-1.6a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2l-1.6 1.6-3.5-3.5z"/></svg>
+          Edit profile
+        </a>
+
+        <div class="profile-main">
+          <span class="avatar-ring">
+            <span class="avatar-image-frame">
+              @if (avatarUrl()) {
+                <img [src]="avatarUrl() || ''" [alt]="displayName() + ' avatar'" (error)="avatarLoadFailed.set(true)">
+              } @else {
+                <span class="avatar-fallback">{{ initials() }}</span>
+              }
+            </span>
+            <span class="seller-star" aria-hidden="true">✦</span>
+          </span>
+
+          <div class="profile-copy">
+            <h2>{{ displayName() }}</h2>
+            <p>{{ handle() }}</p>
+            <span class="seller-badge">{{ sellerBadgeLabel() }}</span>
+          </div>
+        </div>
+
+        <dl class="profile-stats">
+          <div>
+            <dt>Listings</dt>
+            <dd>{{ totalListingCount() }}</dd>
+          </div>
+          <div>
+            <dt>Trades</dt>
+            <dd>{{ completedTradesCount() }}</dd>
+          </div>
+          <div>
+            <dt>Rating</dt>
+            <dd>{{ ratingLabel() }}</dd>
+          </div>
+        </dl>
+
+        <p class="profile-note"><span aria-hidden="true"></span>Good people, beautiful things,<br>brighter tomorrows.</p>
+      </aside>
+    </header>
+
+    <section class="dashboard-grid" aria-label="Marketplace account overview">
+      <article class="dashboard-panel listings-panel">
+        <div class="panel-heading">
+          <h2>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 12 21.8 3.4 13.2 12 4.6l8.6 8.6z"/></svg>
+            Active Listings
+          </h2>
+          <a routerLink="/account/listings">Manage</a>
+        </div>
+
+        @if (loadingListings()) {
+          <div class="skeleton-list" aria-label="Loading listings"><span></span><span></span></div>
+        } @else if (sellerActivationRequired()) {
+          <div class="panel-empty"><strong>Become a Seller</strong><a routerLink="/account/listings">Activate seller profile</a></div>
+        } @else if (listingsError()) {
+          <p class="panel-error">{{ listingsError() }}</p>
+        } @else if (listingPreview().length === 0) {
+          <div class="panel-empty"><strong>No listings yet</strong><a routerLink="/account/listings/new">Sell an Item</a></div>
+        } @else {
+          <div class="listing-list">
+            @for (listing of listingPreview(); track listing.id) {
+              <a routerLink="/account/listings" class="listing-row">
+                @if (listingImage(listing)) {
+                  <img [src]="listingImage(listing) || ''" alt="" />
+                } @else {
+                  <span class="listing-image-fallback">{{ listingInitial(listing) }}</span>
+                }
+                <span class="listing-copy">
+                  <span class="listing-title-line">
+                    <b>{{ listing.title }}</b>
+                    <i class="condition-badge" [class.new]="listing.condition === 'NEW'">{{ conditionLabel(listing.condition) }}</i>
+                  </span>
+                  <small [class.completed-status]="listing.status === 'CLOSED'">{{ listingSubtitle(listing) }}</small>
+                  <strong>{{ priceLabel(listing) }}</strong>
+                </span>
+                <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+              </a>
+            }
+          </div>
+        }
+
+        <a routerLink="/account/listings" class="panel-footer">View all listings <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="dashboard-panel messages-panel">
+        <div class="panel-heading">
+          <h2>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H8.8L5 18.5V5z"/></svg>
+            Messages
+          </h2>
+          <span class="count-pill" [attr.aria-label]="unreadCount() + ' unread messages'">{{ unreadCount() }}</span>
+          <a routerLink="/account/messages">View all</a>
+        </div>
+
+        @if (loadingConversations()) {
+          <div class="skeleton-list" aria-label="Loading messages"><span></span><span></span></div>
+        } @else if (conversationsError()) {
+          <p class="panel-error">{{ conversationsError() }}</p>
+        } @else if (conversationPreview().length === 0) {
+          <div class="panel-empty"><strong>No messages yet</strong><span>Marketplace conversations will appear here.</span></div>
+        } @else {
+          <div class="message-list">
+            @for (conversation of conversationPreview(); track conversation.id) {
+              <a routerLink="/account/messages" class="message-row" [class.unread]="conversation.unread">
+                @if (conversationAvatar(conversation)) {
+                  <img [src]="conversationAvatar(conversation) || ''" alt="" />
+                } @else {
+                  <span class="message-avatar-fallback">{{ conversation.otherParticipant.initials }}</span>
+                }
+                <span class="message-copy">
+                  <b>{{ conversation.otherParticipant.displayName }}</b>
+                  <small>{{ conversationPreviewText(conversation) }}</small>
+                </span>
+                <time>{{ timeAgo(conversation.lastMessageAt || conversation.updatedAt) }}</time>
+              </a>
+            }
+          </div>
+        }
+
+        <a routerLink="/account/messages" class="panel-footer">Go to messages <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="dashboard-panel trade-panel">
+        <div class="panel-heading">
+          <h2>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h8l-2.2-2.2L15 3.6 19.4 8 15 12.4l-1.2-1.2L16 9H8V7zm8 10H8l2.2 2.2L9 20.4 4.6 16 9 11.6l1.2 1.2L8 15h8v2z"/></svg>
+            Trade Overview
+          </h2>
+        </div>
+
+        <dl class="trade-stats">
+          <div><dt>Listings</dt><dd>{{ totalListingCount() }}</dd></div>
+          <div><dt>Conversations</dt><dd>{{ conversationCount() }}</dd></div>
+          <div><dt>Rating</dt><dd>{{ ratingLabel() }}</dd></div>
+        </dl>
+
+        <div class="trade-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5.8c0 4.8-3.4 8-8 9.2-4.6-1.2-8-4.4-8-9.2V6l8-3zm3.5 6.8-4.4 4.4-2-2-1.4 1.4 3.4 3.4 5.8-5.8-1.4-1.4z"/></svg>
+          <p><strong>Great start!</strong> Keep listing items and engage with the community.</p>
+        </div>
+
+        <span class="panel-footer muted-link" aria-disabled="true">View trade history <span aria-hidden="true">→</span></span>
+      </article>
+    </section>
+
+    <section class="pavilion-links" aria-labelledby="pavilion-links-heading">
+      <div class="section-heading">
+        <p>Marketplace home</p>
+        <h2 id="pavilion-links-heading">More from your pavilion</h2>
+      </div>
+
+      <div class="lower-grid">
+        <a routerLink="/account/profile" class="account-tile">
+          <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8a7 7 0 0 1 14 0H5z"/></svg></span>
+          <span><b>Account details</b><small>Update your profile and contact information.</small></span>
+          <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+        </a>
+
+        <a routerLink="/account/seller-profile" class="account-tile">
+          <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16v11H4V9zm2 2v7h12v-7H6zm1-7h10l2 4H5l2-4z"/></svg></span>
+          <span><b>Seller profile</b><small>Manage your public marketplace presence.</small></span>
+          <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+        </a>
+
+        @if (buyerAddressesEnabled) {
+          <a routerLink="/account/addresses" class="account-tile">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.1 7 13 7 13s7-7.9 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></span>
+            <span><b>Addresses</b><small>Manage saved delivery addresses.</small></span>
+            <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+          </a>
+        }
+
+        @if (buyerCheckoutEnabled) {
+          <a routerLink="/account/orders" class="account-tile">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16v18H4V3zm3 4v2h10V7H7zm0 4v2h10v-2H7zm0 4v2h7v-2H7z"/></svg></span>
+            <span><b>Your orders</b><small>View confirmed business purchases.</small></span>
+            <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+          </a>
+        }
+
+        @if (notificationsEnabled) {
+          <a routerLink="/account/notifications" class="account-tile">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.4-6.8V3a1.6 1.6 0 0 0-3.2 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2z"/></svg></span>
+            <span><b>Notifications</b><small>Review business purchase updates.</small></span>
+            <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+          </a>
+        }
+
+        <a routerLink="/account/liked" class="account-tile">
+          <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.4 5.4 14C2 10.8 3.8 5 8.4 5c1.5 0 2.8.7 3.6 1.8C12.8 5.7 14.1 5 15.6 5 20.2 5 22 10.8 18.6 14L12 20.4z"/></svg></span>
+          <span><b>Liked Listings</b><small>Return to the pieces you saved.</small></span>
+          <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+        </a>
+
+        <a routerLink="/account/appeals" class="account-tile">
+          <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5.8c0 4.8-3.4 8-8 9.2-4.6-1.2-8-4.4-8-9.2V6l8-3zm-1 5h2v5h-2V8zm0 7h2v2h-2v-2z"/></svg></span>
+          <span><b>Appeals</b><small>Review restrictions and staff decisions.</small></span>
+          <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+        </a>
+
+        <a routerLink="/support" class="account-tile">
+          <span class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-9 9v3a3 3 0 0 0 3 3h2v-7H5.1a7 7 0 0 1 13.8 0H16v7h2a3 3 0 0 0 3-3v-3a9 9 0 0 0-9-9zm-1 15h2v2h-2v-2z"/></svg></span>
+          <span><b>Support</b><small>Ask for help and follow your requests.</small></span>
+          <svg class="row-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6V6z"/></svg>
+        </a>
+      </div>
+    </section>
+
+    <footer class="account-signoff" aria-hidden="true">
+      <span></span>
+      <p>Your market home · your stories · your beautiful tomorrow</p>
+      <span></span>
+    </footer>
+  </main>
+</section>

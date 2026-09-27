@@ -170,7 +170,7 @@ describe('AccountComponent', () => {
       href: link.getAttribute('href'),
     }));
 
-    expect(text).toContain('Welcome, Alex Buyer');
+    expect(text).toContain('Welcome back, Alex Buyer');
     expect(text).toContain('Seller profile active');
     expect(text).toContain('2 active listings');
     expect(text).toContain('1 unread messages');
@@ -181,6 +181,7 @@ describe('AccountComponent', () => {
     expect(text).toContain('Trade Overview');
     expect(text).toContain('Marketplace seller');
     expect(text).toContain('Rating');
+    expect(text).toContain('More from your pavilion');
     expect(text).not.toContain('Addresses');
     expect(text).toContain('Liked Listings');
     expect(links).toContain(jasmine.objectContaining({ href: '/account/profile' }));
@@ -191,6 +192,9 @@ describe('AccountComponent', () => {
     expect(links).toContain(jasmine.objectContaining({ href: '/account/listings' }));
     expect(links).toContain(jasmine.objectContaining({ href: '/account/listings/new' }));
     expect(host.querySelector('.avatar-ring img')?.getAttribute('src')).toBe('/api/v1/public/user-avatars/01USER?v=4');
+    expect(host.querySelector('.account-hero')).not.toBeNull();
+    expect(host.querySelector('.profile-card')).not.toBeNull();
+    expect(host.querySelectorAll('.dashboard-panel').length).toBe(3);
     expect(userProfileService.getMe).toHaveBeenCalled();
     expect(listingService.getMyListings).toHaveBeenCalled();
     expect(chatService.getConversations).toHaveBeenCalledWith(null, 20);

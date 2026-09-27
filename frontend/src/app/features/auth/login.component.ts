@@ -11,55 +11,97 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
   standalone: true,
   imports: [BrandMascotComponent, FormsModule, ToastContainerComponent],
   template: `
-    <div class="login-page bg-noise" [class.seller-login]="client() === 'seller-portal'" [class.admin-login]="client() === 'admin-portal'">
+    <div class="login-page bg-noise" [class.marketplace-client]="isMarketplaceClient()" [class.seller-login]="client() === 'seller-portal'" [class.admin-login]="client() === 'admin-portal'">
       @if (isMarketplaceClient()) {
-        <section class="general-login-shell" aria-labelledby="general-login-title">
-          <a class="marketplace-home" href="/marketplace">MSBCommerce</a>
-          <div class="general-login-heading">
-            <h1 id="general-login-title">{{ authMode() === 'login' ? 'Sign in' : 'Create account' }}</h1>
-            <p>{{ authMode() === 'login' ? 'Use your marketplace account to continue.' : 'Create your marketplace account.' }}</p>
-          </div>
-          @if (signedOut()) {
-            <p class="signed-out">Signed out successfully</p>
-          }
+        <main class="marketplace-login" aria-labelledby="general-login-title">
+          <div class="login-atmosphere" aria-hidden="true"></div>
+          <section class="marketplace-auth-shell">
+            <a class="login-close" href="/marketplace" aria-label="Return to marketplace">×</a>
 
-          <div class="auth-tabs" role="tablist" aria-label="Account action">
-            <button type="button" role="tab" [attr.aria-selected]="authMode() === 'login'" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')">Sign in</button>
-            <button type="button" role="tab" [attr.aria-selected]="authMode() === 'register'" [class.active]="authMode() === 'register'" (click)="setAuthMode('register')">Create account</button>
-          </div>
+            <aside class="login-art" aria-hidden="true">
+              <img src="/assets/brand/anime/auth-eastern-fantasy-reference-v1.png" alt="" />
+            </aside>
 
-          @if (authError()) {
-            <p class="auth-error" role="alert">{{ authError() }}</p>
-          }
+            <div class="marketplace-auth-content">
+              <div class="general-login-heading">
+                <p class="login-kicker"><span aria-hidden="true">✿</span> MSB marketplace account</p>
+                <h1 id="general-login-title">
+                  {{ authMode() === 'login' ? 'Sign in to keep trading local.' : 'Create your place in the marketplace.' }}
+                </h1>
+                <div class="heading-ornament" aria-hidden="true"><span>✿</span></div>
+                <p>
+                  {{ authMode() === 'login'
+                    ? 'Return to saved listings, messages, purchases, and selling tools.'
+                    : 'Save discoveries, message sellers, and share the things you are ready to pass on.' }}
+                </p>
+              </div>
 
-          <form class="auth-form" (ngSubmit)="submitNativeAuth()">
-            @if (authMode() === 'register') {
-              <label>
-                Display name
-                <input name="displayName" autocomplete="name" [(ngModel)]="authDisplayName" [disabled]="authBusy()" required />
-              </label>
-            }
-            <label>
-              Email
-              <input name="email" type="email" autocomplete="email" [(ngModel)]="authEmail" [disabled]="authBusy()" required />
-            </label>
-            <label>
-              Password
-              <input
-                name="password"
-                type="password"
-                [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
-                [(ngModel)]="authPassword"
-                [disabled]="authBusy()"
-                required
-              />
-            </label>
-            <button type="submit" class="submit-btn" [disabled]="authBusy()">
-              {{ authMode() === 'login' ? 'Sign in' : 'Create account' }}
-            </button>
-          </form>
-          <p class="auth-footnote">Credentials are securely verified by the identity service.</p>
-        </section>
+              @if (signedOut()) {
+                <p class="signed-out" role="status">Signed out successfully</p>
+              }
+
+              <div class="auth-tabs" role="tablist" aria-label="Account action">
+                <button type="button" role="tab" [attr.aria-selected]="authMode() === 'login'" [class.active]="authMode() === 'login'" (click)="setAuthMode('login')"><span aria-hidden="true">✦</span> Sign in</button>
+                <button type="button" role="tab" [attr.aria-selected]="authMode() === 'register'" [class.active]="authMode() === 'register'" (click)="setAuthMode('register')"><span aria-hidden="true">♙</span> Create account</button>
+              </div>
+
+              @if (authError()) {
+                <p class="auth-error" role="alert">{{ authError() }}</p>
+              }
+
+              <form class="auth-form" (ngSubmit)="submitNativeAuth()">
+                @if (authMode() === 'register') {
+                  <div class="form-field">
+                    <label class="field-label" for="displayName">Display name</label>
+                    <span class="field-control">
+                      <span class="field-icon" aria-hidden="true">✿</span>
+                      <input id="displayName" name="displayName" autocomplete="name" [(ngModel)]="authDisplayName" [disabled]="authBusy()" placeholder="How people will know you" required />
+                    </span>
+                  </div>
+                }
+                <div class="form-field">
+                  <label class="field-label" for="email">Email</label>
+                  <span class="field-control">
+                    <span class="field-icon" aria-hidden="true">✉</span>
+                    <input id="email" name="email" type="email" autocomplete="email" [(ngModel)]="authEmail" [disabled]="authBusy()" placeholder="you@example.com" required />
+                  </span>
+                </div>
+                <div class="form-field">
+                  <label class="field-label" for="password">Password</label>
+                  <span class="field-control">
+                    <span class="field-icon" aria-hidden="true">⌑</span>
+                    <input
+                      id="password"
+                      name="password"
+                      [type]="passwordVisible() ? 'text' : 'password'"
+                      [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
+                      [(ngModel)]="authPassword"
+                      [disabled]="authBusy()"
+                      placeholder="Enter your password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      class="password-toggle"
+                      [attr.aria-label]="passwordVisible() ? 'Hide password' : 'Show password'"
+                      [attr.aria-pressed]="passwordVisible()"
+                      (click)="passwordVisible.set(!passwordVisible())"
+                    >◉</button>
+                  </span>
+                </div>
+                <button type="submit" class="submit-btn" [disabled]="authBusy()">
+                  <span>{{ authBusy() ? 'Please wait…' : (authMode() === 'login' ? 'Sign in' : 'Create account') }}</span>
+                  @if (!authBusy()) { <span aria-hidden="true">→</span> }
+                </button>
+              </form>
+
+              <div class="auth-assurance">
+                <span aria-hidden="true">♢</span>
+                <p class="auth-footnote">Keycloak verifies credentials behind the gateway; MSB never stores passwords.</p>
+              </div>
+            </div>
+          </section>
+        </main>
       } @else {
         <section class="login-shell">
           <app-brand-mascot variant="login" alt="MSB portal sign in" />
@@ -354,7 +396,8 @@ import { BrandMascotComponent } from '../../shared/components/ui/brand-mascot.co
         grid-template-columns: 1fr;
       }
     }
-  `]
+  `],
+  styleUrl: './login.component.css'
 })
 export class LoginComponent {
   private authService = inject(AuthService);
@@ -364,6 +407,7 @@ export class LoginComponent {
   authMode = signal<'login' | 'register'>('login');
   authBusy = signal(false);
   authError = signal<string | null>(null);
+  passwordVisible = signal(false);
   authEmail = '';
   authPassword = '';
   authDisplayName = '';

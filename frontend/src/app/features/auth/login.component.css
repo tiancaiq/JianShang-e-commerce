@@ -1,0 +1,720 @@
+:host {
+  display: block;
+  overflow-x: clip;
+}
+
+.login-page.marketplace-client {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  overflow-x: clip;
+}
+
+.marketplace-login {
+  --login-ink: #4a2035;
+  --login-plum: #6e304c;
+  --login-rose: #cf4d78;
+  --login-rose-deep: #a93762;
+  --login-pearl: #fffaf7;
+  --login-muted: #846974;
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(2.5rem, 8vh, 7rem) clamp(2rem, 8vw, 9rem);
+  background: #f7e6e8;
+  color: var(--login-ink);
+  isolation: isolate;
+}
+
+.login-atmosphere {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 244, 242, .24), rgba(246, 217, 226, .12)),
+    url('/assets/brand/anime/account-personal-pavilion-v1.webp') center / cover no-repeat;
+  filter: saturate(.92) brightness(1.01);
+  transform: scale(1.015);
+}
+
+.login-atmosphere::after {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 12%, rgba(255, 255, 255, .28), transparent 25rem),
+    radial-gradient(circle at 88% 88%, rgba(83, 34, 54, .18), transparent 28rem),
+    linear-gradient(180deg, rgba(74, 30, 48, .08), rgba(82, 33, 53, .18));
+  content: '';
+}
+
+.marketplace-auth-shell {
+  position: relative;
+  width: min(84vw, 1180px);
+  height: clamp(500px, 78vh, 700px);
+  min-height: 0;
+  max-height: 700px;
+  display: grid;
+  grid-template-columns: 45% 55%;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, .9);
+  border-radius: 30px;
+  background: rgba(255, 250, 248, .96);
+  box-shadow:
+    0 38px 110px rgba(58, 23, 38, .34),
+    0 12px 32px rgba(58, 23, 38, .18),
+    0 0 0 1px rgba(196, 102, 131, .16),
+    inset 0 1px rgba(255, 255, 255, .92);
+  animation: login-stage-in .72s cubic-bezier(.2, .76, .2, 1) both;
+}
+
+.marketplace-auth-shell::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 55%;
+  background:
+    radial-gradient(circle at 86% 14%, rgba(235, 131, 165, .1), transparent 10rem),
+    radial-gradient(circle at 15% 88%, rgba(221, 160, 181, .08), transparent 12rem),
+    linear-gradient(120deg, transparent 0 68%, rgba(222, 117, 151, .035) 68% 69%, transparent 69%);
+  content: '';
+  pointer-events: none;
+}
+
+.marketplace-auth-shell::after {
+  position: absolute;
+  z-index: 1;
+  top: 1.3rem;
+  right: 1.3rem;
+  width: 8.5rem;
+  height: 8.5rem;
+  border-top: 1px solid rgba(203, 91, 127, .08);
+  border-right: 1px solid rgba(203, 91, 127, .08);
+  border-radius: 0 26px 0 100%;
+  content: '';
+  pointer-events: none;
+}
+
+.login-close {
+  position: absolute;
+  z-index: 5;
+  top: 1rem;
+  right: 1rem;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(187, 91, 124, .08);
+  border-radius: 50%;
+  background: rgba(252, 228, 235, .72);
+  color: #936276;
+  font-size: 1.4rem;
+  line-height: 1;
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+  transition: background .2s ease, color .2s ease, transform .2s ease;
+}
+
+.login-close:hover,
+.login-close:focus-visible {
+  background: #fff;
+  color: var(--login-rose-deep);
+  transform: rotate(5deg);
+}
+
+.login-close:focus-visible,
+.marketplace-login button:focus-visible,
+.marketplace-login input:focus-visible {
+  outline: 3px solid rgba(207, 77, 120, .24);
+  outline-offset: 3px;
+}
+
+.login-art {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 28px 0 0 28px;
+  background: #d6aeb4;
+  box-shadow: inset -1px 0 rgba(196, 101, 131, .22);
+  animation: login-art-in .82s .06s cubic-bezier(.2, .76, .2, 1) both;
+}
+
+.login-art img {
+  width: 222.3%;
+  max-width: none;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+  object-position: left center;
+  filter: saturate(.96) contrast(1.01) brightness(1.015);
+}
+
+.marketplace-auth-content {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(3.2rem, 5vh, 4.25rem) clamp(2rem, 3.7vw, 3rem) clamp(2rem, 4vh, 2.75rem);
+  background:
+    radial-gradient(circle at 94% 25%, rgba(221, 111, 148, .05), transparent 9rem),
+    linear-gradient(180deg, rgba(255, 253, 251, .96), rgba(255, 249, 247, .94));
+  animation: login-copy-in .76s .1s cubic-bezier(.2, .76, .2, 1) both;
+  overflow-y: auto;
+}
+
+.marketplace-login .general-login-heading {
+  margin: 0 0 1.15rem;
+}
+
+.login-kicker {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin: 0 0 .75rem;
+  color: var(--login-rose);
+  font-size: .7rem;
+  font-weight: 850;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.login-kicker span {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.marketplace-login .general-login-heading h1 {
+  max-width: 12ch;
+  margin: 0;
+  color: var(--login-plum);
+  font-family: var(--font-market-display, Georgia, serif);
+  font-size: clamp(2.4rem, 3.7vw, 3.45rem);
+  font-weight: 520;
+  line-height: .98;
+  letter-spacing: -.045em;
+  text-wrap: balance;
+}
+
+.heading-ornament {
+  width: 10.5rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: .85rem 0 .7rem;
+  color: #dc7195;
+}
+
+.heading-ornament::before,
+.heading-ornament::after {
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, rgba(207, 77, 120, .5));
+  content: '';
+}
+
+.heading-ornament::after {
+  background: linear-gradient(90deg, rgba(207, 77, 120, .5), transparent);
+}
+
+.heading-ornament span {
+  font-size: 1rem;
+}
+
+.marketplace-login .general-login-heading > p:last-child {
+  max-width: 32rem;
+  margin: 0;
+  color: var(--login-muted);
+  font-family: var(--font-market-display, Georgia, serif);
+  font-size: .96rem;
+  line-height: 1.45;
+}
+
+.marketplace-login .signed-out {
+  margin: -.25rem 0 1rem;
+  border-color: rgba(73, 133, 112, .24);
+  border-radius: 12px;
+  background: rgba(235, 247, 241, .9);
+  color: #3d705f;
+}
+
+.marketplace-login .auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .25rem;
+  margin: 0 0 1rem;
+  padding: .26rem;
+  overflow: visible;
+  border: 1px solid rgba(196, 100, 135, .22);
+  border-radius: 14px;
+  background: rgba(255, 246, 248, .86);
+}
+
+.marketplace-login .auth-tabs button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #7f6270;
+  font-family: var(--font-market-display, Georgia, serif);
+  font-size: .9rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+.marketplace-login .auth-tabs button span {
+  font-family: sans-serif;
+  font-size: 1.15rem;
+}
+
+.marketplace-login .auth-tabs button.active {
+  background: linear-gradient(135deg, #dc6d92, #cd4c79);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(169, 55, 98, .18);
+}
+
+.marketplace-login .auth-tabs button:hover:not(.active) {
+  background: rgba(248, 225, 233, .7);
+  color: var(--login-plum);
+}
+
+.marketplace-login .auth-error {
+  margin: 0 0 1rem;
+  border-radius: 12px;
+}
+
+.marketplace-login .auth-form {
+  display: grid;
+  gap: .75rem;
+}
+
+.form-field {
+  display: grid;
+  gap: .48rem;
+}
+
+.marketplace-login .field-label {
+  color: var(--login-ink);
+  font-size: .85rem;
+  font-weight: 800;
+}
+
+.field-label {
+  padding-left: .15rem;
+}
+
+.field-control {
+  position: relative;
+  display: block;
+}
+
+.field-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 1.05rem;
+  color: #9e8c95;
+  font-size: 1rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.marketplace-login .auth-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 50px;
+  padding: .7rem 3rem .7rem 3.1rem;
+  border: 1px solid rgba(181, 100, 129, .29);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .9);
+  color: var(--login-ink);
+  font: inherit;
+  font-weight: 600;
+  box-shadow: inset 0 1px 3px rgba(88, 47, 62, .035);
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+
+.marketplace-login .auth-form input::placeholder {
+  color: #ac9da4;
+  font-weight: 500;
+}
+
+.marketplace-login .auth-form input:focus {
+  border-color: var(--login-rose);
+  outline: 0;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(207, 77, 120, .1);
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: .8rem;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #9a8991;
+  font-size: .95rem;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  background: #faedf1;
+  color: var(--login-rose-deep);
+}
+
+.marketplace-login .submit-btn {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .9rem;
+  margin-top: .15rem;
+  border: 1px solid rgba(255, 255, 255, .58);
+  border-radius: 13px;
+  background: linear-gradient(135deg, #da638d, #c84170);
+  color: #fff;
+  font-family: var(--font-market-display, Georgia, serif);
+  font-size: 1rem;
+  font-weight: 650;
+  box-shadow: 0 14px 28px rgba(169, 55, 98, .2);
+}
+
+.marketplace-login .submit-btn:hover:not(:disabled) {
+  box-shadow: 0 18px 34px rgba(169, 55, 98, .27);
+  transform: translateY(-2px);
+}
+
+.marketplace-login .submit-btn:disabled {
+  cursor: wait;
+  opacity: .66;
+}
+
+.auth-assurance {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  margin-top: .9rem;
+  color: #89727c;
+}
+
+.auth-assurance > span {
+  color: var(--login-rose-deep);
+  font-size: 1.15rem;
+  transform: translateY(-.1rem);
+}
+
+.marketplace-login .auth-footnote {
+  margin: 0;
+  color: inherit;
+  font-size: .77rem;
+  line-height: 1.5;
+  text-align: left;
+}
+
+@keyframes login-stage-in {
+  from { opacity: 0; transform: translateY(18px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes login-art-in {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes login-copy-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 1050px) {
+  .marketplace-auth-shell {
+    width: min(86vw, 900px);
+    grid-template-columns: 43% 57%;
+  }
+
+  .marketplace-auth-shell::before {
+    width: 57%;
+  }
+
+  .login-art img {
+    width: 232.6%;
+  }
+
+  .marketplace-auth-content {
+    justify-content: flex-start;
+    padding: 1.35rem clamp(1.2rem, 2.8vw, 2.1rem) 1rem;
+  }
+
+  .marketplace-login .general-login-heading h1 {
+    font-size: clamp(1.85rem, 4.1vw, 2.55rem);
+    line-height: .94;
+  }
+
+  .marketplace-login .general-login-heading {
+    margin-bottom: .65rem;
+  }
+
+  .login-kicker {
+    margin-bottom: .5rem;
+  }
+
+  .heading-ornament {
+    margin-block: .6rem .5rem;
+  }
+
+  .marketplace-login .auth-tabs {
+    margin-bottom: .7rem;
+  }
+
+  .marketplace-login .auth-form {
+    gap: .5rem;
+  }
+
+  .marketplace-login .auth-form input {
+    min-height: 46px;
+  }
+
+  .marketplace-login .submit-btn {
+    min-height: 48px;
+  }
+
+  .auth-assurance {
+    margin-top: .5rem;
+  }
+}
+
+@media (min-width: 581px) and (max-width: 720px) {
+  .marketplace-auth-shell {
+    grid-template-columns: 44% 56%;
+  }
+
+  .marketplace-auth-shell::before {
+    width: 56%;
+  }
+
+  .login-close {
+    top: .7rem;
+    right: .7rem;
+    width: 36px;
+    height: 36px;
+    font-size: 1.15rem;
+  }
+
+  .marketplace-auth-content {
+    padding: .85rem .95rem .7rem;
+  }
+
+  .login-kicker {
+    gap: .38rem;
+    margin-bottom: .32rem;
+    font-size: .54rem;
+    letter-spacing: .07em;
+    white-space: nowrap;
+  }
+
+  .login-kicker span {
+    font-size: .9rem;
+  }
+
+  .marketplace-login .general-login-heading {
+    margin-bottom: .42rem;
+  }
+
+  .marketplace-login .general-login-heading h1 {
+    max-width: 13ch;
+    font-size: 1.72rem;
+    line-height: .95;
+  }
+
+  .heading-ornament {
+    width: 8rem;
+    margin-block: .35rem .28rem;
+  }
+
+  .marketplace-login .general-login-heading > p:last-child {
+    font-size: .78rem;
+    line-height: 1.3;
+  }
+
+  .marketplace-login .auth-tabs {
+    margin-bottom: .45rem;
+    padding: .2rem;
+  }
+
+  .marketplace-login .auth-tabs button {
+    min-height: 38px;
+    gap: .28rem;
+    font-size: .75rem;
+    white-space: nowrap;
+  }
+
+  .marketplace-login .auth-tabs button span {
+    font-size: .9rem;
+  }
+
+  .marketplace-login .auth-form {
+    gap: .35rem;
+  }
+
+  .form-field {
+    gap: .25rem;
+  }
+
+  .marketplace-login .field-label {
+    font-size: .74rem;
+  }
+
+  .marketplace-login .auth-form input {
+    min-height: 42px;
+    padding-block: .55rem;
+  }
+
+  .marketplace-login .submit-btn {
+    min-height: 44px;
+    font-size: .9rem;
+  }
+
+  .auth-assurance {
+    gap: .45rem;
+    margin-top: .35rem;
+  }
+
+  .auth-assurance > span {
+    font-size: .95rem;
+  }
+
+  .marketplace-login .auth-footnote {
+    font-size: .67rem;
+    line-height: 1.35;
+  }
+}
+
+@media (max-width: 580px) {
+  .marketplace-login {
+    align-items: center;
+    overflow: hidden;
+    padding: 2.25rem 1rem;
+  }
+
+  .marketplace-auth-shell {
+    width: min(92vw, 430px);
+    height: auto;
+    min-height: auto;
+    max-height: none;
+    grid-template-columns: 1fr;
+    border-radius: 27px;
+  }
+
+  .marketplace-auth-shell::before,
+  .marketplace-auth-shell::after {
+    display: none;
+  }
+
+  .login-close {
+    top: 1rem;
+    right: 1rem;
+    width: 44px;
+    height: 44px;
+  }
+
+  .login-art {
+    min-height: 125px;
+    max-height: 125px;
+    margin: 0;
+    border-radius: 25px 25px 0 0;
+  }
+
+  .login-art img {
+    width: 191.6%;
+  }
+
+  .marketplace-auth-content {
+    padding: 1rem 1rem 1.05rem;
+  }
+
+  .login-kicker {
+    margin-bottom: .55rem;
+    font-size: .68rem;
+    letter-spacing: .17em;
+  }
+
+  .marketplace-login .general-login-heading h1 {
+    font-size: clamp(1.9rem, 9vw, 2.35rem);
+  }
+
+  .marketplace-login .general-login-heading > p:last-child {
+    font-size: .84rem;
+  }
+
+  .heading-ornament {
+    margin-block: .55rem .45rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .login-art {
+    min-height: 112px;
+    max-height: 112px;
+  }
+
+  .marketplace-auth-content {
+    padding: .85rem .85rem .95rem;
+  }
+
+  .marketplace-login .auth-tabs button {
+    gap: .35rem;
+    font-size: .84rem;
+  }
+
+  .marketplace-login .auth-form input {
+    min-height: 49px;
+  }
+
+  .marketplace-login .submit-btn {
+    min-height: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketplace-auth-shell,
+  .login-art,
+  .marketplace-auth-content {
+    animation: none;
+  }
+
+  .login-close,
+  .marketplace-login .auth-tabs button,
+  .marketplace-login .auth-form input,
+  .marketplace-login .submit-btn {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .login-close {
+    backdrop-filter: none;
+  }
+
+  .marketplace-auth-content {
+    background: #fffaf7;
+  }
+}

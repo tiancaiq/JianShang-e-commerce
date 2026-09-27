@@ -518,115 +518,6 @@
 .marketplace-shell app-business-stores .hero-spotlight a { color: var(--stores-gold-pale); font-size: .82rem; font-weight: 800; text-decoration: none; }
 .marketplace-shell app-business-stores .hero-spotlight-placeholder { gap: .35rem; }
 
-.marketplace-shell app-business-stores .featured-stores {
-  position: relative;
-  overflow: hidden;
-  padding: clamp(1.4rem, 3vw, 2.6rem);
-  border: 1px solid rgba(215, 183, 124, .42);
-  border-radius: 30px 9px 30px 9px;
-  background:
-    radial-gradient(ellipse at 82% 100%, rgba(115, 77, 93, .12), transparent 42%),
-    radial-gradient(ellipse at 9% 0%, rgba(255,255,255,.5), transparent 36%),
-    linear-gradient(135deg, rgba(255, 251, 247, .72), rgba(249, 237, 240, .6));
-  box-shadow: 0 24px 60px rgba(73, 50, 56, .11);
-  backdrop-filter: blur(13px) saturate(1.06);
-}
-
-.marketplace-shell app-business-stores .featured-stores::after {
-  position: absolute;
-  right: -7%;
-  bottom: -52%;
-  width: 48%;
-  height: 88%;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(255,255,255,.72), transparent 68%);
-  content: '';
-  pointer-events: none;
-}
-
-.marketplace-shell app-business-stores .featured-stores-head {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-.marketplace-shell app-business-stores .featured-stores-head h2 {
-  color: var(--stores-plum);
-  font-size: clamp(2rem, 3.2vw, 3rem);
-  font-weight: 540;
-}
-
-.marketplace-shell app-business-stores .featured-stores-head p:not(.eyebrow) { margin: .3rem 0 0; color: var(--stores-mauve); }
-.marketplace-shell app-business-stores .featured-stores-head > a { color: #a6305c; font-weight: 800; text-decoration: none; }
-
-.marketplace-shell app-business-stores .store-grid {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-  gap: clamp(.85rem, 1.6vw, 1.35rem);
-}
-
-.marketplace-shell app-business-stores .store-card {
-  overflow: hidden;
-  border: 1px solid rgba(215, 183, 124, .52);
-  border-radius: 24px 6px 24px 6px;
-  background: rgba(255, 252, 248, .93);
-  box-shadow: 0 16px 38px rgba(73, 50, 56, .1);
-  transition: transform 240ms ease, box-shadow 240ms ease, border-color 240ms ease;
-}
-
-.marketplace-shell app-business-stores .store-card:hover {
-  border-color: rgba(183, 126, 66, .68);
-  box-shadow: 0 24px 50px rgba(73, 50, 56, .18);
-  transform: translateY(-5px);
-}
-
-.marketplace-shell app-business-stores .store-card-art {
-  position: relative;
-  display: block;
-  aspect-ratio: 16 / 8.3;
-  overflow: hidden;
-  background: var(--stores-brown);
-}
-
-.marketplace-shell app-business-stores .store-card-art::after {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 40%, rgba(43, 23, 35, .58));
-  content: '';
-}
-
-.marketplace-shell app-business-stores .store-card-art img { width: 100%; height: 100%; object-fit: cover; transition: transform 700ms cubic-bezier(.2,.72,.24,1); }
-.marketplace-shell app-business-stores .store-card:hover .store-card-art img { transform: scale(1.045); }
-.marketplace-shell app-business-stores .store-number { position: absolute; z-index: 2; top: .75rem; left: .85rem; color: rgba(255,249,241,.86); font-family: var(--font-market-display); font-size: .84rem; letter-spacing: .12em; }
-.marketplace-shell app-business-stores .store-mark {
-  position: absolute;
-  z-index: 3;
-  right: .85rem;
-  bottom: .75rem;
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(242,223,184,.78);
-  border-radius: 50%;
-  background: rgba(53,29,44,.72);
-  color: #fff9f2;
-  font-family: var(--font-market-display);
-  backdrop-filter: blur(12px);
-}
-
-.marketplace-shell app-business-stores .store-card-body { display: grid; gap: .55rem; padding: 1rem 1.1rem 1.15rem; }
-.marketplace-shell app-business-stores .store-card-kicker { display: flex; justify-content: space-between; gap: .75rem; color: #a03b60; font-size: .64rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
-.marketplace-shell app-business-stores .store-card h3 { color: var(--stores-plum); font-size: clamp(1.25rem, 2vw, 1.65rem); font-weight: 540; }
-.marketplace-shell app-business-stores .store-card p { margin: 0; color: var(--stores-mauve); font-size: .82rem; }
-.marketplace-shell app-business-stores .store-card-body > a { width: max-content; margin-top: .15rem; color: #9b2f58; font-size: .82rem; font-weight: 800; text-decoration: none; }
-
 .marketplace-shell app-business-stores .items-panel,
 .marketplace-shell app-business-stores .filter-panel {
   border-color: rgba(215, 183, 124, .38);
@@ -691,8 +582,6 @@
   }
   .marketplace-shell app-business-stores .hero-ornament { display: none; }
   .marketplace-shell app-business-stores .hero-spotlight { width: 300px; }
-  .marketplace-shell app-business-stores .store-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .marketplace-shell app-business-stores .store-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
 @media (max-width: 700px) {
@@ -734,9 +623,6 @@
   .marketplace-shell app-business-stores .hero-actions > * { flex: 1 1 145px; padding-inline: .7rem; }
   .marketplace-shell app-business-stores .hero-trust { display: none; }
   .marketplace-shell app-business-stores .hero-spotlight { display: none; }
-  .marketplace-shell app-business-stores .featured-stores-head { align-items: flex-start; flex-direction: column; }
-  .marketplace-shell app-business-stores .store-grid { grid-template-columns: 1fr; }
-  .marketplace-shell app-business-stores .store-card:last-child:nth-child(odd) { grid-column: auto; }
 }
 
 @media (max-width: 430px) {
@@ -744,14 +630,11 @@
   .marketplace-shell app-business-stores .business-hero .hero-copy { right: .65rem; bottom: .65rem; left: .65rem; padding: 1rem; }
   .marketplace-shell app-business-stores .business-hero h1 { font-size: clamp(2.25rem, 11.5vw, 3.2rem); }
   .marketplace-shell app-business-stores .hero-actions { display: grid; grid-template-columns: 1fr; }
-  .marketplace-shell app-business-stores .featured-stores { padding: 1.1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .marketplace-shell app-marketplace-home app-marketplace-hero-banner .hero-artwork,
   .marketplace-shell app-business-stores .hero-artwork { animation: none; }
-  .marketplace-shell app-business-stores .store-card,
-  .marketplace-shell app-business-stores .store-card-art img { transition: none; }
 }
 
 /* Account and form surfaces */
@@ -778,74 +661,11 @@
 .marketplace-shell app-account {
   display: block;
   min-height: calc(100vh - 72px);
-  background: var(--market-canvas);
-}
-
-.marketplace-shell app-account::before {
-  content: none;
-}
-
-.marketplace-shell app-account .account-page {
-  min-height: calc(100vh - 72px);
-  padding: 2rem var(--market-page-pad) 4rem;
-  background: var(--market-canvas);
-}
-
-.marketplace-shell app-account .account-container {
-  max-width: var(--market-content);
-}
-
-.marketplace-shell app-account :where(.welcome-card, .profile-card, .panel, .account-tile) {
-  border: 1px solid var(--market-line);
-  border-radius: var(--market-radius-md);
-  background: var(--market-surface);
-  box-shadow: var(--market-shadow-sm);
-}
-
-.marketplace-shell app-account .welcome-card {
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 30%);
-  align-items: center;
-  border-radius: 26px 9px 26px 9px;
-  background:
-    radial-gradient(circle at 8% 14%, rgba(247, 168, 191, .25) 0 4rem, transparent 4.1rem),
-    linear-gradient(120deg, #fffdfb 0 72%, var(--market-lavender-soft) 72% 100%);
-}
-
-.marketplace-shell app-account .welcome-illustration {
-  position: relative;
-  inset: auto;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 235px;
-  object-fit: contain;
-  opacity: 1;
-}
-
-.marketplace-shell app-account :where(.primary-action, .nav-search button, .sell-pill) {
-  background: var(--market-accent);
-  color: #fff;
-  box-shadow: none;
-}
-
-.marketplace-shell app-account :where(.secondary-action, .listing-row, .message-row, .message-button, .account-tile) {
-  border-color: var(--market-line);
-  background: #fbfcfc;
-}
-
-.marketplace-shell app-account :where(.listing-row, .message-row, .account-tile):hover {
-  border-color: var(--market-line-strong);
-  background: var(--market-surface-subtle);
-}
-
-.marketplace-shell app-account :where(.tile-icon, .tile-icon.pink, .tile-icon.purple, .tile-icon.green) {
-  background: var(--market-accent-soft);
-  color: var(--market-accent-dark);
-}
-
-.marketplace-shell app-account .trade-note img {
-  display: none;
+  --account-pearl: var(--market-surface);
+  --account-ink: var(--market-ink);
+  --account-muted: var(--market-muted);
+  --account-accent: var(--market-accent-dark);
+  --account-success: var(--market-success);
 }
 
 .marketplace-shell app-profile :where(.profile-header, .profile-form, .avatar-panel),
@@ -2339,23 +2159,6 @@ app-seller-layout :where(.state, .state-message, .table-wrap, .panel, article) {
 }
 
 @media (max-width: 760px) {
-  .marketplace-shell app-account .account-page {
-    padding: 1rem 1rem 3rem;
-  }
-
-  .marketplace-shell app-account :where(.top-grid, .middle-grid, .lower-grid) {
-    grid-template-columns: 1fr;
-  }
-
-  .marketplace-shell app-account .welcome-card {
-    grid-template-columns: 1fr;
-  }
-
-  .marketplace-shell app-account .welcome-illustration {
-    display: block;
-    max-height: 190px;
-  }
-
   .marketplace-shell app-agent-marketplace-v2-page article {
     max-width: 92%;
   }

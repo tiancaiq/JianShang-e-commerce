@@ -286,20 +286,17 @@ describe('MarketplaceLayoutComponent', () => {
     expect(host.querySelector('.marketplace-main')?.classList).toContain('account-dashboard-main');
   });
 
-  it('opens a marketplace-themed auth dialog from the login button', () => {
+  it('opens the themed marketplace login page from the login button', () => {
+    const router = TestBed.inject(Router);
+    Object.defineProperty(router, 'url', { value: '/marketplace' });
     fixture.detectChanges();
 
-    const loginButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
-      .find(button => button.textContent?.trim() === 'Login') as HTMLButtonElement | undefined;
+    const loginLink = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a.login-link');
+    const destination = new URL(loginLink?.href || '', 'http://localhost');
 
-    loginButton?.click();
-    fixture.detectChanges();
-
-    const text = (fixture.nativeElement as HTMLElement).textContent || '';
-
-    expect(text).toContain('MSB marketplace account');
-    expect(text).toContain('Sign in to keep trading local.');
-    expect(text).toContain('Create account');
+    expect(destination.pathname).toBe('/login');
+    expect(destination.searchParams.get('client')).toBe('marketplace');
+    expect(destination.searchParams.get('returnUrl')).toBe('/marketplace');
   });
 
   it('dismisses the sign-in dialog with Escape', () => {

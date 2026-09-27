@@ -58,7 +58,7 @@ describe('BusinessStoresComponent public business item regression', () => {
     fixture = TestBed.createComponent(BusinessStoresComponent);
   });
 
-  it('presents approved business items with data-backed featured stores', () => {
+  it('presents approved business items without a duplicate featured-store directory', () => {
     fixture.detectChanges();
 
     const host = fixture.nativeElement as HTMLElement;
@@ -89,9 +89,8 @@ describe('BusinessStoresComponent public business item regression', () => {
     expect(text).toContain(businessListing.categoryName);
     expect(text).toContain('View item');
     expect(text).toContain('Become a business seller');
-    expect(text).toContain('Featured stores');
-    expect(text).toContain('Explore boutique');
-    expect(host.querySelectorAll('.store-card').length).toBe(1);
+    expect(text).not.toContain('Featured stores');
+    expect(host.querySelector('.featured-stores')).toBeNull();
     expect(host.querySelector('.stores-page-art')).not.toBeNull();
     expect(host.querySelectorAll('.hero-extension, .decorative-rail').length).toBe(0);
     expect(text).not.toContain('Individual bike');

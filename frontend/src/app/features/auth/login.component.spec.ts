@@ -61,10 +61,13 @@ describe('LoginComponent', () => {
     });
 
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    const artwork = (fixture.nativeElement as HTMLElement).querySelector<HTMLImageElement>('.login-art img');
 
-    expect(text).toContain('Use your marketplace account to continue.');
+    expect(text).toContain('Sign in to keep trading local.');
     expect(text).toContain('Create account');
     expect(text).not.toContain('Continue to sign in');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.marketplace-auth-shell')).not.toBeNull();
+    expect(artwork?.getAttribute('src')).toBe('/assets/brand/anime/auth-eastern-fantasy-reference-v1.png');
   });
 
   it('shows signed-out confirmation on login surfaces', () => {

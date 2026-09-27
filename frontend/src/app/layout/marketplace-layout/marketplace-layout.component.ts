@@ -25,7 +25,7 @@ import { NotificationService } from '../../core/services/notification.service';
         [notificationsEnabled]="notificationsEnabled"
         [notificationCount]="notificationCount()"
         [currentUser]="authService.user()"
-        (loginRequested)="openAuthDialog()"
+        (loginRequested)="navigateToLogin()"
         (searchRequested)="searchMarketplace($event)"
       />
 
@@ -388,6 +388,15 @@ export class MarketplaceLayoutComponent implements OnInit, OnDestroy {
     this.authDialogError.set(null);
     this.authMode.set('login');
     this.authDialogOpen.set(true);
+  }
+
+  navigateToLogin(): void {
+    void this.router.navigate(['/login'], {
+      queryParams: {
+        client: 'marketplace',
+        returnUrl: this.currentReturnUrl(),
+      },
+    });
   }
 
   closeAuthDialog(): void {

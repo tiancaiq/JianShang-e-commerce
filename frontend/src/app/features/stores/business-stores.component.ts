@@ -98,43 +98,6 @@ type FeaturedBusinessStore = {
       </header>
 
       <div class="stores-content-flow">
-          @if (featuredStores().length > 0) {
-            <section class="featured-stores" aria-labelledby="featured-stores-title">
-          <div class="featured-stores-head">
-            <div>
-              <p class="eyebrow">Boutique directory</p>
-              <h2 id="featured-stores-title">Featured stores</h2>
-              <p>Meet the approved businesses behind this collection.</p>
-            </div>
-            <a href="#business-items">Browse every business item <span aria-hidden="true">→</span></a>
-          </div>
-          <div class="store-grid">
-            @for (store of featuredStores(); track store.slug; let index = $index) {
-              <article class="store-card">
-                <a [routerLink]="['/stores', store.slug]" class="store-card-art" [attr.aria-label]="'Explore ' + store.name">
-                  @if (store.coverUrl) {
-                    <img [src]="store.coverUrl" [alt]="store.name + ' collection cover'" (error)="useStoreCoverFallback($event)" />
-                  } @else {
-                    <img src="/assets/brand/anime/stores-fox-boutique-hero-v1.webp" alt="" aria-hidden="true" />
-                  }
-                  <span class="store-number" aria-hidden="true">0{{ index + 1 }}</span>
-                  <span class="store-mark" aria-hidden="true">{{ storeInitials(store.name) }}</span>
-                </a>
-                <div class="store-card-body">
-                  <div class="store-card-kicker">
-                    <span>{{ store.verified ? 'Verified boutique' : 'Business store' }}</span>
-                    <span>{{ store.itemCount }} {{ store.itemCount === 1 ? 'item' : 'items' }}</span>
-                  </div>
-                  <h3>{{ store.name }}</h3>
-                  <p>{{ store.category }} <span aria-hidden="true">·</span> {{ store.location }}</p>
-                  <a [routerLink]="['/stores', store.slug]">Explore boutique <span aria-hidden="true">→</span></a>
-                </div>
-              </article>
-            }
-          </div>
-            </section>
-          }
-
           <section id="business-items" class="business-layout" aria-labelledby="business-items-title">
         <main class="business-main">
           <div class="items-panel">
