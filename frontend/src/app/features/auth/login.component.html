@@ -1,0 +1,156 @@
+<div
+  class="login-page bg-noise"
+  [class.marketplace-client]="isMarketplaceClient()"
+  [class.seller-login]="client() === 'seller-portal'"
+  [class.admin-login]="client() === 'admin-portal'"
+>
+  @if (isMarketplaceClient()) {
+    <main class="marketplace-login" aria-labelledby="general-login-title">
+      <div class="login-atmosphere" aria-hidden="true"></div>
+      <section class="marketplace-auth-shell">
+        <a class="login-close" href="/marketplace" aria-label="Return to marketplace">×</a>
+
+        <aside class="login-art" aria-hidden="true">
+          <img src="/assets/brand/anime/auth-eastern-fantasy-reference-v1.png" alt="" />
+        </aside>
+
+        <div class="marketplace-auth-content">
+          <div class="general-login-heading">
+            <p class="login-kicker"><span aria-hidden="true">✿</span> MSB marketplace account</p>
+            <h1 id="general-login-title">
+              {{ authMode() === 'login' ? 'Sign in to keep trading local.' : 'Create your place in the marketplace.' }}
+            </h1>
+            <div class="heading-ornament" aria-hidden="true"><span>✿</span></div>
+            <p>
+              {{
+                authMode() === 'login'
+                  ? 'Return to saved listings, messages, purchases, and selling tools.'
+                  : 'Save discoveries, message sellers, and share the things you are ready to pass on.'
+              }}
+            </p>
+          </div>
+
+          @if (signedOut()) {
+            <p class="signed-out" role="status">Signed out successfully</p>
+          }
+
+          <div class="auth-tabs" role="tablist" aria-label="Account action">
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="authMode() === 'login'"
+              [class.active]="authMode() === 'login'"
+              (click)="setAuthMode('login')"
+            >
+              <span aria-hidden="true">✦</span> Sign in
+            </button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="authMode() === 'register'"
+              [class.active]="authMode() === 'register'"
+              (click)="setAuthMode('register')"
+            >
+              <span aria-hidden="true">♙</span> Create account
+            </button>
+          </div>
+
+          @if (authError()) {
+            <p class="auth-error" role="alert">{{ authError() }}</p>
+          }
+
+          <form class="auth-form" (ngSubmit)="submitNativeAuth()">
+            @if (authMode() === 'register') {
+              <div class="form-field">
+                <label class="field-label" for="displayName">Display name</label>
+                <span class="field-control">
+                  <span class="field-icon" aria-hidden="true">✿</span>
+                  <input
+                    id="displayName"
+                    name="displayName"
+                    autocomplete="name"
+                    [(ngModel)]="authDisplayName"
+                    [disabled]="authBusy()"
+                    placeholder="How people will know you"
+                    required
+                  />
+                </span>
+              </div>
+            }
+            <div class="form-field">
+              <label class="field-label" for="email">Email</label>
+              <span class="field-control">
+                <span class="field-icon" aria-hidden="true">✉</span>
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  [(ngModel)]="authEmail"
+                  [disabled]="authBusy()"
+                  placeholder="you@example.com"
+                  required
+                />
+              </span>
+            </div>
+            <div class="form-field">
+              <label class="field-label" for="password">Password</label>
+              <span class="field-control">
+                <span class="field-icon" aria-hidden="true">⌑</span>
+                <input
+                  id="password"
+                  name="password"
+                  [type]="passwordVisible() ? 'text' : 'password'"
+                  [autocomplete]="authMode() === 'login' ? 'current-password' : 'new-password'"
+                  [(ngModel)]="authPassword"
+                  [disabled]="authBusy()"
+                  placeholder="Enter your password"
+                  required
+                />
+                <button
+                  type="button"
+                  class="password-toggle"
+                  [attr.aria-label]="passwordVisible() ? 'Hide password' : 'Show password'"
+                  [attr.aria-pressed]="passwordVisible()"
+                  (click)="passwordVisible.set(!passwordVisible())"
+                >
+                  ◉
+                </button>
+              </span>
+            </div>
+            <button type="submit" class="submit-btn" [disabled]="authBusy()">
+              <span>{{ authBusy() ? 'Please wait…' : authMode() === 'login' ? 'Sign in' : 'Create account' }}</span>
+              @if (!authBusy()) {
+                <span aria-hidden="true">→</span>
+              }
+            </button>
+          </form>
+
+          <div class="auth-assurance">
+            <span aria-hidden="true">♢</span>
+            <p class="auth-footnote">Keycloak verifies credentials behind the gateway; MSB never stores passwords.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  } @else {
+    <section class="login-shell">
+      <app-brand-mascot variant="login" alt="MSB portal sign in" />
+      <div class="login-panel">
+        <div class="login-brand">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <p class="portal-label">{{ portalLabel() }}</p>
+          <h1 class="brand-title">{{ portalTitle() }}</h1>
+          <p class="brand-subtitle">{{ portalSubtitle() }}</p>
+        </div>
+
+        @if (signedOut()) {
+          <p class="signed-out">Signed out successfully</p>
+        }
+
+        <button type="button" class="submit-btn" (click)="handleLogin()">Continue to sign in</button>
+      </div>
+    </section>
+  }
+  <app-toast-container />
+</div>
