@@ -199,7 +199,9 @@ public class OpenSearchListingHybridSearchClient {
     }
 
     private void filters(ArrayNode filters, ListingHybridSearchRequest.Filters request) {
-        term(filters, "sellerType", "INDIVIDUAL");
+        if (!"ALL".equals(request.sellerType())) {
+            term(filters, "sellerType", request.sellerType());
+        }
         term(filters, "status", "ACTIVE");
         term(filters, "visibility", "PUBLIC");
         booleanTerm(filters, "inventoryAvailable", true);

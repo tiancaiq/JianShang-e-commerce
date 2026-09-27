@@ -77,7 +77,7 @@ class _HybridIdentity(_StrictModel):
 
 
 class _HybridFilters(_StrictModel):
-    seller_type: Literal["INDIVIDUAL"] = Field(alias="sellerType")
+    seller_type: Literal["INDIVIDUAL", "ALL"] = Field(alias="sellerType")
     category_id: str | None = Field(
         default=None,
         alias="categoryId",
@@ -166,9 +166,9 @@ class _HybridResult(_StrictModel):
         max_length=1_000,
     )
     published_at: datetime = Field(alias="publishedAt")
-    transaction_notice: str = Field(
+    transaction_notice: str | None = Field(
+        default=None,
         alias="transactionNotice",
-        min_length=1,
         max_length=1_000,
     )
     provenance: _HybridProvenance
@@ -413,6 +413,51 @@ class HybridMarketplaceDiscoveryClient:
         query_timeout_seconds: float | None = None,
         product_timeout_seconds: float | None = None,
     ) -> DiscoverySearchPage:
+        """Preserve the legacy individual-only discovery contract."""
+
+        return await self._search(
+            actor_user_id=actor_user_id,
+            request=request,
+            correlation_id=correlation_id,
+            seller_type="INDIVIDUAL",
+            turn_deadline_monotonic=turn_deadline_monotonic,
+            query_timeout_seconds=query_timeout_seconds,
+            product_timeout_seconds=product_timeout_seconds,
+        )
+
+    async def search_marketplace(
+        self,
+        *,
+        actor_user_id: str,
+        request: DiscoverySearchRequest,
+        correlation_id: str,
+        turn_deadline_monotonic: float | None = None,
+        query_timeout_seconds: float | None = None,
+        product_timeout_seconds: float | None = None,
+    ) -> DiscoverySearchPage:
+        """Search both public seller types for Marketplace Agent V2."""
+
+        return await self._search(
+            actor_user_id=actor_user_id,
+            request=request,
+            correlation_id=correlation_id,
+            seller_type="ALL",
+            turn_deadline_monotonic=turn_deadline_monotonic,
+            query_timeout_seconds=query_timeout_seconds,
+            product_timeout_seconds=product_timeout_seconds,
+        )
+
+    async def _search(
+        self,
+        *,
+        actor_user_id: str,
+        request: DiscoverySearchRequest,
+        correlation_id: str,
+        seller_type: Literal["INDIVIDUAL", "ALL"],
+        turn_deadline_monotonic: float | None,
+        query_timeout_seconds: float | None,
+        product_timeout_seconds: float | None,
+    ) -> DiscoverySearchPage:
         """Generate one ephemeral query vector and accept only Product-ranked IDs."""
 
         if _ULID.fullmatch(actor_user_id) is None:
@@ -471,7 +516,7 @@ class HybridMarketplaceDiscoveryClient:
             },
             embedding=vector,
             filters={
-                "sellerType": "INDIVIDUAL",
+                "sellerType": seller_type,
                 "categoryId": request.category_id,
                 "condition": request.condition,
                 "minPrice": request.min_price,

@@ -629,7 +629,9 @@ public class OpenSearchListingSearchClient {
         root.put("_source", false);
         ObjectNode bool = root.putObject("query").putObject("bool");
         ArrayNode filter = bool.putArray("filter");
-        term(filter, "sellerType", sellerType);
+        if (!"ALL".equals(sellerType)) {
+            term(filter, "sellerType", sellerType);
+        }
         term(filter, "status", "ACTIVE");
         term(filter, "visibility", "PUBLIC");
         optionalTerm(filter, "categoryId", criteria.categoryId());

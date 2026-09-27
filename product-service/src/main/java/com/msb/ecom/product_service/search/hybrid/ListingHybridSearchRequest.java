@@ -31,7 +31,19 @@ public record ListingHybridSearchRequest(
             BigDecimal maxPrice,
             String currency,
             String city,
-            String publicRegion
+            String publicRegion,
+            String sellerType
     ) {
+        public Filters(
+                String categoryId,
+                String condition,
+                BigDecimal minPrice,
+                BigDecimal maxPrice,
+                String currency,
+                String city,
+                String publicRegion) {
+            this(categoryId, condition, minPrice, maxPrice, currency, city, publicRegion,
+                    "INDIVIDUAL");
+        }
     }
 }

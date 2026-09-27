@@ -42,6 +42,12 @@ final class ListingConceptCompatibilityReranker {
                 .anyMatch(title::contains);
         boolean originalPhrase = title.contains(query.normalizedQuery());
         boolean broadType = query.excludedBroadTypes().stream().anyMatch(title::contains);
+        boolean titleTypeCompatible = !deskFurnitureQuery(query)
+                || deskFurnitureTitle(title);
+        boolean productTypeCompatible = complete
+                && (titleMatches > 0 || structuredMatches > 0)
+                && !broadType
+                && titleTypeCompatible;
         int missing = query.coreConcepts().size() - matched.size();
         int score = (originalPhrase || productPhrase ? properties.exactPhraseBoost() : 0)
                 + titleMatches * properties.titleConceptWeight()
@@ -50,9 +56,9 @@ final class ListingConceptCompatibilityReranker {
                 - missing * properties.missingConceptPenalty()
                 - (broadType ? properties.unrelatedTypePenalty() : 0);
         Relevance relevance;
-        if (complete && !broadType && score >= properties.minimumDirectScore()) {
+        if (productTypeCompatible && score >= properties.minimumDirectScore()) {
             relevance = Relevance.HIGH;
-        } else if (complete && score >= properties.minimumRelatedScore()) {
+        } else if (productTypeCompatible && score >= properties.minimumRelatedScore()) {
             relevance = Relevance.MEDIUM;
         } else {
             relevance = Relevance.LOW;
@@ -60,9 +66,25 @@ final class ListingConceptCompatibilityReranker {
         return new Assessment(
                 relevance,
                 complete,
-                complete,
+                productTypeCompatible,
                 Set.copyOf(matched),
                 score);
+    }
+
+    private boolean deskFurnitureQuery(ListingQueryConcept query) {
+        return query.coreConcepts().stream()
+                .anyMatch(group -> "desk furniture".equals(group.label()));
+    }
+
+    private boolean deskFurnitureTitle(String title) {
+        String productTitle = title
+                .replaceFirst("\\s+(?:private sale|for sale)$", "")
+                .trim();
+        return productTitle.equals("desk")
+                || productTitle.endsWith(" desk")
+                || productTitle.contains(" desk with ")
+                || productTitle.contains(" desk and ")
+                || productTitle.startsWith("desk ");
     }
 
     enum Relevance { HIGH, MEDIUM, LOW }

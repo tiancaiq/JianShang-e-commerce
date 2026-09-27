@@ -39,9 +39,24 @@ class ListingHybridSearchRequestParserTests {
         assertThat(parsed.request().embedding()).hasSize(1536);
         assertThat(parsed.request().limit()).isEqualTo(7);
         assertThat(parsed.request().filters().condition()).isEqualTo("GOOD");
+        assertThat(parsed.request().filters().sellerType()).isEqualTo("INDIVIDUAL");
         assertThat(parsed.request().filters().publicRegion()).isEqualTo("Orange County");
         assertThat(parsed.request().responseSchemaVersion())
                 .isEqualTo(ListingHybridSearchResponse.FACET_SCHEMA_VERSION);
+    }
+
+    @Test
+    void acceptsAllPublicSellerTypesAndRejectsAnUnsupportedScope() throws Exception {
+        ObjectNode all = request();
+        all.putObject("filters").put("sellerType", "ALL");
+
+        var parsed = parser.parse(mapper.writeValueAsBytes(all));
+
+        assertThat(parsed.request().filters().sellerType()).isEqualTo("ALL");
+
+        ObjectNode invalid = request();
+        invalid.putObject("filters").put("sellerType", "BUSINESS");
+        assertInvalid(invalid);
     }
 
     @Test

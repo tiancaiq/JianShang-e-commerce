@@ -2,6 +2,7 @@ package com.msb.ecom.product_service.search.hybrid;
 
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.search.ListingSearchProperties;
+import com.msb.ecom.product_service.service.AuthServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,9 +17,11 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class ListingHybridSearchService {
@@ -35,6 +38,7 @@ public class ListingHybridSearchService {
     private final ListingHybridSearchRequestParser parser;
     private final OpenSearchListingHybridSearchClient searchClient;
     private final ListingHybridSearchRepository repository;
+    private final AuthServiceClient authServiceClient;
     private final ListingHybridSearchMetrics metrics;
     private final ListingConceptCompatibilityReranker conceptReranker;
     private final String internalServiceToken;
@@ -47,6 +51,7 @@ public class ListingHybridSearchService {
             ListingHybridSearchRequestParser parser,
             OpenSearchListingHybridSearchClient searchClient,
             ListingHybridSearchRepository repository,
+            AuthServiceClient authServiceClient,
             ListingHybridSearchMetrics metrics,
             ListingConceptRankingProperties conceptProperties,
             @Value("${agent.internal-service-token}") String internalServiceToken) {
@@ -56,6 +61,7 @@ public class ListingHybridSearchService {
                 parser,
                 searchClient,
                 repository,
+                authServiceClient,
                 metrics,
                 conceptProperties,
                 internalServiceToken,
@@ -68,6 +74,7 @@ public class ListingHybridSearchService {
             ListingHybridSearchRequestParser parser,
             OpenSearchListingHybridSearchClient searchClient,
             ListingHybridSearchRepository repository,
+            AuthServiceClient authServiceClient,
             ListingHybridSearchMetrics metrics,
             ListingConceptRankingProperties conceptProperties,
             String internalServiceToken,
@@ -77,6 +84,7 @@ public class ListingHybridSearchService {
         this.parser = parser;
         this.searchClient = searchClient;
         this.repository = repository;
+        this.authServiceClient = authServiceClient;
         this.metrics = metrics;
         this.conceptReranker = new ListingConceptCompatibilityReranker(conceptProperties);
         this.internalServiceToken = internalServiceToken;
@@ -89,10 +97,12 @@ public class ListingHybridSearchService {
             ListingHybridSearchRequestParser parser,
             OpenSearchListingHybridSearchClient searchClient,
             ListingHybridSearchRepository repository,
+            AuthServiceClient authServiceClient,
             ListingHybridSearchMetrics metrics,
             String internalServiceToken,
             Clock clock) {
-        this(properties, searchProperties, parser, searchClient, repository, metrics,
+        this(properties, searchProperties, parser, searchClient, repository,
+                authServiceClient, metrics,
                 new ListingConceptRankingProperties(12, 8, 5, 2, 12, 20, 12, 2),
                 internalServiceToken, clock);
     }
@@ -138,9 +148,13 @@ public class ListingHybridSearchService {
                     () -> ListingHybridRrf.fuse(retrieval.lexicalIds(), retrieval.vectorIds()));
             List<String> fusedIds =
                     fused.stream().map(ListingHybridRrf.FusedCandidate::listingId).toList();
-            List<ListingHybridSearchListing> current =
+            List<ListingHybridSearchListing> revalidated =
                     unavailableStage("mysql_revalidation",
                             () -> repository.findCurrentEligibleByIds(fusedIds));
+            List<ListingHybridSearchListing> current = unavailableStage(
+                    "business_visibility",
+                    () -> visibleCurrentListings(
+                            parsed.request().filters().sellerType(), revalidated));
             ListingHybridSearchResponse response =
                     response(parsed.request(), retrieval, fused, current);
             metrics.record("request", retrieval.degraded() ? "degraded" : "success");
@@ -228,7 +242,8 @@ public class ListingHybridSearchService {
                  "lexical_branch",
                  "vector_branch",
                  "rrf_fusion",
-                 "mysql_revalidation" -> true;
+                 "mysql_revalidation",
+                 "business_visibility" -> true;
             default -> false;
         };
     }
@@ -315,7 +330,9 @@ public class ListingHybridSearchService {
                     true,
                     listing.primaryImageUrl(),
                     listing.publishedAt(),
-                    INDIVIDUAL_TRANSACTION_NOTICE,
+                    "INDIVIDUAL".equals(listing.sellerType())
+                            ? INDIVIDUAL_TRANSACTION_NOTICE
+                            : null,
                     new ListingHybridSearchResponse.Provenance(
                             results.size() + 1,
                             candidate.mode(),
@@ -405,6 +422,8 @@ public class ListingHybridSearchService {
             ListingHybridSearchRequest.Filters filters,
             ListingHybridSearchListing listing) {
         return listing.available()
+                && ("ALL".equals(filters.sellerType())
+                || filters.sellerType().equals(listing.sellerType()))
                 && equalsIfPresent(filters.categoryId(), listing.categoryId())
                 && equalsIfPresent(filters.condition(), listing.condition())
                 && equalsIfPresent(filters.currency(), listing.currency())
@@ -424,6 +443,43 @@ public class ListingHybridSearchService {
         return expected == null
                 || (actual != null
                 && expected.toLowerCase(Locale.ROOT).equals(actual.toLowerCase(Locale.ROOT)));
+    }
+
+    // Business listings remain visible only while Auth confirms an active public store.
+    private List<ListingHybridSearchListing> visibleCurrentListings(
+            String sellerType,
+            List<ListingHybridSearchListing> listings) {
+        List<ListingHybridSearchListing> scoped = listings.stream()
+                .filter(listing -> "ALL".equals(sellerType)
+                        || sellerType.equals(listing.sellerType()))
+                .toList();
+        Set<String> businessIds = scoped.stream()
+                .filter(listing -> "BUSINESS".equals(listing.sellerType()))
+                .map(ListingHybridSearchListing::businessId)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (businessIds.isEmpty()) {
+            return scoped.stream()
+                    .filter(listing -> !"BUSINESS".equals(listing.sellerType()))
+                    .toList();
+        }
+        try {
+            List<AuthServiceClient.PublicBusinessStoreSearchResult> stores =
+                    authServiceClient.searchPublicBusinessStores(
+                            null, businessIds, Set.of());
+            Set<String> visibleBusinessIds = (stores == null
+                    ? List.<AuthServiceClient.PublicBusinessStoreSearchResult>of()
+                    : stores).stream()
+                    .map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+            return scoped.stream()
+                    .filter(listing -> !"BUSINESS".equals(listing.sellerType())
+                            || visibleBusinessIds.contains(listing.businessId()))
+                    .toList();
+        } catch (RuntimeException exception) {
+            throw new ListingHybridSearchUnavailableException();
+        }
     }
 
     private void requireInternalToken(String suppliedToken) {

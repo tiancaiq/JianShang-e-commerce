@@ -92,9 +92,14 @@ public class ListingHybridSearchRequestParser {
     private ListingHybridSearchRequest.Filters filters(JsonNode filters) {
         if (filters == null || filters.isNull()) {
             return new ListingHybridSearchRequest.Filters(
-                    null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, "INDIVIDUAL");
         }
-        exactOptional(filters.get("sellerType"), "INDIVIDUAL");
+        String sellerType = optionalText(filters.get("sellerType"), 20);
+        if (sellerType == null) {
+            sellerType = "INDIVIDUAL";
+        } else if (!Set.of("INDIVIDUAL", "ALL").contains(sellerType)) {
+            throw invalid();
+        }
         exactOptional(filters.get("availability"), "AVAILABLE");
         String categoryId = optionalText(filters.get("categoryId"), 26);
         if (categoryId != null) {
@@ -123,7 +128,8 @@ public class ListingHybridSearchRequestParser {
                 max,
                 currency,
                 optionalText(filters.get("city"), 100),
-                optionalText(filters.get("county"), 100));
+                optionalText(filters.get("county"), 100),
+                sellerType);
     }
 
     private String query(JsonNode value) {

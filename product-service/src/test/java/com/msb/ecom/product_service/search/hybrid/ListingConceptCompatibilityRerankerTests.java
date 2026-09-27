@@ -1,6 +1,7 @@
 package com.msb.ecom.product_service.search.hybrid;
 
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
@@ -45,6 +46,50 @@ class ListingConceptCompatibilityRerankerTests {
         assertThat(strong.productTypeCompatible()).isTrue();
         assertThat(irrelevant.relevance())
                 .isEqualTo(ListingConceptCompatibilityReranker.Relevance.LOW);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Walnut desktop radio with warm dial light,Radio sized for a writing desk",
+            "Bundle of Urban Nori puzzle storage case,A case that can sit beside a desk",
+            "Walnut Brown folding picnic mat by Hearthlane,A mat stored near a desk",
+            "Harbor Business Desk Lamp,LED lighting for a desk",
+            "Little Metro canvas tote bag for desk use,Canvas bag",
+            "Amber Loop noise isolating earbuds for desk use,Wireless earbuds",
+            "Amber Loop bedside reading lamp for desk use,Reading lamp",
+            "Luna language workbook set for desk use,Workbook set"
+    })
+    void deskSearchRejectsDescriptionMentionsAndDeskAccessories(
+            String unrelatedTitle,
+            String unrelatedDescription) {
+        var interpreted = ListingQueryConcept.interpret("desk");
+
+        var desk = reranker.assess(
+                interpreted,
+                listing("Restored oak writing desk", "Solid wood writing desk"));
+        var unrelated = reranker.assess(
+                interpreted,
+                listing(unrelatedTitle, unrelatedDescription));
+
+        assertThat(desk.relevance())
+                .isEqualTo(ListingConceptCompatibilityReranker.Relevance.HIGH);
+        assertThat(desk.productTypeCompatible()).isTrue();
+        assertThat(unrelated.relevance())
+                .isEqualTo(ListingConceptCompatibilityReranker.Relevance.LOW);
+        assertThat(unrelated.productTypeCompatible()).isFalse();
+    }
+
+    @Test
+    void exactDeskAccessoryQueryRemainsCompatibleWithItsDisplayedProductType() {
+        var interpreted = ListingQueryConcept.interpret("Harbor Business Desk Lamp");
+
+        var lamp = reranker.assess(
+                interpreted,
+                listing("Harbor Business Desk Lamp", "LED lighting for a desk"));
+
+        assertThat(lamp.relevance())
+                .isEqualTo(ListingConceptCompatibilityReranker.Relevance.HIGH);
+        assertThat(lamp.productTypeCompatible()).isTrue();
     }
 
     private ListingHybridSearchListing listing(String title, String description) {

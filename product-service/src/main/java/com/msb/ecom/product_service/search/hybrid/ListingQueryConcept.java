@@ -17,8 +17,10 @@ record ListingQueryConcept(
 ) {
     private static final Pattern NON_WORD = Pattern.compile("[^\\p{L}\\p{N}]+");
     private static final Set<String> FILLER = Set.of(
-            "a", "an", "and", "for", "give", "in", "me", "near", "of", "or",
-            "please", "show", "the", "to", "under", "with");
+            "a", "an", "and", "find", "for", "give", "in", "item", "items",
+            "listing", "listings", "marketplace", "me", "near", "of", "or",
+            "please", "product", "products", "search", "show", "the", "to",
+            "under", "with");
 
     // Produces a bounded Product-owned concept model without replacing the original query.
     static ListingQueryConcept interpret(String query) {
@@ -117,6 +119,18 @@ record ListingQueryConcept(
                     ),
                     List.of("desk organizer", "desktop organizer", "desk caddy"),
                     List.of("closet organizer", "key organizer"));
+        }
+        if (tokens.contains("desk")
+                && !intersects(tokens, Set.of("lamp", "mat", "accessory", "radio"))) {
+            return new ListingQueryConcept(
+                    query,
+                    normalized,
+                    List.of(new ConceptGroup("desk furniture", Set.of("desk"))),
+                    List.of("desk", "writing desk", "office desk", "computer desk", "study desk"),
+                    List.of(
+                            "desk lamp", "desk mat", "desk organizer", "desk chair",
+                            "desk accessory", "desktop radio", "desktop computer",
+                            "storage case", "picnic mat"));
         }
         List<ConceptGroup> groups = new ArrayList<>();
         for (String token : tokens) {

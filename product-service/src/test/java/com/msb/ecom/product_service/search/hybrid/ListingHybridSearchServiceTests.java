@@ -2,6 +2,7 @@ package com.msb.ecom.product_service.search.hybrid;
 
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.search.ListingSearchProperties;
+import com.msb.ecom.product_service.service.AuthServiceClient;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +42,7 @@ class ListingHybridSearchServiceTests {
             mock(OpenSearchListingHybridSearchClient.class);
     private final ListingHybridSearchRepository repository =
             mock(ListingHybridSearchRepository.class);
+    private final AuthServiceClient authServiceClient = mock(AuthServiceClient.class);
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final ListingHybridSearchMetrics metrics =
             new ListingHybridSearchMetrics(registry);
@@ -89,6 +92,7 @@ class ListingHybridSearchServiceTests {
         assertThat(response.data().getFirst().transactionNotice())
                 .contains("does not verify or protect");
         assertThat(response.discovery()).isNull();
+        verifyNoInteractions(authServiceClient);
     }
 
     @Test
@@ -126,6 +130,37 @@ class ListingHybridSearchServiceTests {
                 .extracting(ListingHybridSearchResponse.FacetValue::value)
                 .containsExactly("Dining Chair", "Folding Chair", "Gaming Chair", "Office Chair")
                 .doesNotContain("Chair Accessories");
+    }
+
+    @Test
+    void allMarketplaceScopeReturnsOnlyAuthVisibleBusinessListings() {
+        String businessId = "01D00000000000000000000777";
+        ListingHybridSearchRequest request = new ListingHybridSearchRequest(
+                "Harbor Cart Fixture Tote", new float[1536],
+                new ListingHybridSearchRequest.Filters(
+                        null, null, null, null, null, null, null, "ALL"),
+                5, ListingHybridSearchResponse.CONCEPT_RERANK_SCHEMA_VERSION);
+        when(parser.parse(BODY)).thenReturn(parsed(request));
+        when(client.validateReadAlias()).thenReturn(GENERATION);
+        when(client.searchLexical(GENERATION, request)).thenReturn(List.of(id(1)));
+        when(client.searchVector(GENERATION, request)).thenReturn(List.of());
+        when(repository.findCurrentEligibleByIds(List.of(id(1))))
+                .thenReturn(List.of(businessListing(
+                        id(1), businessId, "Harbor Cart Fixture Tote")));
+        when(authServiceClient.searchPublicBusinessStores(
+                null, Set.of(businessId), Set.of()))
+                .thenReturn(List.of(new AuthServiceClient.PublicBusinessStoreSearchResult(
+                        businessId,
+                        "01D00000000000000000000666",
+                        "Harbor Store",
+                        "Harbor Business")));
+
+        ListingHybridSearchResponse response = service(true, false)
+                .search("agent-token", BODY);
+
+        assertThat(response.data()).extracting(ListingHybridSearchResponse.Result::listingId)
+                .containsExactly(id(1));
+        assertThat(response.data().getFirst().transactionNotice()).isNull();
     }
 
     @Test
@@ -370,6 +405,7 @@ class ListingHybridSearchServiceTests {
                 parser,
                 client,
                 repository,
+                authServiceClient,
                 metrics,
                 "agent-token",
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -445,6 +481,18 @@ class ListingHybridSearchServiceTests {
                 base.categorySlug(), base.categoryName(), base.title(), base.condition(),
                 base.priceAmount(), base.currency(), base.publicCity(), base.publicRegion(),
                 base.available(), base.primaryImageUrl(), base.publishedAt(), description);
+    }
+
+    private ListingHybridSearchListing businessListing(
+            String id, String businessId, String title) {
+        ListingHybridSearchListing base = listing(
+                id, title, true, "Irvine", "Orange County");
+        return new ListingHybridSearchListing(
+                base.listingId(), base.listingVersion(), base.categoryId(),
+                base.categorySlug(), base.categoryName(), base.title(), base.condition(),
+                base.priceAmount(), base.currency(), base.publicCity(), base.publicRegion(),
+                base.available(), base.primaryImageUrl(), base.publishedAt(),
+                "Current business listing", "BUSINESS", businessId);
     }
 
     private String id(int suffix) {

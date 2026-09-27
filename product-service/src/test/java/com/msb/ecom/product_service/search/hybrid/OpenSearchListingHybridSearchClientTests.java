@@ -118,6 +118,26 @@ class OpenSearchListingHybridSearchClientTests {
     }
 
     @Test
+    void allMarketplaceScopeKeepsPublicAvailabilityFiltersWithoutSellerTypeTerm() {
+        ListingHybridSearchRequest base = request();
+        ListingHybridSearchRequest request = new ListingHybridSearchRequest(
+                base.query(), base.embedding(),
+                new ListingHybridSearchRequest.Filters(
+                        base.filters().categoryId(), base.filters().condition(),
+                        base.filters().minPrice(), base.filters().maxPrice(),
+                        base.filters().currency(), base.filters().city(),
+                        base.filters().publicRegion(), "ALL"),
+                base.limit(), base.responseSchemaVersion());
+
+        String lexical = client().lexicalBody(request);
+
+        assertThat(lexical)
+                .contains("\"status\":\"ACTIVE\"", "\"visibility\":\"PUBLIC\"",
+                        "\"inventoryAvailable\":true")
+                .doesNotContain("\"sellerType\"");
+    }
+
+    @Test
     void rejectsIncompatibleMappingBeforeAnyBranchSearch() throws Exception {
         start(exchange -> {
             String path = exchange.getRequestURI().getPath();

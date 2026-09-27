@@ -302,6 +302,37 @@ class ProductHybridClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, provenance.final_rank)
         self.assertEqual(("LEXICAL", "VECTOR"), provenance.matched_by)
 
+    async def test_marketplace_v2_requests_both_public_seller_types(self) -> None:
+        requests: list[httpx.Request] = []
+        response = hybrid_response()
+        data = response["data"]
+        assert isinstance(data, list)
+        data[0]["transactionNotice"] = None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json=response)
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as transport:
+            client = HybridMarketplaceDiscoveryClient(
+                product=FakeProductDetail(),
+                product_base_url="http://product-service:8091",
+                product_service_token="internal-test-token",
+                embedding_provider=FakeEmbeddingProvider(),
+                client=transport,
+            )
+            result = await client.search_marketplace(
+                actor_user_id=ACTOR,
+                request=DiscoverySearchRequest(q="Harbor Cart Fixture Tote"),
+                correlation_id="hybrid-marketplace-all",
+            )
+
+        payload = json.loads(requests[0].content)
+        self.assertEqual("ALL", payload["filters"]["sellerType"])
+        self.assertEqual((LISTING,), tuple(item.listing_id for item in result.data))
+
     async def test_accepts_product_zero_listing_version(self) -> None:
         embedding = FakeEmbeddingProvider()
 

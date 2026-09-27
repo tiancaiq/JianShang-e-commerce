@@ -30,6 +30,8 @@ public class ListingHybridSearchRepository {
         List<ListingHybridSearchListing> rows = jdbcTemplate.query("""
                 select l.id,
                        l.version as listing_version,
+                       l.seller_type,
+                       l.business_id,
                        l.category_id,
                        c.slug as category_slug,
                        c.name as category_name,
@@ -55,9 +57,12 @@ public class ListingHybridSearchRepository {
                        ) as primary_image_id
                 from listings l
                 join categories c on c.id = l.category_id
-                where l.seller_type = 'INDIVIDUAL'
-                  and l.status = 'ACTIVE'
-                  and l.moderation_status = 'APPROVED'
+                where (
+                    (l.seller_type = 'INDIVIDUAL' and l.status = 'ACTIVE'
+                        and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.status = 'ACTIVE'
+                        and l.publication_source = 'BUSINESS_SELF_PUBLISHED')
+                  )
                   and l.id in (%s)
                   and not exists (
                     select 1 from enforcement_actions ea
@@ -85,7 +90,9 @@ public class ListingHybridSearchRepository {
                             resultSet.getBoolean("available"),
                             imageId == null ? null : PUBLIC_MEDIA_PATH + imageId,
                             resultSet.getTimestamp("published_at").toInstant(),
-                            resultSet.getString("description"));
+                            resultSet.getString("description"),
+                            resultSet.getString("seller_type"),
+                            resultSet.getString("business_id"));
                 },
                 listingIds.toArray());
         Map<String, ListingHybridSearchListing> byId = new HashMap<>();

@@ -665,20 +665,20 @@ class _PublicListingImage(_StrictModel):
 
 
 class PublicIndividualListing(_StrictModel):
-    """Matches the existing safe Product public listing projection exactly."""
+    """Matches Product's safe public listing projection for either seller type."""
 
     id: ProductListingId
-    seller_type: Literal["INDIVIDUAL"] = Field(alias="sellerType")
+    seller_type: Literal["INDIVIDUAL", "BUSINESS"] = Field(alias="sellerType")
     seller_display_name: str = Field(alias="sellerDisplayName", max_length=180)
     seller_avatar_url: str | None = Field(
         default=None,
         alias="sellerAvatarUrl",
         max_length=1_000,
     )
-    store_id: None = Field(default=None, alias="storeId")
-    store_slug: None = Field(default=None, alias="storeSlug")
-    store_name: None = Field(default=None, alias="storeName")
-    business_verified: Literal[False] = Field(alias="businessVerified")
+    store_id: Ulid | None = Field(default=None, alias="storeId")
+    store_slug: str | None = Field(default=None, alias="storeSlug", max_length=180)
+    store_name: str | None = Field(default=None, alias="storeName", max_length=180)
+    business_verified: bool = Field(alias="businessVerified")
     category_id: Ulid = Field(alias="categoryId")
     category_slug: str = Field(alias="categorySlug", max_length=120)
     category_name: str = Field(alias="categoryName", max_length=180)
@@ -708,9 +708,9 @@ class PublicIndividualListing(_StrictModel):
         max_length=100,
     )
     published_at: datetime = Field(alias="publishedAt")
-    transaction_notice: str = Field(
+    transaction_notice: str | None = Field(
+        default=None,
         alias="transactionNotice",
-        min_length=1,
         max_length=1_000,
     )
     visit_count: int = Field(alias="visitCount", ge=0)
@@ -765,6 +765,15 @@ class DiscoverySearchCandidate(_StrictModel):
     match_quality: Literal["EXACT", "RELATED"] | None = Field(
         default=None, alias="matchQuality"
     )
+
+
+class _AgentMarketplaceSearchCandidate(_StrictModel):
+    listing_id: ProductListingId = Field(alias="listingId")
+    lexical_rank: int = Field(alias="lexicalRank", ge=1, le=40)
+
+
+class _AgentMarketplaceSearchResponse(_StrictModel):
+    data: tuple[_AgentMarketplaceSearchCandidate, ...] = Field(max_length=40)
 
 
 class DiscoveryFacetValue(_StrictModel):
@@ -940,6 +949,97 @@ class ProductMarketplaceDiscoveryClient:
                 for item in page.data
             ),
             page=page.page,
+        )
+
+    async def search_marketplace(
+        self,
+        *,
+        actor_user_id: str,
+        request: DiscoverySearchRequest,
+        correlation_id: str,
+        turn_deadline_monotonic: float | None = None,
+        query_timeout_seconds: float = 8.0,
+        product_timeout_seconds: float | None = None,
+    ) -> DiscoverySearchPage:
+        """Use Product's authenticated cross-seller relevance gate when configured."""
+
+        if self._internal_service_token is not None:
+            _trusted_id(actor_user_id)
+            _safe_correlation(correlation_id)
+            params = request.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+            )
+            params.pop("currency", None)
+            params.pop("sort", None)
+            params.pop("cursor", None)
+            response = await self._get(
+                "/api/v1/internal/agent/marketplace/listings/search",
+                correlation_id,
+                params=params,
+                headers={
+                    "X-Agent-Internal-Service-Token": self._internal_service_token
+                },
+                timeout_seconds=_clipped_http_timeout(
+                    turn_deadline_monotonic,
+                    product_timeout_seconds or self._timeout,
+                ),
+            )
+            response.raise_for_status()
+            result = _AgentMarketplaceSearchResponse.model_validate(response.json())
+            if len(result.data) > request.limit:
+                raise ValueError("Product search exceeded the requested result limit")
+            return DiscoverySearchPage(
+                data=tuple(
+                    DiscoverySearchCandidate(listingId=item.listing_id)
+                    for item in result.data
+                ),
+                page={"nextCursor": None, "hasMore": False},
+            )
+
+        # Retain the public-route fallback for legacy callers without service auth.
+
+        individual = await self.search_individual(
+            actor_user_id=actor_user_id,
+            request=request,
+            correlation_id=correlation_id,
+            turn_deadline_monotonic=turn_deadline_monotonic,
+            query_timeout_seconds=query_timeout_seconds,
+            product_timeout_seconds=product_timeout_seconds,
+        )
+        params = request.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+        )
+        params.pop("currency", None)
+        if params.get("sort") == "RELEVANCE":
+            params["sort"] = "NEWEST"
+        response = await self._get(
+            "/api/v1/public/stores/listings/search",
+            correlation_id,
+            params=params,
+            timeout_seconds=_clipped_http_timeout(
+                turn_deadline_monotonic,
+                product_timeout_seconds or self._timeout,
+            ),
+        )
+        response.raise_for_status()
+        business = PublicIndividualSearchPage.model_validate(response.json())
+        ordered_ids = list(dict.fromkeys(
+            [item.listing_id for item in individual.data]
+            + [item.id for item in business.data]
+        ))[: request.limit]
+        return DiscoverySearchPage(
+            data=tuple(
+                DiscoverySearchCandidate(listingId=listing_id)
+                for listing_id in ordered_ids
+            ),
+            page={
+                "nextCursor": None,
+                "hasMore": individual.page.has_more or business.page.has_more,
+            },
         )
 
     async def get_listing(

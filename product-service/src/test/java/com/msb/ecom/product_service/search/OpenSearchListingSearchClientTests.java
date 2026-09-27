@@ -84,6 +84,28 @@ class OpenSearchListingSearchClientTests {
     }
 
     @Test
+    void allSellerRelevanceSearchOmitsSellerTypeFilter() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        start(exchange -> {
+            requestBody.set(readBody(exchange));
+            writeJson(exchange, 200, """
+                    {"hits":{"hits":[{"_id":"01LISTING0000000000000001"}]}}
+                    """);
+        });
+
+        List<String> ids = client(false).searchRelevantIds(
+                "ALL",
+                new PublicListingSearchCriteria(
+                        "desk", null, null, null, null, null, null, "newest",
+                        List.of(), List.of(), null, null, null),
+                20);
+
+        assertEquals(List.of("01LISTING0000000000000001"), ids);
+        assertFalse(requestBody.get().contains("\"sellerType\""));
+        assertTrue(requestBody.get().contains("\"inventoryAvailable\":true"));
+    }
+
+    @Test
     void mysqlDefaultDoesNotPerformHealthOrIndexRequests() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         start(exchange -> {

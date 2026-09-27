@@ -2530,6 +2530,122 @@ class ProductDiscoveryAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("NEWEST", seen[0].url.params["sort"])
         self.assertNotIn("actor", str(seen[0].url).casefold())
 
+    async def test_public_detail_adapter_accepts_safe_business_listing_shape(self) -> None:
+        from msb_agent_service.marketplace_discovery import (
+            ProductMarketplaceDiscoveryClient,
+        )
+
+        payload = _listing(
+            LISTINGS[0], category=CATEGORY_1, title="Harbor Cart Fixture Tote"
+        ).model_dump(mode="json", by_alias=True)
+        payload.update({
+            "sellerType": "BUSINESS",
+            "storeId": "01D00000000000000000000666",
+            "storeSlug": "harbor-store",
+            "storeName": "Harbor Store",
+            "businessVerified": True,
+            "transactionNotice": None,
+        })
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, json=payload)
+            )
+        ) as client:
+            checked = await ProductMarketplaceDiscoveryClient(
+                "http://product-service:8091", client=client
+            ).get_listing(
+                actor_user_id=ACTOR,
+                listing_id=LISTINGS[0],
+                correlation_id="disc-business-detail",
+            )
+
+        self.assertIsNotNone(checked)
+        assert checked is not None
+        self.assertEqual("BUSINESS", checked.listing.seller_type)
+        self.assertEqual("Harbor Store", checked.listing.store_name)
+
+    async def test_nonhybrid_marketplace_search_merges_visible_business_results(self) -> None:
+        from msb_agent_service.marketplace_discovery import (
+            ProductMarketplaceDiscoveryClient,
+        )
+
+        seen: list[str] = []
+        business = _listing(
+            LISTINGS[0], category=CATEGORY_1, title="Harbor Cart Fixture Tote"
+        ).model_dump(mode="json", by_alias=True)
+        business.update({
+            "sellerType": "BUSINESS",
+            "storeId": "01D00000000000000000000666",
+            "storeSlug": "harbor-store",
+            "storeName": "Harbor Store",
+            "businessVerified": True,
+            "transactionNotice": None,
+        })
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            data = [business] if "/public/stores/" in request.url.path else []
+            return httpx.Response(200, json={
+                "data": data,
+                "page": {"nextCursor": None, "hasMore": False},
+            })
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            page = await ProductMarketplaceDiscoveryClient(
+                "http://product-service:8091", client=client
+            ).search_marketplace(
+                actor_user_id=ACTOR,
+                request=DiscoverySearchRequest(q="Harbor Cart Fixture Tote", limit=5),
+                correlation_id="disc-marketplace-fallback",
+            )
+
+        self.assertEqual((LISTINGS[0],), tuple(item.listing_id for item in page.data))
+        self.assertEqual([
+            "/api/v1/public/marketplace/listings/search",
+            "/api/v1/public/stores/listings/search",
+        ], seen)
+
+    async def test_authenticated_nonhybrid_marketplace_search_uses_product_relevance_gate(self) -> None:
+        from msb_agent_service.marketplace_discovery import (
+            ProductMarketplaceDiscoveryClient,
+        )
+
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={
+                "data": [{"listingId": LISTINGS[0], "lexicalRank": 1}],
+            })
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            page = await ProductMarketplaceDiscoveryClient(
+                "http://product-service:8091",
+                internal_service_token="opaque-test-token",
+                client=client,
+            ).search_marketplace(
+                actor_user_id=ACTOR,
+                request=DiscoverySearchRequest(q="desk", limit=5),
+                correlation_id="disc-product-relevance",
+            )
+
+        self.assertEqual((LISTINGS[0],), tuple(item.listing_id for item in page.data))
+        self.assertEqual(1, len(seen))
+        self.assertEqual(
+            "/api/v1/internal/agent/marketplace/listings/search",
+            seen[0].url.path,
+        )
+        self.assertEqual("opaque-test-token", seen[0].headers[
+            "X-Agent-Internal-Service-Token"
+        ])
+        self.assertEqual("desk", seen[0].url.params["q"])
+        self.assertNotIn("sort", seen[0].url.params)
+
     def test_search_schema_matches_product_sort_and_condition_contract(self) -> None:
         self.assertEqual("RELEVANCE", DiscoverySearchRequest().sort)
         self.assertEqual(
