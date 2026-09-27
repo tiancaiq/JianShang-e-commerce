@@ -72,6 +72,12 @@ public class CheckoutController {
                 CorrelationIdFilter.current(servletRequest));
     }
 
+    @GetMapping("/{checkoutId}/payment-intent")
+    public CheckoutPaymentIntentResponse getPaymentIntent(
+            @PathVariable String checkoutId) {
+        return checkoutPaymentService.get(checkoutId);
+    }
+
     @PostMapping("/{checkoutId}/complete-demo-payment")
     public DemoPaymentCompletionResponse completeDemoPayment(
             @PathVariable String checkoutId,

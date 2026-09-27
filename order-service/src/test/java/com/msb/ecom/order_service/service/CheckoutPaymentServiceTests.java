@@ -6,6 +6,7 @@ import com.msb.ecom.order_service.config.CheckoutPaymentProperties;
 import com.msb.ecom.order_service.config.CheckoutProperties;
 import com.msb.ecom.order_service.model.CheckoutAggregate;
 import com.msb.ecom.order_service.model.CheckoutException;
+import com.msb.ecom.order_service.model.CheckoutPaymentBinding;
 import com.msb.ecom.order_service.model.CheckoutReleaseStatus;
 import com.msb.ecom.order_service.model.CheckoutStatus;
 import com.msb.ecom.order_service.repository.CheckoutRepository;
@@ -50,12 +51,15 @@ class CheckoutPaymentServiceTests {
             mock(CheckoutPaymentBindingRepository.class);
     private final PaymentIntentClient client = mock(PaymentIntentClient.class);
     private final ProductCommerceClient products = mock(ProductCommerceClient.class);
+    private final InventoryReservationClient inventory = mock(InventoryReservationClient.class);
     private CheckoutPaymentService service;
 
     @BeforeEach
     void setUp() {
         service = service(true, true);
         when(buyers.resolveBuyer(SUBJECT)).thenReturn(BUYER_ID);
+        when(inventory.get("01R00000000000000000000001")).thenReturn(
+                reservation("ACTIVE", true, NOW.plusSeconds(900)));
     }
 
     @Test
@@ -88,6 +92,52 @@ class CheckoutPaymentServiceTests {
             assertThat(value.amount()).isEqualByComparingTo("30.0000");
             assertThat(value.expiresAt()).isEqualTo(NOW.plusSeconds(900));
         });
+    }
+
+    @Test
+    void getReconcilesTheExactOwnedPaymentBindingWithoutCreatingAnotherIntent() {
+        CheckoutAggregate checkout = checkout(CheckoutStatus.PENDING_PAYMENT, NOW.plusSeconds(900));
+        CheckoutPaymentBinding binding = new CheckoutPaymentBinding(
+                "01P00000000000000000000001",
+                CHECKOUT_ID,
+                checkout.version(),
+                checkout.cartSnapshotHash(),
+                BUYER_ID,
+                List.of("01B00000000000000000000001", "01B00000000000000000000002"),
+                checkout.total(),
+                checkout.currency(),
+                checkout.expiresAt(),
+                NOW);
+        when(repository.findOwned(CHECKOUT_ID, BUYER_ID)).thenReturn(Optional.of(checkout));
+        when(paymentBindings.findByCheckout(CHECKOUT_ID)).thenReturn(Optional.of(binding));
+        when(client.get(binding.paymentIntentId(), BUYER_ID)).thenReturn(intent(
+                new PaymentIntentClient.Command(
+                        binding.checkoutId(), binding.checkoutVersion(),
+                        binding.checkoutSnapshotHash(), binding.buyerId(),
+                        binding.businessIds(), binding.amount(), binding.currency(),
+                        binding.expiresAt())));
+
+        var response = service.get(CHECKOUT_ID);
+
+        assertThat(response.id()).isEqualTo(binding.paymentIntentId());
+        assertThat(response.checkoutId()).isEqualTo(CHECKOUT_ID);
+        assertThat(response.amount()).isEqualByComparingTo("30.0000");
+        verify(client).get(binding.paymentIntentId(), BUYER_ID);
+        verify(client, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void getDoesNotRevealWhetherAnotherBuyerHasAPaymentBinding() {
+        when(repository.findOwned(CHECKOUT_ID, BUYER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(CHECKOUT_ID))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(404);
+                    assertThat(exception.code()).isEqualTo("CHECKOUT_NOT_FOUND");
+                });
+
+        verify(paymentBindings, never()).findByCheckout(any());
+        verify(client, never()).get(any(), any());
     }
 
     @Test
@@ -179,6 +229,23 @@ class CheckoutPaymentServiceTests {
         }
 
         verify(client, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void staleOrChangedInventoryReservationFailsBeforePaymentCreation() {
+        CheckoutAggregate checkout = checkout(CheckoutStatus.PENDING_PAYMENT, NOW.plusSeconds(900));
+        when(repository.findOwned(CHECKOUT_ID, BUYER_ID)).thenReturn(Optional.of(checkout));
+        when(inventory.get(checkout.reservationId())).thenReturn(
+                reservation("RELEASED", false, checkout.expiresAt()));
+
+        assertThatThrownBy(() -> service.create(CHECKOUT_ID, KEY, "correlation"))
+                .isInstanceOfSatisfying(CheckoutException.class, exception -> {
+                    assertThat(exception.status().value()).isEqualTo(409);
+                    assertThat(exception.code()).isEqualTo("CHECKOUT_NOT_PAYABLE");
+                });
+
+        verify(client, never()).create(any(), any(), any());
+        verify(paymentBindings, never()).insertOrVerify(any());
     }
 
     @Test
@@ -316,6 +383,7 @@ class CheckoutPaymentServiceTests {
                 paymentProperties,
                 client,
                 products,
+                inventory,
                 mock(OrderConfirmationRepository.class),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
@@ -338,6 +406,25 @@ class CheckoutPaymentServiceTests {
                         "FAKE_HOSTED_ACTION",
                         "fake-action-reference"),
                 null);
+    }
+
+    private InventoryReservationClient.Reservation reservation(
+            String status,
+            boolean usable,
+            Instant expiresAt) {
+        return new InventoryReservationClient.Reservation(
+                "01R00000000000000000000001",
+                CHECKOUT_ID,
+                "CHECKOUT",
+                status,
+                usable,
+                expiresAt,
+                1L,
+                List.of(
+                        new InventoryReservationClient.Item(
+                                "01L00000000000000000000001", 1),
+                        new InventoryReservationClient.Item(
+                                "01L00000000000000000000002", 1)));
     }
 
     private CheckoutAggregate checkout(CheckoutStatus status, Instant expiresAt) {

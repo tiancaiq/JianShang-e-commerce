@@ -58,6 +58,51 @@ class MarketplaceAgentV2ContractTest(unittest.TestCase):
                 provider_configured=True,
             )
 
+    def test_v19_is_forward_only_and_allows_only_read_commerce_tool_audits(self) -> None:
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "db" / "migration"
+            / "V19__allow_marketplace_agent_v2_commerce_read_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        for value in ("get_my_cart", "list_my_orders", "get_my_order"):
+            self.assertIn(f"'{value}'", migration)
+        for forbidden in ("add_to_cart", "cancel_order", "refund_order", "DROP TABLE"):
+            self.assertNotIn(forbidden, migration)
+
+    def test_v20_is_forward_only_and_narrowly_allows_cart_mutation_audits(self) -> None:
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "db" / "migration"
+            / "V20__allow_marketplace_agent_v2_cart_mutation_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        for value in (
+            "add_to_my_cart", "update_my_cart_quantity", "remove_from_my_cart",
+        ):
+            self.assertIn(f"'{value}'", migration)
+        for forbidden in (
+            "checkout", "payment", "cancel_order", "refund_order", "admin", "DROP TABLE",
+        ):
+            self.assertNotIn(forbidden.casefold(), migration.casefold())
+
+    def test_v22_is_forward_only_and_narrowly_allows_checkout_audits(self) -> None:
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "db" / "migration"
+            / "V22__allow_marketplace_agent_v2_checkout_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        for value in (
+            "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
+        ):
+            self.assertIn(f"'{value}'", migration)
+        for forbidden in (
+            "collect_payment_credentials", "cancel_order", "refund_order",
+            "admin_action", "DROP TABLE", "TRUNCATE",
+        ):
+            self.assertNotIn(forbidden.casefold(), migration.casefold())
+
 
 if __name__ == "__main__":
     unittest.main()

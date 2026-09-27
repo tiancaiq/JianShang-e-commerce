@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import aiomysql
 
@@ -21,6 +23,19 @@ from msb_agent_service.agent_persistence import (
 from .schemas import (
     MarketplaceAgentV2ActiveWorkflow,
     MarketplaceAgentV2PendingInteraction,
+    CancelOrderConfirmationArguments,
+    SubmitCheckoutConfirmationArguments,
+    SubmitReturnConfirmationArguments,
+)
+from .confirmations import (
+    ConfirmationExecution,
+    ConfirmationFinancialFact,
+    ConfirmationRecord,
+    ConfirmationState,
+    ConfirmationTarget,
+    ConsequentialConfirmationRepository,
+    PrepareConfirmation,
+    expiry_from_ttl,
 )
 from .seller_workflow import (
     SellerReplyResolution,
@@ -58,9 +73,18 @@ class SellerFieldResolution:
 class MarketplaceAgentV2Persistence:
     """Isolates V2 sessions while reusing invocation and message infrastructure."""
 
-    def __init__(self, repository: AgentPersistenceRepository) -> None:
+    def __init__(
+        self,
+        repository: AgentPersistenceRepository,
+        *,
+        confirmation_ttl_seconds: int = 900,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._repository = repository
         self._pool = repository.pool
+        self._confirmations = ConsequentialConfirmationRepository(self._pool)
+        self._confirmation_ttl_seconds = confirmation_ttl_seconds
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     @property
     def conversation(self) -> AgentPersistenceRepository:
@@ -84,6 +108,12 @@ class MarketplaceAgentV2Persistence:
                 await connection.rollback()
         if not ready:
             raise AgentPersistenceError(AgentPersistenceErrorCode.SCHEMA_NOT_MIGRATED)
+        try:
+            await self._confirmations.validate_schema()
+        except Exception as error:
+            raise AgentPersistenceError(
+                AgentPersistenceErrorCode.SCHEMA_NOT_MIGRATED
+            ) from error
 
     async def create_or_resume(
         self,
@@ -168,7 +198,33 @@ class MarketplaceAgentV2Persistence:
                     row = await cursor.fetchone()
             finally:
                 await connection.rollback()
-        return None if row is None else _session(row)
+        if row is None:
+            return None
+        loaded = _session(row)
+        pending = _pending_from_state(loaded.preference_state)
+        now = self._clock()
+        if (
+            pending is None
+            or pending.type != "CONFIRM_ACTION"
+            or pending.status not in {"WAITING", "CONFIRMED"}
+            or pending.expires_at is None
+            or now < pending.expires_at
+        ):
+            return loaded
+        decision = await self._confirmations.expire_if_due(
+            confirmation_id=pending.confirmation_id or pending.id,
+            actor_user_id=actor,
+            session_id=session,
+            correlation_id="marketplace-agent-v2-expiry-read",
+            now=now,
+        )
+        if decision.confirmation is None:
+            return loaded
+        state = dict(loaded.preference_state)
+        state["pendingInteraction"] = _pending_state(
+            _pending_from_confirmation(decision.confirmation, pending)
+        )
+        return replace(loaded, preference_state=state)
 
     async def begin(self, **kwargs: object) -> BeginInvocation:
         return await self._repository.begin_invocation(**kwargs)
@@ -187,6 +243,160 @@ class MarketplaceAgentV2Persistence:
             session_id=session_id, actor_user_id=actor_user_id,
             replacement=interaction, now=now,
         )
+
+    async def prepare_confirmation(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        originating_invocation_id: str,
+        interaction: MarketplaceAgentV2PendingInteraction,
+        correlation_id: str,
+        now: datetime,
+    ) -> MarketplaceAgentV2PendingInteraction:
+        """Durably binds a display interaction to one immutable backend action."""
+
+        if interaction.type != "CONFIRM_ACTION" or interaction.summary is None:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        expires_at = expiry_from_ttl(
+            now=now, ttl_seconds=self._confirmation_ttl_seconds
+        )
+        if interaction.action == "RUN_REFINED_SEARCH":
+            request = PrepareConfirmation(
+                confirmation_id=interaction.confirmation_id or interaction.id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                originating_invocation_id=originating_invocation_id,
+                workflow_id="RUN_REFINED_SEARCH",
+                capability="search_listings",
+                capability_version="marketplace-search-v4",
+                action_name="RUN_REFINED_SEARCH",
+                normalized_arguments=interaction.arguments,
+                human_summary=interaction.summary,
+                risk_level=2,
+                expires_at=expires_at,
+                correlation_id=correlation_id,
+            )
+        elif interaction.action == "SUBMIT_CHECKOUT":
+            try:
+                binding = SubmitCheckoutConfirmationArguments.model_validate(
+                    interaction.arguments
+                )
+            except Exception as error:
+                raise AgentPersistenceError(
+                    AgentPersistenceErrorCode.INVALID_ARGUMENT
+                ) from error
+            request = PrepareConfirmation(
+                confirmation_id=interaction.confirmation_id or interaction.id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                originating_invocation_id=originating_invocation_id,
+                workflow_id="CUSTOMER_CHECKOUT",
+                capability="submit_my_checkout",
+                capability_version="customer-checkout-v1",
+                action_name="SUBMIT_CHECKOUT",
+                normalized_arguments=binding.model_dump(mode="json", by_alias=True),
+                human_summary=interaction.summary,
+                risk_level=3,
+                expires_at=expires_at,
+                targets=(
+                    ConfirmationTarget(
+                        resource_type="CHECKOUT",
+                        resource_id=binding.checkout_id,
+                        version_token=str(binding.cart_version),
+                        snapshot_fingerprint=binding.checkout_fingerprint,
+                    ),
+                    ConfirmationTarget(
+                        resource_type="CART",
+                        resource_id="CURRENT",
+                        version_token=str(binding.cart_version),
+                        snapshot_fingerprint=binding.cart_fingerprint,
+                    ),
+                ),
+                financial_facts=(ConfirmationFinancialFact(
+                    name="TOTAL",
+                    amount=Decimal(binding.total),
+                    currency=binding.currency,
+                ),),
+                correlation_id=correlation_id,
+            )
+        elif interaction.action == "CANCEL_ORDER":
+            try:
+                binding = CancelOrderConfirmationArguments.model_validate(
+                    interaction.arguments
+                )
+            except Exception as error:
+                raise AgentPersistenceError(
+                    AgentPersistenceErrorCode.INVALID_ARGUMENT
+                ) from error
+            request = PrepareConfirmation(
+                confirmation_id=interaction.confirmation_id or interaction.id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                originating_invocation_id=originating_invocation_id,
+                workflow_id="CUSTOMER_ORDER_CANCELLATION",
+                capability="cancel_my_order",
+                capability_version="customer-order-cancellation-v1",
+                action_name="CANCEL_ORDER",
+                normalized_arguments=binding.model_dump(
+                    mode="json", by_alias=True
+                ),
+                human_summary=interaction.summary,
+                risk_level=3,
+                expires_at=expires_at,
+                targets=(ConfirmationTarget(
+                    resource_type="ORDER",
+                    resource_id=binding.order_id,
+                    version_token=str(binding.order_version),
+                    snapshot_fingerprint=binding.order_fingerprint,
+                ),),
+                financial_facts=(ConfirmationFinancialFact(
+                    name="ORDER_TOTAL",
+                    amount=Decimal(binding.total),
+                    currency=binding.currency,
+                ),),
+                correlation_id=correlation_id,
+            )
+        elif interaction.action == "SUBMIT_RETURN_REQUEST":
+            try:
+                binding = SubmitReturnConfirmationArguments.model_validate(
+                    interaction.arguments
+                )
+            except Exception as error:
+                raise AgentPersistenceError(
+                    AgentPersistenceErrorCode.INVALID_ARGUMENT
+                ) from error
+            request = PrepareConfirmation(
+                confirmation_id=interaction.confirmation_id or interaction.id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                originating_invocation_id=originating_invocation_id,
+                workflow_id="CUSTOMER_RETURN_REQUEST",
+                capability="submit_my_return_request",
+                capability_version="customer-return-request-v1",
+                action_name="SUBMIT_RETURN_REQUEST",
+                normalized_arguments=binding.model_dump(
+                    mode="json", by_alias=True
+                ),
+                human_summary=interaction.summary,
+                risk_level=3,
+                expires_at=expires_at,
+                targets=(ConfirmationTarget(
+                    resource_type="BUSINESS_ORDER_GROUP",
+                    resource_id=binding.business_order_id,
+                    version_token=str(binding.group_version),
+                    snapshot_fingerprint=binding.group_fingerprint,
+                ),),
+                correlation_id=correlation_id,
+            )
+        else:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        record = await self._confirmations.prepare(
+            request,
+            pending_interaction=_pending_state(interaction),
+            now=now,
+        )
+        return _pending_from_confirmation(record, interaction)
 
     async def set_workflow_state(
         self,
@@ -401,8 +611,85 @@ class MarketplaceAgentV2Persistence:
         actor_user_id: str,
         accepted: bool,
         now: datetime,
+        invocation_id: str | None = None,
+        correlation_id: str = "marketplace-agent-v2-confirmation",
+        policy_allowed: bool = True,
+        authorization_allowed: bool = True,
+        current_resource_versions: dict[str, str] | None = None,
+        current_resource_snapshots: dict[str, str] | None = None,
     ) -> MarketplaceAgentV2PendingInteraction | None:
         """Atomically consumes or cancels a WAITING interaction exactly once."""
+
+        current = await self.get(
+            session_id=session_id, actor_user_id=actor_user_id
+        )
+        pending = None if current is None else _pending_from_state(
+            current.preference_state
+        )
+        if pending is None or pending.status not in {"WAITING", "CONFIRMED"}:
+            return None
+        if pending.type == "CONFIRM_ACTION":
+            if invocation_id is None:
+                raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+            confirmation_id = pending.confirmation_id or pending.id
+            if not accepted:
+                decision = await self._confirmations.cancel(
+                    confirmation_id=confirmation_id,
+                    actor_user_id=actor_user_id,
+                    session_id=session_id,
+                    invocation_id=invocation_id,
+                    correlation_id=correlation_id,
+                    now=now,
+                )
+                if decision.confirmation is None:
+                    return await self._invalidate_legacy_confirmation(
+                        session_id=session_id,
+                        actor_user_id=actor_user_id,
+                        pending=pending,
+                        now=now,
+                    )
+                return _pending_from_confirmation(decision.confirmation, pending)
+            confirmed = await self._confirmations.confirm(
+                confirmation_id=confirmation_id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                confirming_invocation_id=invocation_id,
+                correlation_id=correlation_id,
+                now=now,
+            )
+            if confirmed.confirmation is None:
+                return await self._invalidate_legacy_confirmation(
+                    session_id=session_id,
+                    actor_user_id=actor_user_id,
+                    pending=pending,
+                    now=now,
+                )
+            if not confirmed.allowed:
+                return _pending_from_confirmation(confirmed.confirmation, pending)
+            record = confirmed.confirmation
+            consumed = await self._confirmations.consume(
+                ConfirmationExecution(
+                    confirmation_id=record.confirmation_id,
+                    actor_user_id=actor_user_id,
+                    session_id=session_id,
+                    consuming_invocation_id=invocation_id,
+                    capability=record.capability,
+                    capability_version=record.capability_version,
+                    action_name=record.action_name,
+                    normalized_arguments=record.normalized_arguments,
+                    targets=record.targets,
+                    financial_facts=record.financial_facts,
+                    policy_allowed=policy_allowed,
+                    authorization_allowed=authorization_allowed,
+                    current_resource_versions=current_resource_versions,
+                    current_resource_snapshots=current_resource_snapshots,
+                    correlation_id=correlation_id,
+                ),
+                now=now,
+            )
+            if consumed.confirmation is None:
+                return None
+            return _pending_from_confirmation(consumed.confirmation, pending)
 
         session = _id(session_id)
         actor = _id(actor_user_id)
@@ -455,12 +742,82 @@ class MarketplaceAgentV2Persistence:
                 raise
 
     async def cancel_pending_interaction(
-        self, *, session_id: str, actor_user_id: str, now: datetime
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        now: datetime,
+        invocation_id: str | None = None,
+        correlation_id: str = "marketplace-agent-v2-confirmation-cancel",
     ) -> MarketplaceAgentV2PendingInteraction | None:
         return await self.consume_pending_interaction(
             session_id=session_id, actor_user_id=actor_user_id,
-            accepted=False, now=now,
+            accepted=False, now=now, invocation_id=invocation_id,
+            correlation_id=correlation_id,
         )
+
+    async def invalidate_pending_interaction(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        now: datetime,
+        invocation_id: str | None,
+        correlation_id: str,
+        reason: str,
+    ) -> MarketplaceAgentV2PendingInteraction | None:
+        current = await self.get(
+            session_id=session_id, actor_user_id=actor_user_id
+        )
+        pending = None if current is None else _pending_from_state(
+            current.preference_state
+        )
+        if pending is None or pending.status not in {"WAITING", "CONFIRMED"}:
+            return None
+        if pending.type != "CONFIRM_ACTION":
+            return await self.cancel_pending_interaction(
+                session_id=session_id,
+                actor_user_id=actor_user_id,
+                now=now,
+                invocation_id=invocation_id,
+                correlation_id=correlation_id,
+            )
+        decision = await self._confirmations.invalidate(
+            confirmation_id=pending.confirmation_id or pending.id,
+            actor_user_id=actor_user_id,
+            session_id=session_id,
+            invocation_id=invocation_id,
+            correlation_id=correlation_id,
+            reason=reason,
+            now=now,
+        )
+        if decision.confirmation is None:
+            return await self._invalidate_legacy_confirmation(
+                session_id=session_id,
+                actor_user_id=actor_user_id,
+                pending=pending,
+                now=now,
+            )
+        return _pending_from_confirmation(decision.confirmation, pending)
+
+    async def _invalidate_legacy_confirmation(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        pending: MarketplaceAgentV2PendingInteraction,
+        now: datetime,
+    ) -> MarketplaceAgentV2PendingInteraction:
+        """Fail closed for a pre-V21 WAITING row lacking durable action binding."""
+
+        updated = pending.model_copy(update={"status": "INVALIDATED"})
+        await self._write_pending_interaction(
+            session_id=session_id,
+            actor_user_id=actor_user_id,
+            replacement=updated,
+            now=now,
+        )
+        return updated
 
     async def _write_pending_interaction(
         self,
@@ -491,12 +848,11 @@ class MarketplaceAgentV2Persistence:
                         raise AgentPersistenceError(AgentPersistenceErrorCode.SESSION_NOT_FOUND)
                     state = _json_object(row["preference_state_json"])
                     current = state.get("pendingInteraction")
-                    if isinstance(current, dict) and current.get("id") == replacement.id:
+                    replacement_state = _pending_state(replacement)
+                    if current == replacement_state:
                         await connection.commit()
-                        return MarketplaceAgentV2PendingInteraction.model_validate_json(
-                            json.dumps(current)
-                        )
-                    state["pendingInteraction"] = _pending_state(replacement)
+                        return replacement
+                    state["pendingInteraction"] = replacement_state
                     await cursor.execute(
                         """
                         UPDATE agent_sessions
@@ -578,6 +934,29 @@ def _pending_state(
     if pending.accepts_replacement:
         payload["acceptsReplacement"] = True
     return payload
+
+
+def _pending_from_confirmation(
+    record: ConfirmationRecord,
+    template: MarketplaceAgentV2PendingInteraction,
+) -> MarketplaceAgentV2PendingInteraction:
+    status = {
+        ConfirmationState.PENDING: "WAITING",
+        ConfirmationState.CONFIRMED: "CONFIRMED",
+        ConfirmationState.CONSUMED: "CONSUMED",
+        ConfirmationState.CANCELLED: "CANCELLED",
+        ConfirmationState.EXPIRED: "EXPIRED",
+        ConfirmationState.INVALIDATED: "INVALIDATED",
+    }[record.state]
+    return template.model_copy(update={
+        "id": record.confirmation_id,
+        "confirmation_id": record.confirmation_id,
+        "arguments": record.normalized_arguments,
+        "summary": record.human_summary,
+        "status": status,
+        "created_at": record.created_at,
+        "expires_at": record.expires_at,
+    })
 
 
 def _workflow_from_state(

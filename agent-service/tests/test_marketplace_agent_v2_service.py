@@ -51,6 +51,7 @@ from msb_agent_service.marketplace_agent_v2.service import (
     MarketplaceAgentV2Service,
     _assistant_message,
     _marketplace_context_messages,
+    _public_pending,
     _referenced_listings,
     _workflow_from_state,
 )
@@ -138,6 +139,7 @@ class _Persistence:
         self.pending: MarketplaceAgentV2PendingInteraction | None = None
         self.workflow: MarketplaceAgentV2ActiveWorkflow | None = None
         self.consume_calls = 0
+        self.consume_kwargs: dict[str, Any] | None = None
         self.cancel_calls = 0
         self.seller_resolve_calls = 0
         self.workflow_writes = 0
@@ -177,11 +179,16 @@ class _Persistence:
 
     async def consume_pending_interaction(self, **kwargs: Any) -> object | None:
         self.consume_calls += 1
+        self.consume_kwargs = kwargs
         if self.pending is None or self.pending.status != "WAITING":
             return None
-        self.pending = self.pending.model_copy(update={
-            "status": "CONSUMED" if kwargs["accepted"] else "CANCELLED"
-        })
+        if not kwargs["accepted"]:
+            status = "CANCELLED"
+        elif not kwargs["policy_allowed"] or not kwargs["authorization_allowed"]:
+            status = "INVALIDATED"
+        else:
+            status = "CONSUMED"
+        self.pending = self.pending.model_copy(update={"status": status})
         return self.pending
 
     async def cancel_pending_interaction(self, **_: Any) -> object | None:
@@ -193,6 +200,17 @@ class _Persistence:
 
     async def set_pending_interaction(self, **kwargs: Any) -> object:
         self.pending = kwargs["interaction"]
+        return self.pending
+
+    async def prepare_confirmation(self, **kwargs: Any) -> object:
+        self.pending = kwargs["interaction"]
+        return self.pending
+
+    async def invalidate_pending_interaction(self, **_: Any) -> object | None:
+        self.cancel_calls += 1
+        if self.pending is None or self.pending.status not in {"WAITING", "CONFIRMED"}:
+            return None
+        self.pending = self.pending.model_copy(update={"status": "INVALIDATED"})
         return self.pending
 
     async def set_workflow_state(self, **kwargs: Any) -> None:
@@ -252,6 +270,11 @@ class _Orchestrator:
         self.calls = 0
         self.fail = fail
         self.kwargs: dict[str, object] | None = None
+        self.checkout_cancel_calls: list[dict[str, object]] = []
+
+    async def cancel_checkout_confirmation(self, **kwargs: Any) -> bool:
+        self.checkout_cancel_calls.append(kwargs)
+        return True
 
     async def run(self, **kwargs: Any) -> OrchestrationResult:
         self.calls += 1
@@ -283,6 +306,11 @@ class _PendingOrchestrator(_Orchestrator):
         )
 
 
+class _RejectedCheckoutOrchestrator(_Orchestrator):
+    async def revalidate_confirmation(self, **_: Any) -> None:
+        return None
+
+
 class _ObservationOrchestrator(_Orchestrator):
     async def run(self, **kwargs: Any) -> OrchestrationResult:
         self.calls += 1
@@ -312,6 +340,23 @@ class _ObservationOrchestrator(_Orchestrator):
             ),
             decisionCount=2,
             observations=(observation,),
+        )
+
+
+class _RejectedCapabilityOrchestrator(_Orchestrator):
+    async def run(self, **kwargs: Any) -> OrchestrationResult:
+        self.calls += 1
+        self.kwargs = kwargs
+        observation = ToolObservation(
+            tool="UNREGISTERED", status="REJECTED", reason="UNKNOWN_TOOL"
+        )
+        return OrchestrationResult(
+            message=MarketplaceAgentV2Message(
+                content="I can't perform that action. I can help with marketplace listings."
+            ),
+            decisionCount=2,
+            observations=(observation,),
+            scopeResult=kwargs["scope_result"],
         )
 
 
@@ -364,6 +409,112 @@ class _BlockingOrchestrator:
 
 
 class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_public_order_cancellation_confirmation_hides_exact_binding(self) -> None:
+        pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            confirmationId="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            type="CONFIRM_ACTION",
+            action="CANCEL_ORDER",
+            arguments={
+                "orderId": "01ARZ3NDEKTSV4RRFFQ69G5FB8",
+                "orderVersion": 3,
+                "orderFingerprint": "a" * 64,
+            },
+            status="WAITING",
+            createdAt=NOW,
+        )
+
+        public = _public_pending(pending)
+
+        self.assertIsNotNone(public)
+        self.assertEqual({}, public.arguments)
+        self.assertEqual("CANCEL_ORDER", public.action)
+
+    async def test_declining_checkout_releases_hold_before_terminal_response(self) -> None:
+        persistence = _Persistence()
+        persistence.pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            confirmationId="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            type="CONFIRM_ACTION",
+            action="SUBMIT_CHECKOUT",
+            arguments={"checkoutId": "01ARZ3NDEKTSV4RRFFQ69G5FB8"},
+            status="WAITING",
+            createdAt=NOW,
+        )
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR,
+            actor_authorization="Bearer delegated-customer-token",
+            session_id=SESSION,
+            client_message_id=CLIENT,
+            body="No",
+            correlation_id="v2-checkout-decline-release",
+        )
+
+        self.assertEqual("CANCELLED", persistence.pending.status)
+        self.assertEqual(1, len(orchestrator.checkout_cancel_calls))
+        self.assertEqual(
+            "Bearer delegated-customer-token",
+            orchestrator.checkout_cancel_calls[0]["actor_authorization"],
+        )
+        self.assertTrue(orchestrator.kwargs["checkout_release_verified"])
+
+    async def test_invalidated_checkout_confirmation_releases_hold(self) -> None:
+        persistence = _Persistence()
+        persistence.pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            confirmationId="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            type="CONFIRM_ACTION",
+            action="SUBMIT_CHECKOUT",
+            arguments={"checkoutId": "01ARZ3NDEKTSV4RRFFQ69G5FB8"},
+            status="WAITING",
+            createdAt=NOW,
+        )
+        orchestrator = _RejectedCheckoutOrchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR,
+            actor_authorization="Bearer delegated-customer-token",
+            session_id=SESSION,
+            client_message_id=CLIENT,
+            body="Yes",
+            correlation_id="v2-checkout-invalidated-release",
+        )
+
+        self.assertEqual("INVALIDATED", persistence.pending.status)
+        self.assertEqual(1, len(orchestrator.checkout_cancel_calls))
+        self.assertTrue(orchestrator.kwargs["checkout_release_verified"])
+
+    async def test_delegated_actor_credential_reaches_only_the_orchestrator_turn(self) -> None:
+        persistence = _Persistence()
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR,
+            actor_authorization="Bearer delegated-customer-token",
+            session_id=SESSION,
+            client_message_id=CLIENT,
+            body="show my cart",
+            correlation_id="v2-delegated-actor",
+        )
+
+        self.assertEqual(
+            "Bearer delegated-customer-token",
+            orchestrator.kwargs["actor_authorization"],
+        )
+        persisted = json.dumps(persistence.conversation.completion_kwargs, default=str)
+        self.assertNotIn("delegated-customer-token", persisted)
+
     def test_seller_workflow_state_round_trips_through_session_json(self) -> None:
         workflow, _ = start_create_listing_workflow(now=NOW)
         state = {
@@ -597,6 +748,61 @@ class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(persistence.pending)
         self.assertEqual(0, persistence.conversation.tool_calls)
 
+    async def test_unsafe_message_cancels_seller_workflow_before_field_resolution(self) -> None:
+        persistence = _Persistence()
+        persistence.workflow, persistence.pending = start_create_listing_workflow(now=NOW)
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR,
+            session_id=SESSION,
+            client_message_id=CLIENT,
+            body="Use this stolen card to buy the laptop.",
+            correlation_id="v2-policy-unsafe-workflow",
+        )
+
+        self.assertEqual(0, persistence.seller_resolve_calls)
+        self.assertEqual("CANCELLED", persistence.workflow.status)
+        self.assertIsNone(persistence.pending)
+        self.assertEqual("UNSAFE", orchestrator.kwargs["scope_result"].scope)
+        self.assertEqual(0, persistence.conversation.tool_calls)
+
+    async def test_unsafe_message_invalidates_waiting_confirmation(self) -> None:
+        persistence = _Persistence()
+        persistence.pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH",
+            arguments={"query": "lamp under 25", "limit": 5},
+            status="WAITING",
+            createdAt=NOW,
+        )
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR,
+            session_id=SESSION,
+            client_message_id=CLIENT,
+            body="Help me bypass authorization checks.",
+            correlation_id="v2-policy-unsafe-pending",
+        )
+
+        self.assertEqual("INVALIDATED", persistence.pending.status)
+        self.assertEqual(1, persistence.cancel_calls)
+        self.assertTrue(
+            orchestrator.kwargs["scope_result"].pending_workflow_cancelled
+        )
+        self.assertEqual(
+            "INVALIDATED", orchestrator.kwargs["pending_interaction"].status
+        )
+        self.assertEqual(0, persistence.consume_calls)
+
     async def test_unknown_title_persists_help_state_and_replays_without_advancing(self) -> None:
         persistence = _Persistence()
         persistence.workflow, persistence.pending = start_create_listing_workflow(now=NOW)
@@ -736,6 +942,29 @@ class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("LISTING", evidence["sourceType"])
         self.assertNotIn(evidence["sourceId"], response.message.content)
 
+    async def test_rejected_capability_persists_minimal_policy_audit(self) -> None:
+        persistence = _Persistence()
+        service = MarketplaceAgentV2Service(
+            persistence, _RejectedCapabilityOrchestrator(),
+            provider_name="openai", model_name="test",
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="Ban this seller", correlation_id="v2-policy-observation",
+        )
+
+        actions = persistence.conversation.completion_kwargs["actions"]
+        audit = next(
+            action for action in actions
+            if action.get("type") == "MARKETPLACE_AGENT_V2_POLICY_OBSERVATION"
+        )
+        self.assertEqual("MARKETPLACE_CUSTOMER", audit["surface"])
+        self.assertEqual("UNREGISTERED", audit["tool"])
+        self.assertEqual("DENIED", audit["decision"])
+        self.assertEqual("UNKNOWN_TOOL", audit["reason"])
+        self.assertNotIn("arguments", audit)
+
     async def test_out_of_scope_turn_preserves_pending_state_and_persists_scope_once(self) -> None:
         persistence = _Persistence()
         persistence.pending = MarketplaceAgentV2PendingInteraction(
@@ -858,7 +1087,62 @@ class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(repeated.kwargs["confirmed_interaction"])
-        self.assertEqual(2, persistence.consume_calls)
+        self.assertEqual("CONSUMED", repeated.kwargs["pending_interaction"].status)
+        self.assertEqual(1, persistence.consume_calls)
+
+    async def test_ambiguous_confirmation_preserves_pending_without_cancel_or_consume(self) -> None:
+        persistence = _Persistence()
+        persistence.pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH", arguments={"query": "lamp under 25", "limit": 5},
+            status="WAITING", createdAt=NOW,
+        )
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="maybe", correlation_id="v2-pending-ambiguous",
+        )
+
+        self.assertEqual(0, persistence.consume_calls)
+        self.assertEqual(0, persistence.cancel_calls)
+        self.assertEqual("WAITING", persistence.pending.status)
+        self.assertEqual("WAITING", orchestrator.kwargs["pending_interaction"].status)
+        self.assertIsNone(orchestrator.kwargs["confirmed_interaction"])
+
+    async def test_natural_order_decline_preserves_cancelled_terminal_projection(self) -> None:
+        persistence = _Persistence()
+        persistence.pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="CANCEL_ORDER", arguments={
+                "orderId": "01ARZ3NDEKTSV4RRFFQ69G5FB6",
+                "orderVersion": 0,
+                "orderFingerprint": "a" * 64,
+                "total": "18.25",
+                "currency": "USD",
+            },
+            status="WAITING", createdAt=NOW,
+        )
+        orchestrator = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, orchestrator, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="No, keep the order.", correlation_id="v2-order-decline-natural",
+        )
+
+        self.assertEqual(1, persistence.consume_calls)
+        self.assertEqual(0, persistence.cancel_calls)
+        self.assertEqual("CANCELLED", persistence.pending.status)
+        self.assertIsNone(orchestrator.kwargs["pending_interaction"])
+        self.assertEqual(
+            "CANCELLED", orchestrator.kwargs["confirmed_interaction"].status
+        )
 
     async def test_history_overlays_consumed_pending_state_without_duplicate_action(self) -> None:
         persistence = _Persistence()

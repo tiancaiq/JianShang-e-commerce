@@ -128,6 +128,22 @@ class CheckoutControllerTests {
                 any());
     }
 
+    @Test
+    void getPaymentIntentUsesOwnedServiceProjectionAndReturnsNoInternalBinding() throws Exception {
+        when(checkoutPaymentService.get(CHECKOUT_ID)).thenReturn(paymentResponse());
+
+        mockMvc.perform(get("/api/v1/checkouts/{id}/payment-intent", CHECKOUT_ID)
+                        .with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("01P00000000000000000000001"))
+                .andExpect(jsonPath("$.checkoutId").value(CHECKOUT_ID))
+                .andExpect(jsonPath("$.buyerId").doesNotExist())
+                .andExpect(jsonPath("$.businessIds").doesNotExist())
+                .andExpect(jsonPath("$.providerReference").doesNotExist());
+
+        verify(checkoutPaymentService).get(CHECKOUT_ID);
+    }
+
     private CheckoutResponse response(String status) {
         Instant now = Instant.parse("2026-07-19T12:00:00Z");
         BigDecimal zero = new BigDecimal("0.0000");

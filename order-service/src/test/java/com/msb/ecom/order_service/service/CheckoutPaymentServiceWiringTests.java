@@ -41,6 +41,9 @@ class CheckoutPaymentServiceWiringTests {
     ProductCommerceClient productCommerceClient;
 
     @MockitoBean
+    InventoryReservationClient inventoryReservationClient;
+
+    @MockitoBean
     OrderConfirmationRepository orderConfirmationRepository;
 
     @Autowired

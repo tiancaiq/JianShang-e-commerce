@@ -208,7 +208,42 @@ class _MixedCategoryProduct(_Product):
         )
 
 
+class _MarketplaceScopeProduct(_FacetedProduct):
+    async def search_individual(self, **_: Any) -> DiscoverySearchPage:
+        raise AssertionError("Marketplace Agent V2 used the legacy individual scope")
+
+    async def search_marketplace(self, **_: Any) -> DiscoverySearchPage:
+        return DiscoverySearchPage(
+            data=(DiscoverySearchCandidate(listingId=LISTING, matchQuality="EXACT"),),
+            page={"hasMore": False},
+            summary=DiscoverySearchSummary(
+                normalizedCategory="harbor cart fixture tote",
+                totalMatches=1,
+                relevantMatchCount=1,
+                exactMatchCount=1,
+                relatedMatchCount=0,
+                retrievalConfidence="HIGH",
+                reason="RESULTS_AVAILABLE",
+                facets=DiscoverySearchFacets(),
+            ),
+        )
+
+
 class MarketplaceAgentV2ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_search_uses_all_marketplace_seller_types_when_adapter_supports_it(self) -> None:
+        product = _MarketplaceScopeProduct(total=1, subtypes=())
+
+        result = await MarketplaceAgentV2ToolRegistry(product).execute(
+            tool="search_listings",
+            arguments=SearchListingsArguments(query="Harbor Cart Fixture Tote"),
+            actor_user_id=ACTOR,
+            correlation_id="v2-marketplace-scope",
+            activity=None,
+        )
+
+        self.assertEqual("RESULTS_AVAILABLE", result.reason)
+        self.assertEqual((LISTING,), tuple(item.listing_id for item in result.attachments))
+
     async def test_category_refinement_keeps_product_query_and_filters_revalidated_facts(self) -> None:
         product = _MixedCategoryProduct()
 
@@ -402,8 +437,29 @@ class MarketplaceAgentV2ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(parameters["additionalProperties"])
             self.assertEqual(list(parameters["properties"]), parameters["required"])
         search = next(item for item in schemas if item["name"] == "search_listings")
-        self.assertEqual(5, search["parameters"]["properties"]["limit"]["default"])
-        self.assertEqual(8, search["parameters"]["properties"]["limit"]["maximum"])
+        properties = search["parameters"]["properties"]
+        self.assertEqual("integer", properties["limit"]["type"])
+        self.assertEqual(
+            "Return 5 listings by default; choose an integer from 1 through 8.",
+            properties["limit"]["description"],
+        )
+        self.assertEqual({"type": ["string", "null"]}, properties["categoryId"])
+        self.assertEqual({"type": ["number", "null"]}, properties["maximumPrice"])
+        def schema_keys(value: object) -> set[str]:
+            if isinstance(value, dict):
+                return set(value) | set().union(
+                    *(schema_keys(item) for item in value.values())
+                )
+            if isinstance(value, list):
+                return set().union(*(schema_keys(item) for item in value))
+            return set()
+
+        keys = schema_keys(search["parameters"])
+        for generator_only_keyword in (
+            "title", "default", "minimum", "maximum", "minLength",
+            "maxLength", "pattern",
+        ):
+            self.assertNotIn(generator_only_keyword, keys)
 
     async def test_confirmation_control_creates_pending_state_without_product_work(self) -> None:
         product = _Product(inventory=10)
@@ -424,6 +480,59 @@ class MarketplaceAgentV2ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("WAITING", result.pending_interaction.status)
         self.assertEqual(0, product.searches)
         self.assertEqual(0, product.probes)
+
+    async def test_confirmation_canonicalizes_price_filter_out_of_search_query(self) -> None:
+        product = _Product(inventory=10)
+        registry = MarketplaceAgentV2ToolRegistry(product)
+
+        result = await registry.execute(
+            tool="request_confirmation",
+            arguments=RequestConfirmationArguments(
+                query="Harbor business under 20",
+                maximumPrice=Decimal("20"),
+                currency="USD",
+                limit=5,
+            ),
+            actor_user_id=ACTOR,
+            correlation_id="v2-confirmation-canonical-price-query",
+            activity=None,
+        )
+
+        self.assertEqual(
+            "Harbor business",
+            result.pending_interaction.arguments["query"],
+        )
+        self.assertEqual(
+            "Run the prepared marketplace search for “Harbor business”, at or "
+            "below 20 USD.",
+            result.pending_interaction.summary,
+        )
+        self.assertEqual(0, product.searches)
+
+        self.assertEqual(
+            "Under Armour bag",
+            SearchListingsArguments(
+                query="Under Armour bag",
+                maximumPrice=Decimal("20"),
+                currency="USD",
+            ).query,
+        )
+        self.assertEqual(
+            "lamp under 30",
+            SearchListingsArguments(
+                query="lamp under 30",
+                maximumPrice=Decimal("20"),
+                currency="USD",
+            ).query,
+        )
+        self.assertEqual(
+            "chair",
+            SearchListingsArguments(
+                query="chair at most $20 USD",
+                maximumPrice=Decimal("20"),
+                currency="USD",
+            ).query,
+        )
 
     async def test_small_low_confidence_search_presents_results_without_clarification(self) -> None:
         product = _FacetedProduct(total=60, subtypes=(("General", 3), ("Home & Garden", 2)))

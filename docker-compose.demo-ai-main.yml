@@ -4,6 +4,9 @@ services:
   agent-service:
     image: msb-ecom-agent-service:main-ai
     environment:
+      AGENT_KNOWLEDGE_ENABLED: "true"
+      AGENT_KNOWLEDGE_INGESTION_ENABLED: "false"
+      AGENT_KNOWLEDGE_PROCESSOR_ENABLED: "false"
       AGENT_PERSISTENCE_ENABLED: "true"
       AGENT_CUSTOMER_SERVICE_API_ENABLED: "true"
       AGENT_CUSTOMER_SERVICE_KILL_SWITCH_ENABLED: "false"
@@ -20,8 +23,24 @@ services:
       AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED: "false"
       AGENT_MARKETPLACE_V2_PROVIDER_ENABLED: "true"
       AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED: "true"
+      AGENT_MARKETPLACE_V2_COMMERCE_READS_ENABLED: "true"
+      AGENT_MARKETPLACE_V2_CART_MUTATIONS_ENABLED: "true"
+      # AI-CHK-01 remains an explicit rollout after controlled acceptance.
+      AGENT_MARKETPLACE_V2_CHECKOUT_ENABLED: "false"
+      # AI-ORD-01 is default-off; a disposable acceptance run may opt in per command.
+      AGENT_MARKETPLACE_V2_ORDER_MUTATIONS_ENABLED: ${AGENT_MARKETPLACE_V2_ORDER_MUTATIONS_ENABLED:-false}
+      # AI-RET-01 is independently default-off until its controlled acceptance run.
+      AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED: ${AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED:-false}
+      AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS: "4096"
       AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED: "false"
       AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED: "false"
+      ORDER_SERVICE_URL: "http://order-service:8081"
+
+  product-service:
+    environment:
+      # Honor the selected environment file; isolated AI runs may still omit it
+      # and use the metadata-only local fallback.
+      LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}
 
   api-gateway:
     image: msb-ecom-api-gateway:main-ai
@@ -34,5 +53,5 @@ services:
     image: msb-ecom-frontend:main-ai
     build:
       args:
-        FRONTEND_BUILD_CONFIGURATION: demo-agent-v2
+        FRONTEND_BUILD_CONFIGURATION: demo-cart-ai-discovery
         GATEWAY_FEATURE_AGENT_DISCOVERY: "true"

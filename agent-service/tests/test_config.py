@@ -15,6 +15,93 @@ from msb_agent_service.config import (
 
 
 class SettingsTest(unittest.TestCase):
+    def test_marketplace_agent_v2_commerce_reads_are_default_off_and_fail_closed(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+        self.assertFalse(settings.marketplace_agent_v2.commerce_reads_enabled)
+        self.assertFalse(settings.marketplace_agent_v2.cart_mutations_enabled)
+        self.assertFalse(settings.marketplace_agent_v2.checkout_enabled)
+        self.assertFalse(settings.marketplace_agent_v2.order_mutations_enabled)
+        self.assertFalse(settings.marketplace_agent_v2.return_requests_enabled)
+        self.assertIsNone(settings.marketplace_agent_v2.order_service_url)
+
+        with self.assertRaisesRegex(ValueError, "API_ENABLED"):
+            MarketplaceAgentV2Settings(commerce_reads_enabled=True).validate(
+                persistence_enabled=True, provider_configured=False
+            )
+        with self.assertRaisesRegex(ValueError, "ORDER_SERVICE_URL"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                commerce_reads_enabled=True,
+                auth_service_url="http://auth-service:8085",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            commerce_reads_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "return requests require commerce reads"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                return_requests_enabled=True,
+                auth_service_url="http://auth-service:8085",
+                order_service_url="http://order-service:8087",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            commerce_reads_enabled=True,
+            return_requests_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "order mutations require commerce reads"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                order_mutations_enabled=True,
+                auth_service_url="http://auth-service:8085",
+                order_service_url="http://order-service:8087",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            commerce_reads_enabled=True,
+            order_mutations_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "checkout requires commerce reads"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                checkout_enabled=True,
+                auth_service_url="http://auth-service:8085",
+                order_service_url="http://order-service:8087",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            commerce_reads_enabled=True,
+            checkout_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "require commerce reads"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                cart_mutations_enabled=True,
+                auth_service_url="http://auth-service:8085",
+                order_service_url="http://order-service:8087",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            commerce_reads_enabled=True,
+            cart_mutations_enabled=True,
+            auth_service_url="http://auth-service:8085",
+            order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
     def test_marketplace_agent_v2_result_shape_thresholds_are_defaulted_and_bounded(
         self,
     ) -> None:
@@ -26,6 +113,26 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(4, settings.marketplace_agent_v2.max_clarification_options)
         self.assertEqual(5, settings.marketplace_agent_v2.default_discovery_top_k)
         self.assertEqual(8, settings.marketplace_agent_v2.max_discovery_top_k)
+        self.assertEqual(4_096, settings.marketplace_agent_v2.max_output_tokens)
+        self.assertEqual(900, settings.marketplace_agent_v2.confirmation_ttl_seconds)
+
+        with patch.dict(
+            os.environ,
+            {"AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS": "3072"},
+            clear=True,
+        ):
+            configured = Settings.from_env()
+        self.assertEqual(3_072, configured.marketplace_agent_v2.max_output_tokens)
+
+        with patch.dict(
+            os.environ,
+            {"AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS": "4097"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS"
+            ):
+                Settings.from_env()
 
         with self.assertRaisesRegex(ValueError, "clarification threshold"):
             MarketplaceAgentV2Settings(
@@ -37,6 +144,11 @@ class SettingsTest(unittest.TestCase):
             MarketplaceAgentV2Settings(
                 default_discovery_top_k=6,
                 max_discovery_top_k=5,
+            ).validate(persistence_enabled=False, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "CONFIRMATION_TTL_SECONDS"):
+            MarketplaceAgentV2Settings(
+                confirmation_ttl_seconds=59,
             ).validate(persistence_enabled=False, provider_configured=False)
 
     def test_discovery_hybrid_and_query_embedding_are_default_off(self) -> None:

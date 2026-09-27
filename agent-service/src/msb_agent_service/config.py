@@ -519,18 +519,26 @@ class MarketplaceAgentV2Settings:
     kill_switch_enabled: bool = False
     provider_enabled: bool = False
     product_tools_enabled: bool = False
+    commerce_reads_enabled: bool = False
+    cart_mutations_enabled: bool = False
+    checkout_enabled: bool = False
+    order_mutations_enabled: bool = False
+    return_requests_enabled: bool = False
     hybrid_retrieval_enabled: bool = False
     query_embedding_enabled: bool = False
     auth_service_url: str | None = None
     product_service_url: str | None = None
+    order_service_url: str | None = None
     product_service_token: str | None = field(default=None, repr=False)
     dependency_timeout_seconds: float = 2.0
     model_call_timeout_seconds: float = 10.0
+    max_output_tokens: int = 4_096
     direct_result_max: int = 5
     clarification_result_min: int = 10
     max_clarification_options: int = 4
     default_discovery_top_k: int = 5
     max_discovery_top_k: int = 8
+    confirmation_ttl_seconds: int = 900
 
     @property
     def generation_enabled(self) -> bool:
@@ -555,6 +563,12 @@ class MarketplaceAgentV2Settings:
             10.0,
         )
         _validate_integer(
+            "AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS",
+            self.max_output_tokens,
+            512,
+            4_096,
+        )
+        _validate_integer(
             "AGENT_MARKETPLACE_V2_DIRECT_RESULT_MAX", self.direct_result_max, 1, 10
         )
         _validate_integer(
@@ -573,6 +587,10 @@ class MarketplaceAgentV2Settings:
             "AGENT_MARKETPLACE_V2_MAX_DISCOVERY_TOP_K",
             self.max_discovery_top_k, 1, 8,
         )
+        _validate_integer(
+            "AGENT_MARKETPLACE_V2_CONFIRMATION_TTL_SECONDS",
+            self.confirmation_ttl_seconds, 60, 3_600,
+        )
         if self.default_discovery_top_k > self.max_discovery_top_k:
             raise ValueError(
                 "Marketplace Agent V2 default discovery top-K must not exceed its maximum"
@@ -585,6 +603,11 @@ class MarketplaceAgentV2Settings:
             if any((
                 self.provider_enabled,
                 self.product_tools_enabled,
+                self.commerce_reads_enabled,
+                self.cart_mutations_enabled,
+                self.checkout_enabled,
+                self.order_mutations_enabled,
+                self.return_requests_enabled,
                 self.hybrid_retrieval_enabled,
                 self.query_embedding_enabled,
             )):
@@ -597,6 +620,33 @@ class MarketplaceAgentV2Settings:
         _validate_service_url("AUTH_SERVICE_URL", self.auth_service_url)
         if self.product_tools_enabled:
             _validate_service_url("AGENT_PRODUCT_SERVICE_URL", self.product_service_url)
+        if self.commerce_reads_enabled:
+            _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
+        if self.cart_mutations_enabled:
+            if not self.commerce_reads_enabled:
+                raise ValueError(
+                    "Marketplace Agent V2 cart mutations require commerce reads"
+                )
+            _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
+        if self.checkout_enabled:
+            if not self.commerce_reads_enabled:
+                raise ValueError(
+                    "Marketplace Agent V2 checkout requires commerce reads"
+                )
+            _validate_service_url("AUTH_SERVICE_URL", self.auth_service_url)
+            _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
+        if self.order_mutations_enabled:
+            if not self.commerce_reads_enabled:
+                raise ValueError(
+                    "Marketplace Agent V2 order mutations require commerce reads"
+                )
+            _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
+        if self.return_requests_enabled:
+            if not self.commerce_reads_enabled:
+                raise ValueError(
+                    "Marketplace Agent V2 return requests require commerce reads"
+                )
+            _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
         if self.provider_enabled and not provider_configured:
             raise ValueError("OPENAI_API_KEY is required when Marketplace Agent V2 provider is enabled")
         if self.hybrid_retrieval_enabled and (
@@ -1217,16 +1267,35 @@ class Settings:
             kill_switch_enabled=_boolean("AGENT_MARKETPLACE_V2_KILL_SWITCH_ENABLED", False),
             provider_enabled=_boolean("AGENT_MARKETPLACE_V2_PROVIDER_ENABLED", False),
             product_tools_enabled=_boolean("AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED", False),
+            commerce_reads_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_COMMERCE_READS_ENABLED", False
+            ),
+            cart_mutations_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_CART_MUTATIONS_ENABLED", False
+            ),
+            checkout_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_CHECKOUT_ENABLED", False
+            ),
+            order_mutations_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_ORDER_MUTATIONS_ENABLED", False
+            ),
+            return_requests_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED", False
+            ),
             hybrid_retrieval_enabled=_boolean("AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED", False),
             query_embedding_enabled=_boolean("AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED", False),
             auth_service_url=_optional_text("AUTH_SERVICE_URL"),
             product_service_url=_optional_text("AGENT_PRODUCT_SERVICE_URL"),
+            order_service_url=_optional_text("ORDER_SERVICE_URL"),
             product_service_token=_optional_text("AGENT_PRODUCT_SERVICE_TOKEN"),
             dependency_timeout_seconds=_bounded_float(
                 "AGENT_MARKETPLACE_V2_DEPENDENCY_TIMEOUT_SECONDS", 2.0, 0.1, 2.0
             ),
             model_call_timeout_seconds=_bounded_float(
                 "AGENT_MARKETPLACE_V2_MODEL_CALL_TIMEOUT_SECONDS", 10.0, 0.1, 10.0
+            ),
+            max_output_tokens=_bounded_int(
+                "AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS", 4_096, 512, 4_096
             ),
             direct_result_max=_bounded_int(
                 "AGENT_MARKETPLACE_V2_DIRECT_RESULT_MAX", 5, 1, 10
@@ -1242,6 +1311,9 @@ class Settings:
             ),
             max_discovery_top_k=_bounded_int(
                 "AGENT_MARKETPLACE_V2_MAX_DISCOVERY_TOP_K", 8, 1, 8
+            ),
+            confirmation_ttl_seconds=_bounded_int(
+                "AGENT_MARKETPLACE_V2_CONFIRMATION_TTL_SECONDS", 900, 60, 3_600
             ),
         )
         marketplace_agent_v2.validate(

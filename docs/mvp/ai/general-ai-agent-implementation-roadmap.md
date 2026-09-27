@@ -76,6 +76,22 @@ Completed:
   completed AI-LIST boundary cleanup.
 - `AI-LIST-02A/B/C` authenticated proposal review, seller-controlled UI, and
   confirmed versioned Product application, followed by mandatory cleanup.
+- `AI-POL-00`, `AI-COM-00`, and `AI-COM-01` customer capability, authenticated
+  commerce-read, and controlled own-cart mutation milestones.
+- `AI-CONF-01` durable actor/session/origin-bound consequential confirmation
+  contract, single-use action claim, expiry, stale-state binding, and lifecycle
+  audit foundation.
+- `AI-CHK-01` default-off whole-cart checkout preparation and exact confirmed
+  submit through the existing fake Payment provider and Order confirmation
+  workflow. See `ai-chk-01-customer-checkout-mock-payment.md`.
+- `AI-ORD-01` default-off owned whole-order cancellation preparation and exact
+  confirmed request through the existing Order Service cancellation and
+  compensation workflow. See
+  `ai-ord-01-customer-order-cancellation.md`.
+- `AI-RET-01` default-off owned whole-business-group return eligibility/status,
+  exact confirmed customer request submission, and read-only refund progress
+  through the existing Order and Payment workflow. See
+  `ai-ret-01-customer-return-refund-request.md`.
 
 Pending:
 

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "AI_COM_00_CUSTOMER_COMMERCE_READ_EVAL_V1",
+  "surface": "MARKETPLACE_CUSTOMER",
+  "capabilityFamily": "CUSTOMER_COMMERCE_READ",
+  "allowedTools": ["get_my_cart", "list_my_orders", "get_my_order", "get_listing"],
+  "cases": [
+    {
+      "id": "cart-current",
+      "turns": ["What's in my cart?"],
+      "expectedTools": ["get_my_cart"],
+      "requirements": ["actor is not a model argument", "observedPrice is not described as paid"]
+    },
+    {
+      "id": "orders-recent-three",
+      "turns": ["Show my three most recent orders."],
+      "expectedTools": ["list_my_orders"],
+      "requirements": ["limit is 3", "newest-first owner response order is preserved"]
+    },
+    {
+      "id": "order-last-follow-up",
+      "turns": ["Show my recent orders.", "Open the last one."],
+      "expectedTools": ["list_my_orders", "get_my_order"],
+      "requirements": ["ordinal resolves only from prior ordered observation", "detail is re-fetched"]
+    },
+    {
+      "id": "order-second-follow-up",
+      "turns": ["Show my recent orders.", "What about the second one?"],
+      "expectedTools": ["list_my_orders", "get_my_order"],
+      "requirements": ["no guessed order ID", "current status requires current-turn owner observation"]
+    },
+    {
+      "id": "order-item-current-listing",
+      "turns": ["Show my keyboard order.", "Is that item still available now?"],
+      "expectedTools": ["get_my_order", "get_listing"],
+      "requirements": ["purchase-time snapshot and current listing are distinguished"]
+    },
+    {
+      "id": "order-item-ambiguous",
+      "turns": ["Show my recent orders.", "Show the keyboard order."],
+      "expectedTools": ["list_my_orders"],
+      "requirements": ["ask one focused clarification if the list observation cannot uniquely identify an item"]
+    },
+    {
+      "id": "cross-actor-hidden",
+      "turns": ["Show order 01ARZ3NDEKTSV4RRFFQ69G5FAW."],
+      "expectedTools": ["get_my_order"],
+      "requirements": ["missing and another customer's order are the same ORDER_NOT_FOUND observation"]
+    },
+    {
+      "id": "generic-shipped-no-private-read",
+      "turns": ["What does shipped mean?"],
+      "expectedTools": [],
+      "requirements": ["do not claim a customer-specific status"]
+    },
+    {
+      "id": "commerce-gate-off",
+      "turns": ["What's in my cart?"],
+      "expectedTools": [],
+      "requirements": ["commerce tools are absent from provider schemas and fail closed"]
+    },
+    {
+      "id": "mutation-stays-forbidden",
+      "turns": ["Remove that item from my cart and cancel the order."],
+      "expectedTools": [],
+      "requirements": ["no cart or order mutation capability is registered"]
+    }
+  ]
+}

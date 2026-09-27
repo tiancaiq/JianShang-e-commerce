@@ -1737,6 +1737,97 @@ production legal/provider decisions, and explicit rollout approval are green.
    Legacy terminal unsupported JSON recovers on its next locked reply. The
    replacement marker remains private; no public wire addition or migration is
    introduced.
+   `AI-POL-00` formalizes the customer-agent execution boundary before any
+   commerce tools are added. One typed Marketplace customer capability registry
+   now owns provider exposure, proposal policy, risk metadata, and a final
+   pre-I/O execution check. Unknown, disabled, and surface-mismatched tools fail
+   closed; no admin, enforcement, finance-admin, seller-operation, generic HTTP,
+   SQL, shell, or system capability is registered. Narrow Level 5 fraud,
+   payment-bypass, account-takeover, cross-actor mutation, authorization-bypass,
+   and direct-admin requests terminate before model/tool work and cancel a
+   waiting Agent workflow safely. Existing default-off gates, controlled ReAct,
+   SSE/persistence contracts, and separate seller/customer-service architectures
+   remain unchanged. No migration, public API, Java service, or frontend change
+   is introduced. See
+   `docs/mvp/ai/ai-pol-00-customer-agent-capability-safety-boundary.md`.
+   `AI-COM-00` adds a separate default-off customer-commerce read family to
+   that boundary. The Marketplace Agent may read only the authenticated
+   customer's current cart, recent order summaries, and one owned order through
+   existing Order Service customer APIs. The delegated bearer remains outside
+   model arguments and persistence; Order Service independently derives the
+   buyer and preserves privacy-safe missing/cross-buyer `404` behavior.
+   Normalized observations exclude address, phone, tracking, business/store
+   identifiers, provider/payment internals, and other unnecessary fields.
+   Multi-turn order references retain identifiers rather than current truth and
+   re-fetch status; purchase snapshots may seed the existing current Product
+   listing read without conflating historical and current facts. The family
+   requires `AGENT_MARKETPLACE_V2_COMMERCE_READS_ENABLED` plus
+   `ORDER_SERVICE_URL`, adds forward-only Agent V19 tool-audit allowlisting, and
+   adds no cart/order mutation, Java service, Gateway route, or public DTO. The
+   Angular V2 parser only allowlists the three new read activity names. See
+   `docs/mvp/ai/ai-com-00-customer-commerce-read-context.md`.
+   `AI-COM-01` adds a separate default-off `CUSTOMER_CART_MUTATION` family to
+   Marketplace Agent V2. Three actor-free tools add a listing, replace one cart
+   quantity, or remove one cart line through existing Order customer APIs. The
+   authenticated bearer remains application-supplied; Order Service derives the
+   actor, revalidates Product/inventory, and applies its existing optimistic
+   cart version and Redis idempotency contract. Agent actions derive one stable
+   idempotency key from the durable invocation, permit only same-key replay, and
+   reconcile a lost result with a fresh cart read without fabricating success.
+   Provider, proposal-policy, and pre-I/O gates all remove/reject the family when
+   `AGENT_MARKETPLACE_V2_CART_MUTATIONS_ENABLED` is false. Bounded multi-turn
+   listing references support unambiguous add/update/remove; full cart state is
+   not persisted as authority. Agent V20 and Angular allowlist the three audit
+   and activity names. No Java Cart contract, normal cart UI, checkout, payment,
+   order, refund, seller, or admin behavior changes. See
+   `docs/mvp/ai/ai-com-01-customer-cart-mutations.md`.
+   `AI-CONF-01` adds the durable backend confirmation foundation required before
+   any Level 3 customer action. Agent V21 stores one actor/session/origin-bound
+   immutable action, canonical argument/target/financial bindings, backend
+   expiry, stable action key, explicit lifecycle, and safe transition audit.
+   `CONFIRMED` is not execution authority: exact current policy, authorization,
+   action, arguments, owner-supplied resource version, and financial facts must
+   match before one atomic `CONSUMED` claim can win. Retry/reconnect retains the
+   same action identity; duplicate or concurrent confirmation cannot double-use
+   it. AI-POL-00 unsafe turns invalidate pending authority. Existing refined
+   search uses the generalized path; ordinary AI-COM-01 cart commands remain
+   confirmation-free. No checkout, payment, order, refund, seller, or Admin AI
+   capability is added. See
+   `docs/mvp/ai/ai-conf-01-consequential-action-confirmation.md`.
+   `AI-CHK-01` uses that durable contract for the first Level 3 customer
+   action. A separate default-off `CUSTOMER_CHECKOUT` family prepares the
+   whole current business cart through the existing Order snapshot and
+   Inventory reservation flow, binds exact cart/checkout fingerprints and
+   amount/currency, and submits only after one atomic confirmation consume.
+   Order then uses the existing configured fake Payment provider, verified
+   webhook, outbox, and unique checkout-to-order path. Stable idempotency and
+   owned PaymentIntent lookup reconcile lost responses without a second demo
+   completion. A live Inventory reservation check occurs before payment.
+   Provider/outcome selection, card data, direct payment/order mutation,
+   cancellation, refund, seller, and Admin capabilities remain unavailable.
+   See `docs/mvp/ai/ai-chk-01-customer-checkout-mock-payment.md`.
+   `AI-ORD-01` adds a separate default-off `CUSTOMER_ORDER_MUTATION` family for
+   authenticated whole-order cancellation. The Agent resolves only owned order
+   references, prepares from the existing buyer-safe Order detail eligibility
+   projection, and binds the exact order version, snapshot fingerprint, total,
+   and currency into an AI-CONF-01 Level 3 action. After one atomic consume it
+   submits the existing bodyless versioned customer cancellation request with
+   the durable action key as Order Service idempotency. Order Service remains
+   the sole owner of eligibility, state transitions, history/outbox writes,
+   inventory restock, local demo refund, retry, and final completion. Direct
+   model execution, partial cancellation, Admin APIs, forced refunds, and
+   Payment/Inventory calls remain unavailable. See
+   `docs/mvp/ai/ai-ord-01-customer-order-cancellation.md`.
+   `AI-RET-01` adds a separate default-off `CUSTOMER_RETURN_REQUEST` family.
+   The Agent resolves only buyer-owned order and purchase-time item references,
+   reads Order-owned whole-business-group return eligibility/status, and binds
+   exact group version, snapshot fingerprint, reason, and optional customer
+   comment into an AI-CONF-01 Level 3 action. One atomic consume may submit only
+   the existing versioned buyer return-request API with the durable action key.
+   Order Service remains sole owner of return authorization/receipt, inventory,
+   refund processing, and final state. Partial returns, direct refunds, dispute
+   resolution, seller tools, and Admin finance tools remain unavailable. See
+   `docs/mvp/ai/ai-ret-01-customer-return-refund-request.md`.
 9. Keep all automated report/listing operations disabled until shadow-mode
    quality, appeal, restoration, and explicit approval gates pass.
 
@@ -1924,9 +2015,8 @@ recommendations. `appealsFinalized` is the sum of final `UPHELD`, `MODIFIED`,
 and `REVOKED` rows resolved in the selected window. The adjustment rate is
 `(MODIFIED + REVOKED) / appealsFinalized * 100`, is `N/A` at a zero
 denominator, and excludes recommendation and pending states. The milestone is
-not marked complete until the full live and repository verification matrix is
-green; after that gate, the recommended next milestone is
-`ADM-PLATFORM-RC-01`.
+complete. Its live and repository verification is closed by `ADM-RC-02`; see
+`docs/qa/admin-rc-02-production-acceptance-2026-09-01.md`.
 
 ### ADM-PLATFORM-RC-01A admin platform audit and stabilization
 
@@ -1937,5 +2027,17 @@ migration, feature-flag, test, and documentation pass is recorded in
 admin identity responses closed, keep case-enforcement dry runs out of the
 case timeline/version, batch Governance and Support page reads, and group the
 permission-aware admin navigation. No migration or environment change was
-required. `ADM-PLATFORM-RC-01B` is the next milestone for deployed-stack,
-cross-role final acceptance; it is not implemented here.
+required.
+
+### ADM-RC-02 final production-style acceptance and release signoff
+
+Complete with a **PASS WITH FOLLOW-UP** verdict. The real disposable stack,
+cross-role permission/privacy matrix, MySQL concurrency and idempotency,
+controlled optimistic conflicts, retry/restart recovery, clean and prior-state
+migrations, production builds, container health, configuration, secret scan,
+and repository hygiene checks are recorded in
+`docs/qa/admin-rc-02-production-acceptance-2026-09-01.md`. One P1 catalog
+same-key concurrency defect was fixed and verified. No API contract,
+architecture, domain ownership, migration, or AI behavior changed. The only
+release follow-up is to cut the artifact from a clean reviewed commit; unrelated
+marketplace visual work remains present in the local working tree.

@@ -25,6 +25,30 @@ class AgentPersistenceDomainTest(unittest.TestCase):
 
         self.assertIn("CHECK_AVAILABILITY", _ALLOWED_TOOLS)
 
+    def test_cart_mutation_audits_are_narrowly_allowlisted(self) -> None:
+        self.assertTrue({
+            "add_to_my_cart", "update_my_cart_quantity", "remove_from_my_cart",
+        }.issubset(_ALLOWED_TOOLS))
+        self.assertTrue({
+            "checkout", "purchase", "cancel_order", "refund_order",
+        }.isdisjoint(_ALLOWED_TOOLS))
+
+    def test_checkout_audits_are_narrowly_allowlisted(self) -> None:
+        self.assertTrue({
+            "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
+        }.issubset(_ALLOWED_TOOLS))
+        self.assertTrue({
+            "collect_payment_credentials", "refund_order", "cancel_order",
+        }.isdisjoint(_ALLOWED_TOOLS))
+
+    def test_order_cancellation_audits_are_narrowly_allowlisted(self) -> None:
+        self.assertTrue({
+            "preview_my_order_cancellation", "cancel_my_order",
+        }.issubset(_ALLOWED_TOOLS))
+        self.assertTrue({
+            "admin_cancel_order", "issue_refund", "release_inventory",
+        }.isdisjoint(_ALLOWED_TOOLS))
+
     def test_question_normalization_drives_stable_retry_hash(self) -> None:
         self.assertEqual("Is it available?", normalize_question_body("  Is it available? "))
         self.assertEqual(
@@ -198,6 +222,67 @@ class AgentPersistenceDomainTest(unittest.TestCase):
             "search_listings", "get_listing",
         ):
             self.assertIn(f"'{tool_name}'", migration)
+        self.assertNotIn("DROP TABLE", migration.upper())
+        self.assertNotIn("TRUNCATE", migration.upper())
+
+    def test_v21_adds_durable_single_use_confirmation_and_transition_audit(self) -> None:
+        migration = (
+            Path(__file__).parents[1]
+            / "db"
+            / "migration"
+            / "V21__create_agent_consequential_confirmations.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CREATE TABLE agent_confirmations", migration)
+        self.assertIn("CREATE TABLE agent_confirmation_transitions", migration)
+        self.assertIn("originating_invocation_id", migration)
+        self.assertIn("active_conversation_marker", migration)
+        self.assertIn("action_fingerprint", migration)
+        self.assertIn("action_key", migration)
+        self.assertIn("expires_at", migration)
+        for state in (
+            "PENDING", "CONFIRMED", "CONSUMED", "CANCELLED", "EXPIRED",
+            "INVALIDATED",
+        ):
+            self.assertIn(f"'{state}'", migration)
+        self.assertNotIn("DROP TABLE", migration.upper())
+        self.assertNotIn("TRUNCATE", migration.upper())
+
+    def test_v22_forward_adds_only_checkout_audit_tools(self) -> None:
+        migration = (
+            Path(__file__).parents[1]
+            / "db"
+            / "migration"
+            / "V22__allow_marketplace_agent_v2_checkout_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        for tool_name in (
+            "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
+        ):
+            self.assertIn(f"'{tool_name}'", migration)
+        for forbidden in (
+            "collect_payment_credentials", "refund_order", "cancel_order",
+        ):
+            self.assertNotIn(f"'{forbidden}'", migration)
+        self.assertNotIn("DROP TABLE", migration.upper())
+        self.assertNotIn("TRUNCATE", migration.upper())
+
+    def test_v23_forward_adds_only_customer_order_cancellation_tools(self) -> None:
+        migration = (
+            Path(__file__).parents[1]
+            / "db"
+            / "migration"
+            / "V23__allow_marketplace_agent_v2_order_cancellation_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        for tool_name in (
+            "preview_my_order_cancellation", "cancel_my_order",
+        ):
+            self.assertIn(f"'{tool_name}'", migration)
+        for forbidden in (
+            "admin_cancel_order", "issue_refund", "release_inventory",
+        ):
+            self.assertNotIn(f"'{forbidden}'", migration)
         self.assertNotIn("DROP TABLE", migration.upper())
         self.assertNotIn("TRUNCATE", migration.upper())
 

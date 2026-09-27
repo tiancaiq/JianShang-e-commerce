@@ -102,6 +102,7 @@ from .marketplace_agent_v2.runtime import (
     MarketplaceAgentV2Runtime,
     build_marketplace_agent_v2_runtime,
 )
+from .marketplace_agent_v2.orchestrator import _confirmation_answer
 from .marketplace_agent_v2.service import (
     CreateMarketplaceAgentV2SessionRequest,
     MarketplaceAgentV2HistoryPage,
@@ -392,7 +393,10 @@ def create_app(
                     marketplace_v2_service = marketplace_v2_service_override
                 else:
                     marketplace_v2_repository = MarketplaceAgentV2Persistence(
-                        persistence_repository
+                        persistence_repository,
+                        confirmation_ttl_seconds=(
+                            runtime_settings.marketplace_agent_v2.confirmation_ttl_seconds
+                        ),
                     )
                     await marketplace_v2_repository.validate_schema()
                     marketplace_v2_runtime = create_marketplace_v2_runtime(runtime_settings)
@@ -902,7 +906,7 @@ def create_app(
                 "Marketplace Agent V2 is temporarily unavailable.",
             ) from error
 
-    def require_marketplace_v2_generation() -> None:
+    def require_marketplace_v2_generation(message: str | None = None) -> None:
         """Reject V2 writes before actor, persistence, Product, or provider work."""
 
         if not runtime_settings.marketplace_agent_v2.enabled:
@@ -911,9 +915,12 @@ def create_app(
                 404,
                 "Marketplace Agent V2 is not available.",
             )
-        if (
+        confirmation_decision = (
+            message is not None and _confirmation_answer(message) is not None
+        )
+        if marketplace_v2_service is None or (
             not runtime_settings.marketplace_agent_v2.generation_enabled
-            or marketplace_v2_service is None
+            and not confirmation_decision
         ):
             raise MarketplaceAgentV2ApiError(
                 MarketplaceAgentV2ApiErrorCode.UNAVAILABLE,
@@ -1251,12 +1258,13 @@ def create_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> SendMarketplaceAgentV2MessageResponse:
-        require_marketplace_v2_generation()
+        require_marketplace_v2_generation(body.body)
         actor_user_id = await marketplace_v2_actor(request, authorization)
         assert marketplace_v2_service is not None
         try:
             return await marketplace_v2_service.send_message(
                 actor_user_id=actor_user_id,
+                actor_authorization=authorization,
                 session_id=str(sessionId),
                 client_message_id=body.client_message_id,
                 body=body.body,
@@ -1281,7 +1289,7 @@ def create_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> StreamingResponse:
-        require_marketplace_v2_generation()
+        require_marketplace_v2_generation(body.body)
         actor_user_id = await marketplace_v2_actor(request, authorization)
         assert marketplace_v2_service is not None
         return marketplace_v2_streaming_response(
@@ -1290,6 +1298,7 @@ def create_app(
             client_message_id=body.client_message_id,
             operation=lambda **callbacks: marketplace_v2_service.send_message(
                 actor_user_id=actor_user_id,
+                actor_authorization=authorization,
                 session_id=str(sessionId),
                 client_message_id=body.client_message_id,
                 body=body.body,
@@ -1346,6 +1355,7 @@ def create_app(
             client_message_id=body.client_message_id,
             operation=lambda **callbacks: marketplace_v2_service.retry_response(
                 actor_user_id=actor_user_id,
+                actor_authorization=authorization,
                 session_id=str(sessionId),
                 user_message_id=str(userMessageId),
                 client_message_id=body.client_message_id,

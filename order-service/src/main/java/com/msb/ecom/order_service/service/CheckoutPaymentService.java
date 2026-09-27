@@ -52,6 +52,7 @@ public class CheckoutPaymentService {
     private final CheckoutPaymentProperties paymentProperties;
     private final PaymentIntentClient paymentClient;
     private final ProductCommerceClient productClient;
+    private final InventoryReservationClient inventoryClient;
     private final OrderConfirmationRepository orders;
     private final Clock clock;
 
@@ -65,6 +66,7 @@ public class CheckoutPaymentService {
             CheckoutPaymentProperties paymentProperties,
             PaymentIntentClient paymentClient,
             ProductCommerceClient productClient,
+            InventoryReservationClient inventoryClient,
             OrderConfirmationRepository orders) {
         this(
                 actorProvider,
@@ -75,6 +77,7 @@ public class CheckoutPaymentService {
                 paymentProperties,
                 paymentClient,
                 productClient,
+                inventoryClient,
                 orders,
                 Clock.systemUTC());
     }
@@ -89,7 +92,7 @@ public class CheckoutPaymentService {
             PaymentIntentClient paymentClient,
             OrderConfirmationRepository orders) {
         this(actorProvider, buyerIdentityClient, repository, paymentBindings, checkoutProperties,
-                paymentProperties, paymentClient, null, orders, Clock.systemUTC());
+                paymentProperties, paymentClient, null, null, orders, Clock.systemUTC());
     }
 
     CheckoutPaymentService(
@@ -103,7 +106,7 @@ public class CheckoutPaymentService {
             OrderConfirmationRepository orders,
             Clock clock) {
         this(actorProvider, buyerIdentityClient, repository, paymentBindings, checkoutProperties,
-                paymentProperties, paymentClient, null, orders, clock);
+                paymentProperties, paymentClient, null, null, orders, clock);
     }
 
     CheckoutPaymentService(
@@ -117,6 +120,22 @@ public class CheckoutPaymentService {
             ProductCommerceClient productClient,
             OrderConfirmationRepository orders,
             Clock clock) {
+        this(actorProvider, buyerIdentityClient, repository, paymentBindings, checkoutProperties,
+                paymentProperties, paymentClient, productClient, null, orders, clock);
+    }
+
+    CheckoutPaymentService(
+            CurrentActorProvider actorProvider,
+            BuyerIdentityClient buyerIdentityClient,
+            CheckoutRepository repository,
+            CheckoutPaymentBindingRepository paymentBindings,
+            CheckoutProperties checkoutProperties,
+            CheckoutPaymentProperties paymentProperties,
+            PaymentIntentClient paymentClient,
+            ProductCommerceClient productClient,
+            InventoryReservationClient inventoryClient,
+            OrderConfirmationRepository orders,
+            Clock clock) {
         this.actorProvider = actorProvider;
         this.buyerIdentityClient = buyerIdentityClient;
         this.repository = repository;
@@ -125,6 +144,7 @@ public class CheckoutPaymentService {
         this.paymentProperties = paymentProperties;
         this.paymentClient = paymentClient;
         this.productClient = productClient;
+        this.inventoryClient = inventoryClient;
         this.orders = orders;
         this.clock = clock;
     }
@@ -159,6 +179,31 @@ public class CheckoutPaymentService {
         return new CheckoutOrderResolutionResponse(orderId, orderId != null);
     }
 
+    // Returns only the safe payment-intent projection for a buyer-owned checkout.
+    public CheckoutPaymentIntentResponse get(String checkoutId) {
+        requireEnabled();
+        String buyerId = buyerIdentityClient.resolveBuyer(actorProvider.currentActor().subject());
+        repository.findOwned(checkoutId, buyerId).orElseThrow(this::notFound);
+        CheckoutPaymentBinding binding = paymentBindings.findByCheckout(checkoutId)
+                .orElseThrow(() -> new CheckoutException(
+                        HttpStatus.NOT_FOUND,
+                        "PAYMENT_INTENT_NOT_FOUND",
+                        "Payment has not been started for this checkout."));
+        PaymentIntentClient.Command expected = new PaymentIntentClient.Command(
+                binding.checkoutId(),
+                binding.checkoutVersion(),
+                binding.checkoutSnapshotHash(),
+                binding.buyerId(),
+                binding.businessIds(),
+                binding.amount(),
+                binding.currency(),
+                binding.expiresAt());
+        PaymentIntentClient.PaymentIntent intent = paymentClient.get(
+                binding.paymentIntentId(), buyerId);
+        verifyResponse(expected, intent);
+        return response(intent);
+    }
+
     // Creates a payment intent solely from the authenticated buyer's immutable checkout snapshot.
     public CheckoutPaymentIntentResponse create(
             String checkoutId,
@@ -171,6 +216,7 @@ public class CheckoutPaymentService {
         CheckoutAggregate checkout = repository.findOwned(checkoutId, buyerId)
                 .orElseThrow(this::notFound);
         requirePayable(checkout);
+        requireLiveReservation(checkout);
         buyerIdentityClient.requireCapability(buyerId, "USER_BUYING");
 
         List<String> businessIds = checkout.items().stream()
@@ -266,6 +312,40 @@ public class CheckoutPaymentService {
                 || !checkout.expiresAt().isAfter(clock.instant())
                 || !"ACTIVE".equals(checkout.reservationStatus())
                 || checkout.releaseStatus() != CheckoutReleaseStatus.NOT_REQUIRED) {
+            throw new CheckoutException(
+                    HttpStatus.CONFLICT,
+                    "CHECKOUT_NOT_PAYABLE",
+                    "This checkout cannot start payment.");
+        }
+    }
+
+    private void requireLiveReservation(CheckoutAggregate checkout) {
+        if (inventoryClient == null) {
+            return;
+        }
+        InventoryReservationClient.Reservation reservation = inventoryClient.get(
+                checkout.reservationId());
+        List<String> expectedItems = checkout.items().stream()
+                .map(item -> item.listingId() + ":" + item.quantity())
+                .sorted()
+                .toList();
+        List<String> actualItems = reservation == null || reservation.items() == null
+                ? List.of()
+                : reservation.items().stream()
+                        .map(item -> item.listingId() + ":" + item.quantity())
+                        .sorted()
+                        .toList();
+        boolean valid = reservation != null
+                && checkout.reservationId().equals(reservation.id())
+                && checkout.id().equals(reservation.checkoutId())
+                && "CHECKOUT".equals(reservation.purpose())
+                && "ACTIVE".equals(reservation.status())
+                && reservation.usable()
+                && checkout.expiresAt().equals(reservation.expiresAt())
+                && reservation.expiresAt().isAfter(clock.instant())
+                && expectedItems.equals(actualItems);
+        if (!valid) {
+            log.warn("Checkout payment live reservation rejected checkoutId={}", checkout.id());
             throw new CheckoutException(
                     HttpStatus.CONFLICT,
                     "CHECKOUT_NOT_PAYABLE",

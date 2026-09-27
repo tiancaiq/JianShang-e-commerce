@@ -30,6 +30,9 @@ class DemoActivationConfigTests(unittest.TestCase):
         cls.production = (REPOSITORY_ROOT / "docker-compose.prod.yml").read_text(
             encoding="utf-8"
         )
+        cls.combined = (
+            REPOSITORY_ROOT / "docker-compose.demo-ai-main.yml"
+        ).read_text(encoding="utf-8")
 
     def test_agent_and_gateway_capabilities_default_off(self) -> None:
         agent = _service_block(self.demo, "agent-service")
@@ -48,6 +51,14 @@ class DemoActivationConfigTests(unittest.TestCase):
             "AGENT_DISCOVERY_ORCHESTRATION_ENABLED",
             "AGENT_DISCOVERY_PRODUCT_TOOLS_ENABLED",
             "AGENT_DISCOVERY_PROVIDER_ENABLED",
+            "AGENT_MARKETPLACE_V2_API_ENABLED",
+            "AGENT_MARKETPLACE_V2_PROVIDER_ENABLED",
+            "AGENT_MARKETPLACE_V2_PRODUCT_TOOLS_ENABLED",
+            "AGENT_MARKETPLACE_V2_COMMERCE_READS_ENABLED",
+            "AGENT_MARKETPLACE_V2_CART_MUTATIONS_ENABLED",
+            "AGENT_MARKETPLACE_V2_CHECKOUT_ENABLED",
+            "AGENT_MARKETPLACE_V2_ORDER_MUTATIONS_ENABLED",
+            "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED",
         ):
             self.assertIn(f"{variable}: ${{{variable}:-false}}", agent)
 
@@ -79,7 +90,8 @@ class DemoActivationConfigTests(unittest.TestCase):
         self.assertIn("profiles:\n      - ai", zookeeper)
         self.assertIn("profiles:\n      - ai", broker)
         self.assertIn('KAFKA_ZOOKEEPER_CONNECT: "agent-zookeeper:2181"', broker)
-        self.assertIn("cub zk-ready localhost 2181 30", zookeeper)
+        self.assertIn("cub zk-ready localhost 2181", zookeeper)
+        self.assertNotIn("cub zk-ready localhost 2181 30", zookeeper)
         self.assertIn("restart: unless-stopped", zookeeper)
         self.assertIn(
             "agent-zookeeper:\n        condition: service_healthy",
@@ -93,6 +105,7 @@ class DemoActivationConfigTests(unittest.TestCase):
     ) -> None:
         bootstrap = _service_block(self.demo, "agent-index-bootstrap")
         agent = _service_block(self.demo, "agent-service")
+        migrations = _service_block(self.demo, "agent-migrations")
 
         self.assertIn("profiles:\n      - ai-bootstrap", bootstrap)
         self.assertIn(
@@ -100,6 +113,7 @@ class DemoActivationConfigTests(unittest.TestCase):
             bootstrap,
         )
         self.assertNotIn("agent-index-bootstrap", agent)
+        self.assertIn("command: migrate", migrations)
         self.assertIn(
             "agent-migrations:\n        condition: service_completed_successfully",
             agent,
@@ -133,7 +147,10 @@ class DemoActivationConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("ARG GATEWAY_FEATURE_AGENT_DISCOVERY=false", dockerfile)
-        self.assertIn("demo-ai-discovery|demo-cart-ai-discovery", dockerfile)
+        self.assertIn(
+            "demo-ai-discovery|demo-agent-v2|demo-cart-ai-discovery",
+            dockerfile,
+        )
         self.assertIn(
             "Discovery frontend builds require "
             "GATEWAY_FEATURE_AGENT_DISCOVERY=true.",
@@ -146,6 +163,34 @@ class DemoActivationConfigTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY: ${OPENAI_API_KEY:-}", agent)
         self.assertIn("OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}", agent)
         self.assertNotIn("sk-", agent.lower())
+
+    def test_combined_main_overlay_activates_the_complete_customer_agent_route(self) -> None:
+        agent = _service_block(self.combined, "agent-service")
+        product = _service_block(self.combined, "product-service")
+        gateway = _service_block(self.combined, "api-gateway")
+        frontend = _service_block(self.combined, "frontend")
+
+        self.assertIn('AGENT_KNOWLEDGE_ENABLED: "true"', agent)
+        self.assertIn('AGENT_MARKETPLACE_V2_COMMERCE_READS_ENABLED: "true"', agent)
+        self.assertIn('AGENT_MARKETPLACE_V2_CART_MUTATIONS_ENABLED: "true"', agent)
+        self.assertIn('AGENT_MARKETPLACE_V2_CHECKOUT_ENABLED: "false"', agent)
+        self.assertIn(
+            "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED: "
+            "${AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED:-false}",
+            agent,
+        )
+        self.assertIn('AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS: "4096"', agent)
+        self.assertIn('ORDER_SERVICE_URL: "http://order-service:8081"', agent)
+        self.assertIn(
+            "LISTING_MEDIA_STORAGE: ${LISTING_MEDIA_STORAGE:-local-demo}",
+            product,
+        )
+        self.assertIn('GATEWAY_FEATURE_AGENT: "true"', gateway)
+        self.assertIn('GATEWAY_FEATURE_AGENT_DISCOVERY: "true"', gateway)
+        self.assertIn(
+            "FRONTEND_BUILD_CONFIGURATION: demo-cart-ai-discovery", frontend
+        )
+        self.assertIn('GATEWAY_FEATURE_AGENT_DISCOVERY: "true"', frontend)
 
 
 if __name__ == "__main__":

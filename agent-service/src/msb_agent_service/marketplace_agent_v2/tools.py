@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from math import ceil
-from typing import Awaitable, Callable, Literal
+from typing import Awaitable, Callable, Literal, cast
 
 from pydantic import BaseModel
 
@@ -15,19 +15,35 @@ from msb_agent_service.marketplace_discovery import (
 from msb_agent_service.marketplace_listing_retrieval import MarketplaceRetrievalError
 from msb_agent_service.agent_persistence import new_ulid
 
+from .capabilities import MarketplaceCustomerCapabilityBoundary
 from .schemas import (
+    AddToMyCartArguments,
     CheckAvailabilityArguments,
     CollectListingInformationArguments,
+    GetMyCartArguments,
+    GetMyCheckoutArguments,
+    GetMyOrderArguments,
+    GetMyReturnArguments,
     GetListingArguments,
+    ListMyOrdersArguments,
     ListingAttachment,
     MarketplaceAgentV2PendingInteraction,
     RequestConfirmationArguments,
+    RemoveFromMyCartArguments,
+    PrepareMyCheckoutArguments,
+    PreviewMyOrderCancellationArguments,
+    CancelMyOrderArguments,
+    PrepareMyReturnRequestArguments,
+    SubmitMyReturnRequestArguments,
     SearchListingsArguments,
     ToolFacets,
     ToolName,
     ToolObservation,
+    UpdateMyCartQuantityArguments,
+    SubmitMyCheckoutArguments,
 )
 from .seller_workflow import start_create_listing_workflow
+from .commerce import CommerceReadClient
 
 
 ActivityCallback = Callable[[ToolName, str], Awaitable[None]]
@@ -40,25 +56,28 @@ class MarketplaceAgentV2ToolRegistry:
         self,
         product: DiscoveryProductTool,
         *,
+        commerce: CommerceReadClient | None = None,
         direct_result_max: int = 5,
         clarification_result_min: int = 10,
         max_clarification_options: int = 4,
         default_discovery_top_k: int = 5,
         max_discovery_top_k: int = 8,
+        capability_boundary: MarketplaceCustomerCapabilityBoundary | None = None,
     ) -> None:
         self._product = product
+        self._commerce = commerce
         self._direct_result_max = direct_result_max
         self._clarification_result_min = clarification_result_min
         self._max_clarification_options = max_clarification_options
         self._default_discovery_top_k = default_discovery_top_k
         self._max_discovery_top_k = max_discovery_top_k
+        self.capability_boundary = (
+            capability_boundary or MarketplaceCustomerCapabilityBoundary()
+        )
 
     @property
     def names(self) -> tuple[ToolName, ...]:
-        return (
-            "check_availability", "search_listings", "get_listing",
-            "request_confirmation", "collect_listing_information",
-        )
+        return cast(tuple[ToolName, ...], self.capability_boundary.enabled_names)
 
     def provider_schemas(self) -> tuple[dict[str, object], ...]:
         search_parameters = _strict_parameters(SearchListingsArguments)
@@ -66,16 +85,21 @@ class MarketplaceAgentV2ToolRegistry:
         assert isinstance(search_properties, dict)
         limit_schema = search_properties["limit"]
         assert isinstance(limit_schema, dict)
-        limit_schema["default"] = self._default_discovery_top_k
-        limit_schema["maximum"] = self._max_discovery_top_k
-        return (
+        limit_schema["description"] = (
+            f"Return {self._default_discovery_top_k} listings by default; "
+            f"choose an integer from 1 through {self._max_discovery_top_k}."
+        )
+        schemas = (
             {
                 "type": "function",
                 "name": "check_availability",
                 "description": (
-                    "Check authoritative active inventory for one broad marketplace "
-                    "category before asking detailed preference questions. This is a "
-                    "count-only probe and never returns recommendations."
+                    "Check authoritative current active inventory for the category of "
+                    "an already-grounded listing when the customer asks whether it is "
+                    "available, still available, or in stock. It may also probe one broad "
+                    "marketplace category before detailed preferences. This is category-"
+                    "level and count-only; it never proves exact listing stock or returns "
+                    "recommendations."
                 ),
                 "strict": True,
                 "parameters": _strict_parameters(CheckAvailabilityArguments),
@@ -95,7 +119,10 @@ class MarketplaceAgentV2ToolRegistry:
                 "type": "function",
                 "name": "get_listing",
                 "description": (
-                    "Revalidate one listing already referenced in this conversation."
+                    "Revalidate current Product-owned details for exactly one listing "
+                    "already referenced in this conversation. Use for ordinal, exact-title, "
+                    "or unambiguous pronoun detail requests such as 'tell me more about the "
+                    "second one'; never ask the customer for a listing ID."
                 ),
                 "strict": True,
                 "parameters": _strict_parameters(GetListingArguments),
@@ -116,13 +143,178 @@ class MarketplaceAgentV2ToolRegistry:
                 "name": "collect_listing_information",
                 "description": (
                     "Start structured listing-information collection when the customer "
-                    "wants help preparing an item for sale. This stores a pending seller "
-                    "field only; it does not create, publish, or search listings."
+                    "naturally asks for help selling or preparing a marketplace listing. "
+                    "The first call collects the item type and starts the authenticated "
+                    "CREATE_LISTING information workflow. It stores pending seller fields "
+                    "only; it does not create, publish, or search listings."
                 ),
                 "strict": True,
                 "parameters": _strict_parameters(CollectListingInformationArguments),
             },
+            {
+                "type": "function",
+                "name": "get_my_cart",
+                "description": (
+                    "Read the authenticated customer's current cart. The customer "
+                    "identity is application-owned and is never a tool argument. "
+                    "Observed cart prices are advisory and are not purchase prices."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(GetMyCartArguments),
+            },
+            {
+                "type": "function",
+                "name": "list_my_orders",
+                "description": (
+                    "List the authenticated customer's recent orders in newest-first "
+                    "order. Use a returned opaque cursor only for explicit pagination."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(ListMyOrdersArguments),
+            },
+            {
+                "type": "function",
+                "name": "get_my_order",
+                "description": (
+                    "Read one authenticated customer-owned order by order ID. Use it "
+                    "to refresh current order status or inspect purchase-time item snapshots. "
+                    "Reuse the selected owned order reference for immediate follow-ups instead "
+                    "of listing orders again."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(GetMyOrderArguments),
+            },
+            {
+                "type": "function",
+                "name": "add_to_my_cart",
+                "description": (
+                    "For an explicit, unambiguous request, set the referenced business "
+                    "listing's cart quantity through the authenticated customer's cart. "
+                    "Adding an existing item replaces its quantity; it does not increment."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(AddToMyCartArguments),
+            },
+            {
+                "type": "function",
+                "name": "update_my_cart_quantity",
+                "description": (
+                    "For an explicit, unambiguous request, replace the quantity of one "
+                    "referenced item already associated with the customer's cart context."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(UpdateMyCartQuantityArguments),
+            },
+            {
+                "type": "function",
+                "name": "remove_from_my_cart",
+                "description": (
+                    "For an explicit, unambiguous request, remove one referenced listing "
+                    "from the authenticated customer's cart. A pronoun is unambiguous when "
+                    "the latest actor-owned cart read contains exactly one item or the latest "
+                    "successful cart mutation identifies one item."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(RemoveFromMyCartArguments),
+            },
+            {
+                "type": "function",
+                "name": "prepare_my_checkout",
+                "description": (
+                    "Prepare the authenticated customer's whole current business cart "
+                    "using the default saved delivery address. This creates the normal "
+                    "short-lived checkout reservation and returns authoritative totals "
+                    "plus one exact durable payment confirmation. Never use for a "
+                    "partial-cart request."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(PrepareMyCheckoutArguments),
+            },
+            {
+                "type": "function",
+                "name": "get_my_checkout",
+                "description": (
+                    "Read one already-referenced checkout owned by the authenticated "
+                    "customer. Use it for current checkout contents, total, status, or active/"
+                    "expiry questions. Do not prepare a new checkout or submit it for a read. "
+                    "The application supplies customer identity."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(GetMyCheckoutArguments),
+            },
+            {
+                "type": "function",
+                "name": "submit_my_checkout",
+                "description": (
+                    "Submit one exact prepared checkout. Direct model proposals are "
+                    "rejected; the application invokes this only after a durable "
+                    "AI-CONF-01 claim. The payment provider and outcome are never inputs."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(SubmitMyCheckoutArguments),
+            },
+            {
+                "type": "function",
+                "name": "preview_my_order_cancellation",
+                "description": (
+                    "Read one referenced authenticated customer-owned order, check "
+                    "the Order Service cancellation eligibility projection, and prepare "
+                    "one exact durable whole-order cancellation confirmation. Use only "
+                    "for an explicit cancellation request, never an informational question."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(
+                    PreviewMyOrderCancellationArguments
+                ),
+            },
+            {
+                "type": "function",
+                "name": "cancel_my_order",
+                "description": (
+                    "Request cancellation of one exact owned order. Direct model proposals "
+                    "are rejected; the application invokes this only after a durable "
+                    "AI-CONF-01 claim. Order Service owns all cancellation, inventory, "
+                    "and refund processing."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(CancelMyOrderArguments),
+            },
+            {
+                "type": "function",
+                "name": "get_my_return",
+                "description": (
+                    "Read the authenticated customer's existing return/refund-request "
+                    "status, or current whole-store-group return eligibility. Resolve "
+                    "the order and optional item only from owned order observations."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(GetMyReturnArguments),
+            },
+            {
+                "type": "function",
+                "name": "prepare_my_return_request",
+                "description": (
+                    "Check authoritative eligibility and prepare one durable confirmation "
+                    "for the exact owned whole-store-group return request. The reason is "
+                    "required; the comment is optional. This does not approve a return or "
+                    "issue a refund."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(PrepareMyReturnRequestArguments),
+            },
+            {
+                "type": "function",
+                "name": "submit_my_return_request",
+                "description": (
+                    "Submit one exact confirmed customer return request. Direct model "
+                    "proposals are rejected; the application invokes it only after a "
+                    "durable AI-CONF-01 claim. It never approves or issues a refund."
+                ),
+                "strict": True,
+                "parameters": _strict_parameters(SubmitMyReturnRequestArguments),
+            },
         )
+        return tuple(item for item in schemas if item["name"] in self.names)
 
     async def execute(
         self,
@@ -132,7 +324,20 @@ class MarketplaceAgentV2ToolRegistry:
         actor_user_id: str,
         correlation_id: str,
         activity: ActivityCallback | None,
+        actor_authorization: str | None = None,
+        action_reference: str | None = None,
     ) -> ToolObservation:
+        capability = self.capability_boundary.evaluate(tool)
+        if not capability.allowed:
+            return ToolObservation(
+                tool=tool,
+                status="REJECTED",
+                reason=(
+                    "CAPABILITY_DISABLED"
+                    if capability.code.value == "CAPABILITY_DISABLED"
+                    else "SURFACE_MISMATCH"
+                ),
+            )
         if tool == "check_availability" and isinstance(arguments, CheckAvailabilityArguments):
             return await self._check_availability(
                 arguments, actor_user_id=actor_user_id,
@@ -157,10 +362,16 @@ class MarketplaceAgentV2ToolRegistry:
                 key: value for key, value in arguments.model_dump(mode="json").items()
                 if key not in {"type", "action"}
             })
+            confirmation_id = new_ulid()
             pending = MarketplaceAgentV2PendingInteraction(
-                id=new_ulid(), type=arguments.type, action=arguments.action,
+                id=confirmation_id,
+                confirmationId=confirmation_id,
+                type=arguments.type,
+                action=arguments.action,
                 arguments=search.model_dump(mode="json", by_alias=True),
-                status="WAITING", createdAt=datetime.now(UTC),
+                summary=_refined_search_confirmation_summary(search),
+                status="WAITING",
+                createdAt=datetime.now(UTC),
             )
             return ToolObservation(
                 tool="request_confirmation", status="SUCCEEDED",
@@ -180,7 +391,338 @@ class MarketplaceAgentV2ToolRegistry:
                 pendingInteraction=pending,
                 activeWorkflow=workflow,
             )
+        if self._commerce is None and tool in {
+            "get_my_cart", "list_my_orders", "get_my_order", "add_to_my_cart",
+            "update_my_cart_quantity", "remove_from_my_cart",
+            "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
+            "preview_my_order_cancellation", "cancel_my_order",
+            "get_my_return", "prepare_my_return_request",
+            "submit_my_return_request",
+        }:
+            return ToolObservation(
+                tool=tool, status="FAILED", reason="COMMERCE_UPSTREAM_UNAVAILABLE"
+            )
+        if tool == "get_my_cart" and isinstance(arguments, GetMyCartArguments):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("get_my_cart", "Reading your current cart")
+            return await self._commerce.get_my_cart(
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "list_my_orders" and isinstance(arguments, ListMyOrdersArguments):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("list_my_orders", "Reading your recent orders")
+            return await self._commerce.list_my_orders(
+                limit=arguments.limit,
+                cursor=arguments.cursor,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "get_my_order" and isinstance(arguments, GetMyOrderArguments):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("get_my_order", "Reading your order")
+            return await self._commerce.get_my_order(
+                order_id=arguments.order_id,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "add_to_my_cart" and isinstance(arguments, AddToMyCartArguments):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("add_to_my_cart", "Updating your cart")
+            return await self._commerce.add_to_my_cart(
+                listing_id=arguments.listing_id,
+                quantity=arguments.quantity,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "update_my_cart_quantity" and isinstance(
+            arguments, UpdateMyCartQuantityArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("update_my_cart_quantity", "Updating your cart quantity")
+            return await self._commerce.update_my_cart_quantity(
+                listing_id=arguments.listing_id,
+                quantity=arguments.quantity,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "remove_from_my_cart" and isinstance(
+            arguments, RemoveFromMyCartArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("remove_from_my_cart", "Removing the item from your cart")
+            return await self._commerce.remove_from_my_cart(
+                listing_id=arguments.listing_id,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "prepare_my_checkout" and isinstance(
+            arguments, PrepareMyCheckoutArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("prepare_my_checkout", "Preparing your checkout")
+            return await self._commerce.prepare_my_checkout(
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "get_my_checkout" and isinstance(
+            arguments, GetMyCheckoutArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("get_my_checkout", "Reading your checkout")
+            return await self._commerce.get_my_checkout(
+                checkout_id=arguments.checkout_id,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "submit_my_checkout" and isinstance(
+            arguments, SubmitMyCheckoutArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("submit_my_checkout", "Submitting your checkout")
+            return await self._commerce.submit_my_checkout(
+                checkout_id=arguments.checkout_id,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "preview_my_order_cancellation" and isinstance(
+            arguments, PreviewMyOrderCancellationArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity(
+                    "preview_my_order_cancellation",
+                    "Checking order cancellation eligibility",
+                )
+            return await self._commerce.preview_my_order_cancellation(
+                order_id=arguments.order_id,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "cancel_my_order" and isinstance(
+            arguments, CancelMyOrderArguments
+        ):
+            return ToolObservation(
+                tool="cancel_my_order", status="REJECTED",
+                reason="CONFIRMATION_REQUIRED",
+            )
+        if tool == "get_my_return" and isinstance(arguments, GetMyReturnArguments):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity("get_my_return", "Reading your return status")
+            return await self._commerce.get_my_return(
+                order_id=arguments.order_id,
+                listing_id=arguments.listing_id,
+                store_name=arguments.store_name,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "prepare_my_return_request" and isinstance(
+            arguments, PrepareMyReturnRequestArguments
+        ):
+            assert self._commerce is not None
+            if activity is not None:
+                await activity(
+                    "prepare_my_return_request", "Checking return eligibility"
+                )
+            return await self._commerce.prepare_my_return_request(
+                order_id=arguments.order_id,
+                listing_id=arguments.listing_id,
+                store_name=arguments.store_name,
+                reason_code=arguments.reason_code,
+                comment=arguments.comment,
+                action_reference=action_reference,
+                authorization=actor_authorization,
+                correlation_id=correlation_id,
+            )
+        if tool == "submit_my_return_request" and isinstance(
+            arguments, SubmitMyReturnRequestArguments
+        ):
+            return ToolObservation(
+                tool="submit_my_return_request", status="REJECTED",
+                reason="CONFIRMATION_REQUIRED",
+            )
         return ToolObservation(tool=tool, status="REJECTED", reason="INVALID_ARGUMENTS")
+
+    async def revalidate_checkout_confirmation(
+        self,
+        *,
+        arguments: object,
+        actor_authorization: str | None,
+        correlation_id: str,
+    ):
+        from .schemas import SubmitCheckoutConfirmationArguments
+
+        if self._commerce is None:
+            return None
+        try:
+            binding = SubmitCheckoutConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return None
+        return await self._commerce.revalidate_checkout_confirmation(
+            binding=binding,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
+
+    async def cancel_checkout_confirmation(
+        self,
+        *,
+        arguments: object,
+        actor_authorization: str | None,
+        correlation_id: str,
+        action_reference: str | None,
+    ) -> bool:
+        """Releases a prepared checkout as application lifecycle cleanup."""
+
+        from .schemas import SubmitCheckoutConfirmationArguments
+
+        if self._commerce is None:
+            return False
+        try:
+            binding = SubmitCheckoutConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return False
+        return await self._commerce.cancel_prepared_checkout(
+            checkout_id=binding.checkout_id,
+            action_reference=action_reference,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
+
+    async def revalidate_order_cancellation_confirmation(
+        self,
+        *,
+        arguments: object,
+        actor_authorization: str | None,
+        correlation_id: str,
+    ):
+        from .schemas import CancelOrderConfirmationArguments
+
+        if self._commerce is None:
+            return None
+        try:
+            binding = CancelOrderConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return None
+        return await self._commerce.revalidate_order_cancellation_confirmation(
+            binding=binding,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
+
+    async def execute_confirmed_order_cancellation(
+        self,
+        *,
+        arguments: object,
+        actor_user_id: str,
+        actor_authorization: str | None,
+        correlation_id: str,
+        action_reference: str,
+        activity: ActivityCallback | None,
+    ) -> ToolObservation:
+        """Execute only an application-owned immutable cancellation binding."""
+
+        from .schemas import CancelOrderConfirmationArguments
+
+        capability = self.capability_boundary.evaluate("cancel_my_order")
+        if not capability.allowed or self._commerce is None:
+            return ToolObservation(
+                tool="cancel_my_order", status="REJECTED",
+                reason="CAPABILITY_DISABLED",
+            )
+        try:
+            binding = CancelOrderConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return ToolObservation(
+                tool="cancel_my_order", status="REJECTED",
+                reason="INVALID_ARGUMENTS",
+            )
+        del actor_user_id
+        if activity is not None:
+            await activity("cancel_my_order", "Requesting order cancellation")
+        return await self._commerce.cancel_my_order(
+            order_id=binding.order_id,
+            expected_version=binding.order_version,
+            action_reference=action_reference,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
+
+    async def revalidate_return_confirmation(
+        self,
+        *,
+        arguments: object,
+        actor_authorization: str | None,
+        correlation_id: str,
+    ):
+        from .schemas import SubmitReturnConfirmationArguments
+
+        if self._commerce is None:
+            return None
+        try:
+            binding = SubmitReturnConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return None
+        return await self._commerce.revalidate_return_confirmation(
+            binding=binding,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
+
+    async def execute_confirmed_return_request(
+        self,
+        *,
+        arguments: object,
+        actor_user_id: str,
+        actor_authorization: str | None,
+        correlation_id: str,
+        action_reference: str,
+        activity: ActivityCallback | None,
+    ) -> ToolObservation:
+        """Execute only the application-owned immutable customer request binding."""
+
+        from .schemas import SubmitReturnConfirmationArguments
+
+        capability = self.capability_boundary.evaluate("submit_my_return_request")
+        if not capability.allowed or self._commerce is None:
+            return ToolObservation(
+                tool="submit_my_return_request", status="REJECTED",
+                reason="CAPABILITY_DISABLED",
+            )
+        try:
+            binding = SubmitReturnConfirmationArguments.model_validate(arguments)
+        except Exception:
+            return ToolObservation(
+                tool="submit_my_return_request", status="REJECTED",
+                reason="INVALID_ARGUMENTS",
+            )
+        del actor_user_id
+        if activity is not None:
+            await activity(
+                "submit_my_return_request", "Submitting your return request"
+            )
+        return await self._commerce.submit_my_return_request(
+            binding=binding,
+            action_reference=action_reference,
+            authorization=actor_authorization,
+            correlation_id=correlation_id,
+        )
 
     async def _check_availability(
         self,
@@ -245,7 +787,10 @@ class MarketplaceAgentV2ToolRegistry:
             limit=arguments.limit,
         )
         try:
-            page = await self._product.search_individual(
+            search_marketplace = getattr(
+                self._product, "search_marketplace", self._product.search_individual
+            )
+            page = await search_marketplace(
                 actor_user_id=actor_user_id,
                 request=request,
                 correlation_id=correlation_id,
@@ -437,16 +982,77 @@ class MarketplaceAgentV2ToolRegistry:
         )
 
 
-def _strict_parameters(model: type[BaseModel]) -> dict[str, object]:
-    """Make every declared field required by Responses strict mode; nullable fields stay nullable."""
+def _refined_search_confirmation_summary(
+    arguments: SearchListingsArguments,
+) -> str:
+    """Derive customer confirmation prose from the immutable typed action."""
 
-    schema = model.model_json_schema()
+    details: list[str] = [f'for “{arguments.query}”']
+    if arguments.category_name is not None:
+        details.append(f'in category “{arguments.category_name}”')
+    if arguments.condition is not None:
+        details.append(f"in {arguments.condition.replace('_', ' ').title()} condition")
+    if arguments.maximum_price is not None and arguments.currency is not None:
+        details.append(
+            f"at or below {arguments.maximum_price} {arguments.currency}"
+        )
+    if arguments.city is not None:
+        details.append(f"near {arguments.city}")
+    return "Run the prepared marketplace search " + ", ".join(details) + "."
+
+
+def _strict_parameters(model: type[BaseModel]) -> dict[str, object]:
+    """Expose a lean strict schema; Pydantic remains the executable validator."""
+
+    schema = _provider_safe_schema(model.model_json_schema())
     properties = schema.get("properties")
-    if not isinstance(properties, dict) or not properties:
+    if not isinstance(properties, dict):
         raise RuntimeError("Marketplace Agent V2 tool schema has no properties")
     schema["required"] = list(properties)
     schema["additionalProperties"] = False
     return schema
+
+
+def _provider_safe_schema(raw: object) -> dict[str, object]:
+    """Remove generator-only constraints that can exhaust provider schema compilation."""
+
+    if not isinstance(raw, dict):
+        raise RuntimeError("Marketplace Agent V2 tool schema is invalid")
+    any_of = raw.get("anyOf")
+    if isinstance(any_of, list):
+        variants = tuple(_provider_safe_schema(item) for item in any_of)
+        primitive_types = tuple(
+            item.get("type") for item in variants
+            if set(item) == {"type"} and isinstance(item.get("type"), str)
+        )
+        if len(primitive_types) == len(variants):
+            selected = tuple(dict.fromkeys(primitive_types))
+            # Decimal accepts JSON numbers at the application boundary. Avoid a
+            # redundant string alternative that materially expands the strict grammar.
+            if "number" in selected and "string" in selected:
+                selected = tuple(item for item in selected if item != "string")
+            return {"type": list(selected)}
+        return {"anyOf": list(variants)}
+
+    result: dict[str, object] = {}
+    for key in ("type", "enum", "const", "description"):
+        if key in raw:
+            result[key] = raw[key]
+    properties = raw.get("properties")
+    if isinstance(properties, dict):
+        result["properties"] = {
+            name: _provider_safe_schema(value)
+            for name, value in properties.items()
+        }
+    items = raw.get("items")
+    if isinstance(items, dict):
+        result["items"] = _provider_safe_schema(items)
+    required = raw.get("required")
+    if isinstance(required, list):
+        result["required"] = list(required)
+    if result.get("type") == "object":
+        result["additionalProperties"] = False
+    return result
 
 
 def _tool_facets(

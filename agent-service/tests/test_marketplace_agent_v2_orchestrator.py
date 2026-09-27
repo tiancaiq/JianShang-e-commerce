@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -9,11 +9,23 @@ from msb_agent_service.marketplace_agent_v2.orchestrator import (
     MAX_AGENT_STEPS,
     MarketplaceAgentV2OrchestrationFailure,
     MarketplaceAgentV2Orchestrator,
+    _cart_mutation_reference_ambiguous,
+    _confirmation_answer,
+    _step_limit_content,
+    _validate_terminal_response,
+)
+from msb_agent_service.marketplace_agent_v2.capabilities import (
+    CapabilityFamily,
+    MarketplaceCustomerCapabilityBoundary,
 )
 from msb_agent_service.marketplace_agent_v2.policy import MarketplaceAgentV2ToolPolicy
+from msb_agent_service.marketplace_agent_v2.provider import MarketplaceAgentV2ProviderFailure
 from msb_agent_service.marketplace_agent_v2.schemas import (
+    CustomerCheckoutSnapshot,
+    CustomerOrderReference,
     ListingAttachment,
     MarketplaceAgentV2PendingInteraction,
+    MarketplaceScopeResult,
     ModelDecision,
     ToolObservation,
     ToolFacets,
@@ -23,10 +35,12 @@ from msb_agent_service.marketplace_agent_v2.tools import MarketplaceAgentV2ToolR
 
 
 LISTING_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+SECOND_LISTING_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+ORDER_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 
 
 class _Model:
-    def __init__(self, decisions: list[ModelDecision]) -> None:
+    def __init__(self, decisions: list[ModelDecision | Exception]) -> None:
         self.decisions = decisions
         self.calls: list[object] = []
         self.tool_sets: list[tuple[str, ...]] = []
@@ -37,6 +51,8 @@ class _Model:
         if not self.decisions:
             raise AssertionError("Unexpected sixth V2 model decision")
         decision = self.decisions.pop(0)
+        if isinstance(decision, Exception):
+            raise decision
         if decision.content is not None and kwargs["on_text_delta"] is not None:
             await kwargs["on_text_delta"](decision.content)
         return decision
@@ -95,6 +111,7 @@ class _Registry:
     def __init__(self, observation: ToolObservation) -> None:
         self.observation = observation
         self.executions = 0
+        self.execution_calls: list[dict[str, Any]] = []
 
     def provider_schemas(self) -> tuple[dict[str, object], ...]:
         return (
@@ -102,8 +119,9 @@ class _Registry:
             {"name": "get_listing"},
         )
 
-    async def execute(self, **_: Any) -> ToolObservation:
+    async def execute(self, **kwargs: Any) -> ToolObservation:
         self.executions += 1
+        self.execution_calls.append(kwargs)
         return self.observation
 
 
@@ -131,6 +149,375 @@ def _proposal(call_id: str = "call-1") -> ModelDecision:
 
 
 class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_parse_failure_recovers_natural_no_tool_terminal(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE"
+        ))
+        deltas: list[str] = []
+
+        async def capture(value: str) -> None:
+            deltas.append(value)
+
+        result = await MarketplaceAgentV2Orchestrator(
+            _FailingModel(MarketplaceAgentV2ProviderFailure(
+                "MODEL_RESPONSE_UNSUPPORTED"
+            )),
+            registry,
+        ).run(
+            actor_user_id=LISTING_ID,
+            current_message="What can you help me with?",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-natural-terminal-recovery",
+            text_delta=capture,
+        )
+
+        self.assertEqual(1, result.decision_count)
+        self.assertEqual(0, registry.executions)
+        self.assertIn("marketplace listings", result.message.content)
+        self.assertEqual(result.message.content, "".join(deltas))
+
+    async def test_listing_detail_terminal_is_rejected_until_get_listing_runs(self) -> None:
+        for message in (
+            "Tell me more about the second one.",
+            "Tell me more about the Office chair.",
+        ):
+            with self.subTest(message=message):
+                selected = _attachment().model_copy(update={
+                    "listing_id": SECOND_LISTING_ID,
+                    "title": "Office chair",
+                    "response_hash": "b" * 64,
+                })
+                observation = ToolObservation(
+                    tool="get_listing", status="SUCCEEDED",
+                    reason="LISTING_VERIFIED", attachments=(selected,),
+                )
+                registry = _Registry(observation)
+                model = _Model([
+                    ModelDecision(content="It is a current office chair listing."),
+                    ModelDecision(toolProposal=ToolProposal(
+                        callId="listing-detail", tool="get_listing",
+                        arguments={"listingId": SECOND_LISTING_ID},
+                    )),
+                    ModelDecision(content=(
+                        "The Office chair is currently listed for $99.00 in Good "
+                        "condition in Irvine."
+                    )),
+                ])
+
+                result = await MarketplaceAgentV2Orchestrator(
+                    model, registry
+                ).run(
+                    actor_user_id=LISTING_ID,
+                    current_message=message,
+                    recent_messages=(),
+                    referenced_listings=(_attachment(), selected),
+                    correlation_id="v2-listing-detail-selection",
+                )
+
+                self.assertEqual(1, registry.executions)
+                self.assertEqual(
+                    "get_listing", registry.execution_calls[0]["tool"]
+                )
+                self.assertEqual(
+                    SECOND_LISTING_ID,
+                    registry.execution_calls[0]["arguments"].listing_id,
+                )
+                self.assertIn("Office chair", result.message.content)
+
+    async def test_listing_availability_terminal_is_rejected_until_probe_runs(self) -> None:
+        observation = ToolObservation(
+            tool="check_availability", status="SUCCEEDED",
+            reason="RESULTS_AVAILABLE", broadInventoryCount=4,
+        )
+        registry = _Registry(observation)
+        registry.names = ("check_availability", "get_listing")
+        registry.provider_schemas = lambda: (  # type: ignore[method-assign]
+            {"name": "check_availability"}, {"name": "get_listing"},
+        )
+        model = _Model([
+            ModelDecision(content="It is available."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="availability", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(content=(
+                "There are currently active listings in that category; this "
+                "category-level check does not prove exact listing stock."
+            )),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Is the second one still available?",
+            recent_messages=(),
+            referenced_listings=(_attachment(), _attachment().model_copy(update={
+                "listing_id": SECOND_LISTING_ID,
+                "response_hash": "b" * 64,
+            })),
+            correlation_id="v2-availability-selection",
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(
+            "check_availability", registry.execution_calls[0]["tool"]
+        )
+        self.assertIn("category-level", result.message.content)
+
+    async def test_checkout_follow_up_reuses_reference_and_requires_checkout_read(self) -> None:
+        checkout = CustomerCheckoutSnapshot(
+            checkoutId=ORDER_ID,
+            status="PENDING_PAYMENT",
+            currency="USD",
+            subtotal=Decimal("20.00"),
+            shipping=Decimal("0.00"),
+            tax=Decimal("0.00"),
+            discount=Decimal("0.00"),
+            total=Decimal("20.00"),
+            expiresAt=datetime.now(UTC) + timedelta(minutes=15),
+            addressSummary="Saved address",
+            shippingSummary="Standard shipping",
+            items=({
+                "listingId": LISTING_ID,
+                "title": "Harbor Mouse Pad",
+                "quantity": 1,
+                "unitPrice": Decimal("20.00"),
+                "lineTotal": Decimal("20.00"),
+            },),
+        )
+        prior = ToolObservation(
+            tool="prepare_my_checkout", status="SUCCEEDED",
+            reason="CHECKOUT_READY", checkout=checkout,
+        )
+        refreshed = ToolObservation(
+            tool="get_my_checkout", status="SUCCEEDED",
+            reason="CHECKOUT_READY", checkout=checkout,
+        )
+        registry = _Registry(refreshed)
+        registry.names = ("get_my_checkout",)
+        registry.provider_schemas = lambda: (  # type: ignore[method-assign]
+            {"name": "get_my_checkout"},
+        )
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_CHECKOUT})
+        )
+        model = _Model([
+            ModelDecision(content="The checkout total is $20.00."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="checkout-read", tool="get_my_checkout",
+                arguments={"checkoutId": ORDER_ID},
+            )),
+            ModelDecision(content=(
+                "This checkout contains one Harbor Mouse Pad and the current "
+                "authoritative total is 20.00 USD."
+            )),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's in this checkout?",
+            recent_messages=(),
+            referenced_listings=(),
+            prior_observations=(prior,),
+            correlation_id="v2-checkout-read-selection",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_MARKETPLACE_STATUS",
+            ),
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual("get_my_checkout", registry.execution_calls[0]["tool"])
+        self.assertIn("Harbor Mouse Pad", result.message.content)
+
+    async def test_selected_order_survives_follow_up_without_relisting(self) -> None:
+        reference = CustomerOrderReference(
+            orderId=ORDER_ID, position=1
+        )
+        prior = ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+            orderReferences=(reference,),
+        )
+        refreshed = ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+            orderReferences=(reference,),
+        )
+        registry = _Registry(refreshed)
+        registry.names = ("list_my_orders", "get_my_order")
+        registry.provider_schemas = lambda: (  # type: ignore[method-assign]
+            {"name": "list_my_orders"}, {"name": "get_my_order"},
+        )
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_COMMERCE_READ})
+        )
+        model = _Model([
+            ModelDecision(content="That order is confirmed."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="refresh-selected-order", tool="get_my_order",
+                arguments={"orderId": ORDER_ID},
+            )),
+            ModelDecision(content="Your selected order is currently confirmed."),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's happening with it?",
+            recent_messages=(("USER", "Show me the first order."),),
+            referenced_listings=(),
+            prior_observations=(prior,),
+            correlation_id="v2-selected-order-follow-up",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_COMMERCE_FOLLOW_UP",
+            ),
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual("get_my_order", registry.execution_calls[0]["tool"])
+        self.assertNotIn("list_my_orders", (
+            item.tool for item in result.message.tool_activity
+        ))
+        self.assertIn("confirmed", result.message.content)
+
+    async def test_new_conversation_does_not_inherit_an_order_reference(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND"
+        ))
+        model = _Model([
+            ModelDecision(content="Which order do you mean?")
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's happening with it?",
+            recent_messages=(),
+            referenced_listings=(),
+            prior_observations=(),
+            correlation_id="v2-new-conversation-no-order-leak",
+        )
+
+        self.assertEqual(0, registry.executions)
+        self.assertEqual("Which order do you mean?", result.message.content)
+
+    async def test_empty_checkout_cannot_be_rewritten_as_an_unbound_confirmation(self) -> None:
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="prepare-empty-checkout",
+                tool="prepare_my_checkout",
+                arguments={},
+            )),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="duplicate-empty-checkout",
+                tool="prepare_my_checkout",
+                arguments={},
+            )),
+            ModelDecision(content=(
+                "I can prepare checkout for everything in your cart. "
+                "Reply Yes and I will proceed."
+            )),
+        ])
+        registry = _Registry(ToolObservation(
+            tool="prepare_my_checkout", status="REJECTED", reason="CHECKOUT_EMPTY",
+        ))
+        registry.names = ("prepare_my_checkout",)
+        registry.provider_schemas = lambda: ({"name": "prepare_my_checkout"},)  # type: ignore[method-assign]
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_CHECKOUT})
+        )
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Buy everything in my cart.",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-empty-checkout-terminal",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE",
+                requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH",
+                marketplaceContextUsed=False,
+                reasonCode="CUSTOMER_CHECKOUT",
+            ),
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(3, result.decision_count)
+        self.assertEqual(
+            "Your current cart is empty, so there is nothing to check out.",
+            result.message.content,
+        )
+        self.assertIsNone(result.pending_interaction)
+
+    async def test_checkout_decline_uses_checkout_copy_and_verified_release(self) -> None:
+        cancelled = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            type="CONFIRM_ACTION",
+            action="SUBMIT_CHECKOUT",
+            arguments={"checkoutId": "01ARZ3NDEKTSV4RRFFQ69G5FB6"},
+            status="CANCELLED",
+            createdAt=datetime.now(UTC),
+        )
+        model = _Model([])
+
+        result = await MarketplaceAgentV2Orchestrator(
+            model,
+            _Registry(ToolObservation(
+                tool="search_listings", status="SUCCEEDED",
+                reason="RESULTS_AVAILABLE",
+            )),
+        ).run(
+            actor_user_id=LISTING_ID,
+            current_message="No",
+            recent_messages=(),
+            referenced_listings=(),
+            confirmed_interaction=cancelled,
+            checkout_release_verified=True,
+            correlation_id="v2-checkout-decline-copy",
+        )
+
+        self.assertEqual(0, len(model.calls))
+        self.assertIn("cancelled that prepared checkout", result.message.content)
+        self.assertIn("inventory hold", result.message.content)
+        self.assertNotIn("refined search", result.message.content)
+
+    async def test_buy_it_without_any_reference_gets_one_checkout_clarification(self) -> None:
+        model = _Model([ModelDecision(content="must not run")])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE"
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Buy it",
+            recent_messages=(),
+            referenced_listings=(),
+            prior_observations=(),
+            correlation_id="v2-buy-it-unresolved",
+        )
+
+        self.assertEqual(0, len(model.calls))
+        self.assertEqual(0, registry.executions)
+        self.assertEqual(
+            "Which item do you mean? Checkout uses your whole current cart, so "
+            "please name the item or ask me to review the cart first.",
+            result.message.content,
+        )
+
+    async def test_confirmation_intent_is_narrow_and_never_treats_maybe_as_consent(self) -> None:
+        for value in ("Yes", "Confirm", "Go ahead", "Do it"):
+            with self.subTest(value=value):
+                self.assertTrue(_confirmation_answer(value))
+        for value in (
+            "No", "Never mind", "Don't do it", "Cancel that",
+            "No, keep the order.",
+        ):
+            with self.subTest(value=value):
+                self.assertIs(_confirmation_answer(value), False)
+        self.assertIsNone(_confirmation_answer("maybe"))
+        self.assertIsNone(_confirmation_answer("yes to something else"))
+
     async def test_never_mind_uses_the_narrow_zero_model_cancellation_gate(self) -> None:
         model = _Model([ModelDecision(content="must not run")])
         registry = _Registry(ToolObservation(
@@ -158,6 +545,10 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
     async def test_model_failures_cross_the_boundary_as_safe_categories(self) -> None:
         for error, expected in (
             (ValueError("private response body"), "MODEL_DECISION_INVALID"),
+            (
+                MarketplaceAgentV2ProviderFailure("MODEL_OUTPUT_LIMIT_EXCEEDED"),
+                "MODEL_OUTPUT_LIMIT_EXCEEDED",
+            ),
             (RuntimeError("private provider detail"), "MODEL_PROVIDER_UNAVAILABLE"),
         ):
             with self.subTest(expected=expected):
@@ -273,15 +664,12 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
             text_delta=capture,
         )
 
-        self.assertEqual(MAX_AGENT_STEPS, result.decision_count)
+        self.assertEqual(1, result.decision_count)
         self.assertEqual(0, registry.executions)
         self.assertNotIn("three business days", result.message.content)
-        self.assertEqual([result.message.content], deltas)
-        self.assertIn("official marketplace document", result.message.content)
-        self.assertIn(
-            "GROUNDING_REQUIRED",
-            {item.reason for item in result.observations},
-        )
+        self.assertEqual(result.message.content, "".join(deltas))
+        self.assertIn("within 30 days of delivery", result.message.content)
+        self.assertIn("does not approve", result.message.content)
 
     async def test_current_price_claim_without_listing_evidence_is_rejected(self) -> None:
         model = _Model([
@@ -305,6 +693,58 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("GROUNDING_REQUIRED", {
             item.reason for item in result.observations
         })
+
+    async def test_explicit_understandable_discovery_rejects_pre_search_clarification(self) -> None:
+        for message, query in (
+            ("Find Harbor business items", "Harbor Business"),
+            ("Search the marketplace for a desk", "desk"),
+        ):
+            with self.subTest(message=message):
+                attachment = _attachment().model_copy(update={
+                    "title": f"Current {query} result",
+                })
+                observation = ToolObservation(
+                    tool="search_listings",
+                    status="SUCCEEDED",
+                    reason="RESULTS_AVAILABLE",
+                    normalizedQuery=query,
+                    resultCount=1,
+                    attachments=(attachment,),
+                )
+                model = _Model([
+                    ModelDecision(content=(
+                        "What subtype, price, condition, or location do you prefer?"
+                    )),
+                    ModelDecision(toolProposal=ToolProposal(
+                        callId=f"search-{query}",
+                        tool="search_listings",
+                        arguments={"query": query, "limit": 5},
+                    )),
+                    ModelDecision(content="I found a current marketplace result."),
+                ])
+                registry = _Registry(observation)
+
+                result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+                    actor_user_id=LISTING_ID,
+                    current_message=message,
+                    recent_messages=(),
+                    referenced_listings=(),
+                    correlation_id=f"v2-results-first-{query}",
+                    scope_result=MarketplaceScopeResult(
+                        scope="IN_SCOPE",
+                        requiredGrounding="LISTING_DATA",
+                        confidence="HIGH",
+                        marketplaceContextUsed=False,
+                        reasonCode="MARKETPLACE_DISCOVERY",
+                    ),
+                )
+
+                self.assertEqual(1, registry.executions)
+                self.assertEqual(3, result.decision_count)
+                self.assertEqual((attachment,), result.message.attachments)
+                self.assertEqual(
+                    "GROUNDING_REQUIRED", model.calls[1].observations[-1].reason
+                )
 
     async def test_natural_greeting_accepts_common_two_question_response_shape(self) -> None:
         model = _Model([ModelDecision(content=(
@@ -399,6 +839,48 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.message.tool_activity[0].observed_at)
         self.assertEqual("LISTING", result.evidence[0].source_type)
         self.assertEqual(LISTING_ID, result.evidence[0].source_id)
+
+    async def test_internal_zero_result_reason_is_buffered_and_translated(self) -> None:
+        observation = ToolObservation(
+            tool="search_listings",
+            status="SUCCEEDED",
+            reason="CATEGORY_UNAVAILABLE",
+            normalizedQuery="teleporting marketplace sofa",
+            resultCount=0,
+        )
+        model = _ToolThenChunkedModel(
+            ModelDecision(toolProposal=ToolProposal(
+                callId="teleport-search",
+                tool="search_listings",
+                arguments={"query": "teleporting marketplace sofa", "limit": 5},
+            )),
+            ("No listings were returned because ", "CATEGORY_UNAVAILABLE."),
+        )
+        registry = _Registry(observation)
+        deltas: list[str] = []
+
+        async def capture(value: str) -> None:
+            deltas.append(value)
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Find me a sofa that can teleport me to the moon.",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-zero-result-reason-redaction",
+            text_delta=capture,
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(2, result.decision_count)
+        self.assertEqual(result.message.content, "".join(deltas))
+        self.assertNotIn("CATEGORY_UNAVAILABLE", result.message.content)
+        self.assertNotIn("CATEGORY_UNAVAILABLE", "".join(deltas))
+        self.assertEqual(
+            'I checked current availability for "teleporting marketplace sofa" '
+            "and found no active listings.",
+            result.message.content,
+        )
 
     async def test_diverse_results_are_presented_before_a_grounded_optional_refinement(self) -> None:
         second_attachment = _attachment().model_copy(update={
@@ -1050,6 +1532,115 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("search_listings", "get_listing"), model.tool_sets[0])
         self.assertEqual((), model.tool_sets[1])
 
+    async def test_explicit_discovery_recovers_failed_initial_model_decision(self) -> None:
+        harbor = _attachment().model_copy(update={
+            "title": "Harbor Business Desk Lamp",
+        })
+        observation = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE",
+            normalizedQuery="Harbor", resultCount=1, attachments=(harbor,),
+        )
+        model = _Model([
+            MarketplaceAgentV2ProviderFailure("MODEL_RESPONSE_UNSUPPORTED"),
+            ModelDecision(content="I found one current Harbor listing."),
+        ])
+        registry = _Registry(observation)
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Find Harbor business items",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-results-first-model-recovery",
+        )
+
+        self.assertEqual(2, result.decision_count)
+        self.assertEqual(1, registry.executions)
+        self.assertEqual("Harbor", registry.execution_calls[0]["arguments"].query)
+        self.assertEqual(5, registry.execution_calls[0]["arguments"].limit)
+        self.assertEqual((harbor,), result.message.attachments)
+
+    async def test_successful_search_survives_unsupported_model_synthesis(self) -> None:
+        observation = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE",
+            normalizedQuery="desk", resultCount=1,
+            attachments=(_attachment().model_copy(update={
+                "title": "Restored oak writing desk",
+            }),),
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="desk-search", tool="search_listings",
+                arguments={"query": "desk", "limit": 5},
+            )),
+            MarketplaceAgentV2ProviderFailure("MODEL_RESPONSE_UNSUPPORTED"),
+        ])
+        deltas: list[str] = []
+
+        async def capture(delta: str) -> None:
+            deltas.append(delta)
+
+        result = await MarketplaceAgentV2Orchestrator(
+            model, _Registry(observation)
+        ).run(
+            actor_user_id=LISTING_ID,
+            current_message="Search the marketplace for a desk",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-search-synthesis-fallback",
+            text_delta=capture,
+        )
+
+        self.assertEqual(2, result.decision_count)
+        self.assertEqual(1, len(result.message.attachments))
+        self.assertEqual(
+            "I found 1 current listing matching your request. "
+            "The verified option is shown below.",
+            result.message.content,
+        )
+        self.assertEqual(result.message.content, "".join(deltas))
+
+    async def test_successful_search_replaces_invalid_synthesis_before_streaming(self) -> None:
+        observation = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE",
+            normalizedQuery="desk", resultCount=1,
+            attachments=(_attachment().model_copy(update={
+                "title": "Restored oak writing desk",
+            }),),
+        )
+        model = _ToolThenChunkedModel(
+            ModelDecision(toolProposal=ToolProposal(
+                callId="desk-search", tool="search_listings",
+                arguments={"query": "desk", "limit": 5},
+            )),
+            ("Which desk result ", "would you like?"),
+        )
+        deltas: list[str] = []
+
+        async def capture(delta: str) -> None:
+            deltas.append(delta)
+
+        result = await MarketplaceAgentV2Orchestrator(
+            model, _Registry(observation)
+        ).run(
+            actor_user_id=LISTING_ID,
+            current_message="Search the marketplace for a desk",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-search-invalid-synthesis-fallback",
+            text_delta=capture,
+        )
+
+        self.assertEqual(2, result.decision_count)
+        self.assertEqual(1, len(result.message.attachments))
+        self.assertEqual(
+            "I found 1 current listing matching your request. "
+            "The verified option is shown below.",
+            result.message.content,
+        )
+        self.assertEqual(result.message.content, "".join(deltas))
+        self.assertNotIn("Which desk", "".join(deltas))
+
     async def test_nonexistent_comparison_ordinal_is_rejected_before_persistence(self) -> None:
         model = _Model([ModelDecision(
             content="The third one is best because its condition is new."
@@ -1383,20 +1974,73 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
                     "type": "CONFIRM_ACTION", "action": "RUN_REFINED_SEARCH",
                 },
             )),
-            ModelDecision(content="Would you like me to run that narrower search? Yes or no."),
         ])
         registry = MarketplaceAgentV2ToolRegistry(object())  # type: ignore[arg-type]
+        prepared: list[MarketplaceAgentV2PendingInteraction] = []
+        deltas: list[str] = []
+
+        async def persist_confirmation(
+            interaction: MarketplaceAgentV2PendingInteraction,
+        ) -> MarketplaceAgentV2PendingInteraction:
+            durable = interaction.model_copy(update={
+                "expires_at": datetime.now(UTC) + timedelta(minutes=15)
+            })
+            prepared.append(durable)
+            return durable
+
+        async def capture_delta(delta: str) -> None:
+            deltas.append(delta)
 
         result = await MarketplaceAgentV2Orchestrator(model, registry).run(
             actor_user_id=LISTING_ID,
             current_message="Could you narrow these further?",
             recent_messages=(), referenced_listings=(_attachment(),),
             correlation_id="v2-pending-interaction",
+            confirmation_prepared=persist_confirmation,
+            text_delta=capture_delta,
         )
 
+        self.assertEqual(1, len(prepared))
         self.assertEqual("WAITING", result.pending_interaction.status)
         self.assertEqual("RUN_REFINED_SEARCH", result.pending_interaction.action)
+        self.assertEqual(
+            "Run the prepared marketplace search for “lamp”, at or below "
+            "25 USD. Confirm?",
+            result.message.content,
+        )
+        self.assertEqual(result.message.content, "".join(deltas))
         self.assertEqual((), result.message.tool_activity)
+        self.assertEqual(1, result.decision_count)
+
+    def test_confirmation_policy_revalidates_the_live_search_tool(self) -> None:
+        interaction = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            confirmationId="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH",
+            arguments={"query": "lamp", "limit": 5},
+            summary="Run the prepared marketplace search for lamp.",
+            status="WAITING",
+            createdAt=datetime.now(UTC),
+        )
+        enabled = MarketplaceAgentV2Orchestrator(
+            _Model([]),
+            MarketplaceAgentV2ToolRegistry(object()),  # type: ignore[arg-type]
+        )
+        disabled_registry = _Registry(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_VERIFIED"
+        ))
+        disabled_registry.names = ("get_listing",)
+        disabled = MarketplaceAgentV2Orchestrator(_Model([]), disabled_registry)
+        kill_switched = MarketplaceAgentV2Orchestrator(
+            _Model([]),
+            MarketplaceAgentV2ToolRegistry(object()),  # type: ignore[arg-type]
+            confirmation_execution_enabled=False,
+        )
+
+        self.assertTrue(enabled.confirmation_policy_allows(interaction))
+        self.assertFalse(disabled.confirmation_policy_allows(interaction))
+        self.assertFalse(kill_switched.confirmation_policy_allows(interaction))
 
     async def test_yes_without_waiting_interaction_cannot_execute_a_tool(self) -> None:
         model = _Model([
@@ -1461,6 +2105,7 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_action_offers_are_rejected(self) -> None:
         offers = (
             "Would you like me to start a purchase for the first listing?",
+            "Would you like to proceed to checkout?",
             "I can show the seller's pickup and payment instructions next.",
         )
         for index, offer in enumerate(offers):
@@ -1478,6 +2123,48 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
                         correlation_id=f"v2-unavailable-action-{index}",
                     )
                 self.assertEqual("MODEL_RESPONSE_UNSUPPORTED", caught.exception.kind)
+
+    async def test_explicit_checkout_request_gets_capability_boundary_response(self) -> None:
+        model = _Model([ModelDecision(content=(
+            "I couldn't find an official marketplace document that answers that clearly."
+        ))])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE"
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Check out my cart and pay now.",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-checkout-boundary",
+        )
+
+        self.assertEqual(1, result.decision_count)
+        self.assertEqual(0, registry.executions)
+        self.assertEqual(
+            "I can help with your cart, but I can’t check out, take payment, or place "
+            "an order. No checkout, payment, or order was started.",
+            result.message.content,
+        )
+
+    async def test_disabled_checkout_explains_whole_cart_purchase_unavailability(self) -> None:
+        model = _Model([ModelDecision(content="Your cart has two items.")])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE"
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Buy everything in my cart",
+            recent_messages=(),
+            referenced_listings=(),
+            correlation_id="v2-whole-cart-checkout-disabled",
+        )
+
+        self.assertEqual(1, result.decision_count)
+        self.assertIn("can’t check out", result.message.content)
+        self.assertIn("No checkout, payment, or order was started", result.message.content)
 
     async def test_stream_blocks_gallery_execution_claim_before_exposure(self) -> None:
         model = _ChunkedModel((
@@ -1542,7 +2229,7 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("MODEL_RESPONSE_UNSUPPORTED", caught.exception.kind)
 
-    async def test_consumed_confirmation_reaches_post_search_model_context(self) -> None:
+    async def test_consumed_confirmation_completes_from_search_without_model(self) -> None:
         consumed = MarketplaceAgentV2PendingInteraction(
             id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
             action="RUN_REFINED_SEARCH", arguments={"query": "lamp under 30", "limit": 5},
@@ -1560,9 +2247,10 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
             correlation_id="v2-consumed-context",
         )
 
-        self.assertEqual("CONSUMED", model.calls[0].pending_interaction.status)
+        self.assertEqual(0, len(model.calls))
         self.assertEqual(1, registry.executions)
         self.assertEqual(1, len(result.message.attachments))
+        self.assertEqual("CONSUMED", result.message.pending_interaction.status)
 
     async def test_consumed_search_replaces_repeated_confirmation_with_grounded_result(self) -> None:
         consumed = MarketplaceAgentV2PendingInteraction(
@@ -1587,6 +2275,141 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(result.message.attachments))
         self.assertNotIn("?", result.message.content)
         self.assertNotIn("yes/no", result.message.content.casefold())
+
+    async def test_consumed_search_owns_category_unavailable_terminal_response(self) -> None:
+        consumed = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH", arguments={"query": "lamp under 20", "limit": 5},
+            status="CONSUMED", createdAt=datetime.now(UTC),
+        )
+        model = _Model([ModelDecision(content=(
+            "Proceed to run the prepared marketplace search now?"
+        ))])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="CATEGORY_UNAVAILABLE",
+            normalizedQuery="lamp under 20", resultCount=0,
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID, current_message="yes", recent_messages=(),
+            referenced_listings=(), confirmed_interaction=consumed,
+            correlation_id="v2-consumed-category-unavailable",
+        )
+
+        self.assertEqual(
+            'I checked current availability for "lamp under 20" and found no active listings.',
+            result.message.content,
+        )
+        self.assertEqual("CONSUMED", result.message.pending_interaction.status)
+        self.assertNotIn("proceed", result.message.content.casefold())
+        self.assertNotIn("?", result.message.content)
+
+    async def test_consumed_search_owns_search_unavailable_terminal_response(self) -> None:
+        consumed = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH", arguments={"query": "lamp under 20", "limit": 5},
+            status="CONSUMED", createdAt=datetime.now(UTC),
+        )
+        model = _Model([ModelDecision(content=(
+            "I will run the prepared marketplace search after you confirm."
+        ))])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="FAILED", reason="SEARCH_UNAVAILABLE",
+            normalizedQuery="lamp under 20",
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID, current_message="yes", recent_messages=(),
+            referenced_listings=(), confirmed_interaction=consumed,
+            correlation_id="v2-consumed-search-unavailable",
+        )
+
+        self.assertEqual(
+            "I could not complete the marketplace check because the service is "
+            "temporarily unavailable. Please try again.",
+            result.message.content,
+        )
+        self.assertNotIn("confirm", result.message.content.casefold())
+
+    async def test_ambiguous_confirmation_preserves_waiting_action_without_model_or_tool(self) -> None:
+        pending = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH", arguments={"query": "lamp under 20", "limit": 5},
+            status="WAITING", createdAt=datetime.now(UTC),
+        )
+        model = _Model([])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="CATEGORY_UNAVAILABLE",
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID, current_message="maybe", recent_messages=(),
+            referenced_listings=(), pending_interaction=pending,
+            correlation_id="v2-ambiguous-confirmation",
+        )
+
+        self.assertEqual(0, len(model.calls))
+        self.assertEqual(0, registry.executions)
+        self.assertEqual("WAITING", result.pending_interaction.status)
+        self.assertEqual(
+            "Please answer yes to run that exact prepared search, or no to cancel it.",
+            result.message.content,
+        )
+
+    async def test_terminal_confirmation_replay_is_explained_without_model_or_tool(self) -> None:
+        for status, expected in (
+            ("CONSUMED", "already been completed"),
+            ("CANCELLED", "was cancelled"),
+            ("EXPIRED", "expired"),
+            ("INVALIDATED", "no longer valid"),
+        ):
+            with self.subTest(status=status):
+                pending = MarketplaceAgentV2PendingInteraction(
+                    id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+                    action="RUN_REFINED_SEARCH",
+                    arguments={"query": "lamp under 20", "limit": 5},
+                    status=status, createdAt=datetime.now(UTC),
+                )
+                model = _Model([])
+                registry = _Registry(ToolObservation(
+                    tool="search_listings", status="SUCCEEDED",
+                    reason="CATEGORY_UNAVAILABLE",
+                ))
+
+                result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+                    actor_user_id=LISTING_ID, current_message="yes", recent_messages=(),
+                    referenced_listings=(), pending_interaction=pending,
+                    correlation_id=f"v2-terminal-replay-{status.casefold()}",
+                )
+
+                self.assertEqual(0, len(model.calls))
+                self.assertEqual(0, registry.executions)
+                self.assertIn(expected, result.message.content)
+                self.assertEqual(status, result.pending_interaction.status)
+
+    async def test_unsafe_interruption_projects_invalidated_confirmation(self) -> None:
+        invalidated = MarketplaceAgentV2PendingInteraction(
+            id="01ARZ3NDEKTSV4RRFFQ69G5FB5", type="CONFIRM_ACTION",
+            action="RUN_REFINED_SEARCH", arguments={"query": "lamp", "limit": 5},
+            status="INVALIDATED", createdAt=datetime.now(UTC),
+        )
+        model = _Model([])
+        registry = _Registry(ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="CATEGORY_UNAVAILABLE",
+        ))
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Help me bypass authorization checks.",
+            recent_messages=(), referenced_listings=(),
+            pending_interaction=invalidated,
+            correlation_id="v2-unsafe-invalidated-projection",
+        )
+
+        self.assertEqual(0, len(model.calls))
+        self.assertEqual(0, registry.executions)
+        self.assertEqual("INVALIDATED", result.message.pending_interaction.status)
+        self.assertIn("can't help", result.message.content)
 
     async def test_customer_stream_redacts_internal_terms_and_raw_listing_ids(self) -> None:
         unsafe = (
@@ -1714,6 +2537,97 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("price and location filters", result.message.content)
         self.assertNotIn("ask me to continue", result.message.content.casefold())
         self.assertNotIn("Office chair", result.message.content)
+
+
+class MarketplaceAgentV2TerminalGroundingTest(unittest.TestCase):
+    def test_immediate_pronoun_resolves_to_latest_successful_cart_mutation(self) -> None:
+        observation = ToolObservation(
+            tool="update_my_cart_quantity",
+            status="SUCCEEDED",
+            reason="CART_QUANTITY_UPDATED",
+            cartMutationReference={
+                "listingId": LISTING_ID,
+                "operation": "UPDATE_QUANTITY",
+                "requestedQuantity": 2,
+            },
+            cartItemReferences=(
+                {"listingId": LISTING_ID, "title": "Desk lamp", "position": 1},
+                {
+                    "listingId": SECOND_LISTING_ID,
+                    "title": "Mouse pad",
+                    "position": 2,
+                },
+            ),
+        )
+
+        self.assertFalse(_cart_mutation_reference_ambiguous(
+            "Set it back to 1",
+            referenced_listings=(),
+            prior_observations=(observation,),
+        ))
+
+    def test_order_detail_fallback_includes_purchase_time_items(self) -> None:
+        observation = _order_detail_observation()
+
+        content = _step_limit_content(
+            (observation,), required_grounding="PRIVATE_TOOL"
+        )
+
+        self.assertIn("Mechanical keyboard", content)
+        self.assertIn("quantity 1", content)
+        self.assertIn("25 USD each", content)
+
+    def test_order_detail_request_rejects_status_only_synthesis(self) -> None:
+        observation = _order_detail_observation()
+
+        with self.assertRaises(MarketplaceAgentV2OrchestrationFailure):
+            _validate_terminal_response(
+                current_message="Show me the first order",
+                content="Your order is currently shipped.",
+                active_recommendations=(),
+                current_attachments=(),
+                observations=(observation,),
+                has_waiting_interaction=False,
+            )
+
+        _validate_terminal_response(
+            current_message="Show me the first order",
+            content="Your order is shipped and includes Mechanical keyboard.",
+            active_recommendations=(),
+            current_attachments=(),
+            observations=(observation,),
+            has_waiting_interaction=False,
+        )
+
+
+def _order_detail_observation() -> ToolObservation:
+    observed_at = datetime.now(UTC)
+    return ToolObservation.model_validate({
+        "tool": "get_my_order",
+        "status": "SUCCEEDED",
+        "reason": "ORDER_FOUND",
+        "order": {
+            "orderId": ORDER_ID,
+            "status": "SHIPPED",
+            "paymentStatus": "SUCCEEDED",
+            "total": {"amount": Decimal("25"), "currency": "USD"},
+            "createdAt": observed_at,
+            "updatedAt": observed_at,
+            "groups": ({
+                "storeName": "Keyboard Store",
+                "status": "SHIPPED",
+                "total": {"amount": Decimal("25"), "currency": "USD"},
+                "items": ({
+                    "listingId": LISTING_ID,
+                    "title": "Mechanical keyboard",
+                    "quantity": 1,
+                    "purchaseUnitPrice": Decimal("25"),
+                    "lineTotal": Decimal("25"),
+                    "currency": "USD",
+                },),
+            },),
+        },
+    })
 
 
 class MarketplaceAgentV2PolicyTest(unittest.TestCase):

@@ -9,7 +9,7 @@ COPY . .
 ARG FRONTEND_BUILD_CONFIGURATION=production
 ARG GATEWAY_FEATURE_AGENT_DISCOVERY=false
 RUN case "$FRONTEND_BUILD_CONFIGURATION" in \
-      demo-ai|demo-ai-discovery|demo-cart-ai-discovery) \
+      demo-ai|demo-ai-discovery|demo-agent-v2|demo-cart-ai-discovery) \
         if [ "$GATEWAY_FEATURE_AGENT_DISCOVERY" != "true" ]; then \
           echo "Discovery frontend builds require GATEWAY_FEATURE_AGENT_DISCOVERY=true." >&2; \
           exit 1; \

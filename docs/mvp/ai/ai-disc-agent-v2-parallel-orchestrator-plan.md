@@ -340,16 +340,19 @@ unsupported exact-match counts or best claims, duplicate follow-up prose,
 results-without-evidence claims, and newly introduced listing identities.
 
 For a materially changed refined search only, the model may propose the strict
-no-I/O `request_confirmation` control action. The resulting pending interaction
-is stored in existing V2 session JSON and in the originating assistant action
-snapshot. A committed `yes` or `no` atomically changes `WAITING` to `CONSUMED`
-or `CANCELLED`; only the first accepted confirmation can run its stored search.
-Ordinary result display and comparison never require confirmation. No database
-migration or legacy endpoint change is required.
+no-I/O `request_confirmation` control action. AI-CONF-01 stores the resulting
+exact action in the Agent-owned durable confirmation table before it may be
+displayed; V2 session JSON is only its conversation display projection. A
+committed `yes` atomically progresses `PENDING` through `CONFIRMED` to
+single-use `CONSUMED`, while a committed `no` moves it to `CANCELLED`.
+Expiration, invalidation, actor/session/origin binding, and a stable action key
+prevent refresh, retry, or concurrent confirmation from broadening or repeating
+the stored search. Ordinary result display and comparison never require
+confirmation. The V21 migration does not alter a legacy endpoint.
 
 ## Action-evidence boundary (`AI-DISC-AGENT-V2-ACTION-EVIDENCE-02`)
 
-Only a persisted `WAITING` refined-search interaction may solicit a yes/no
+Only a persisted `PENDING` refined-search confirmation may solicit a yes/no
 answer. Listing display, comparison, and detail guidance remain direct and do
 not create confirmation state. A rejected or failed tool observation cannot be
 followed by prose claiming that the action completed.
@@ -509,13 +512,20 @@ wire field is introduced.
 The localhost Marketplace runtime uses `docker-compose.demo-ai-main.yml` as an
 override of `docker-compose.demo.yml`. The override selects dedicated
 `main-ai` image tags for Agent, Gateway, and frontend, builds the frontend with
-`demo-agent-v2` so the dedicated V2 route and unified assistant surfaces are
-present, and keeps both Cart and Agent Discovery Gateway flags enabled. The
-overlay also pins the approved non-secret Agent activation
-categories: persistence, customer-service compatibility, and Marketplace V2
-are enabled; legacy Discovery, the V2 kill switch, hybrid retrieval, and query
-embedding remain disabled. This prevents an unrelated local business-only build of a mutable
-`latest` image from silently becoming the running port-4200 Marketplace site.
+`demo-cart-ai-discovery` so the dedicated V2 route, unified assistant surfaces,
+and authoritative Cart UI are present, and keeps both Cart and Agent Discovery
+Gateway flags enabled. The
+overlay also pins the approved non-secret Agent activation categories:
+knowledge retrieval, persistence, customer-service compatibility, Marketplace
+V2 Product tools, customer commerce reads, and cart mutations are enabled; the
+Order Service URL is wired to the Compose-owned service. Legacy Discovery, the
+V2 kill switch, hybrid retrieval, and query embedding remain disabled. The V2
+provider decision budget is explicitly `4096` output tokens (validated from
+`512` through `4096`) because Responses output limits include reasoning and
+tool-call output. An incomplete `max_output_tokens` response is classified as
+`MODEL_OUTPUT_LIMIT_EXCEEDED`, separately from provider unavailability. This
+prevents an unrelated local business-only build of a mutable `latest` image
+from silently becoming the running port-4200 Marketplace site.
 
 The overlay does not change production defaults or include credentials. Local
 publication continues to use the existing Compose environment opaquely and
