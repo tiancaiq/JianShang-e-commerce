@@ -56,6 +56,7 @@ Cleanup verification status:
 | `ADM-USER-01/02` | Complete |
 | `ADM-BUS-04/05` | Complete |
 | `ADM-LIST-06` | Complete |
+| `ADM-RC-02` | Complete — PASS WITH FOLLOW-UP |
 
 ## MVP Slices
 
@@ -558,8 +559,10 @@ Status: implemented. Payment Service owns permission-gated, server-paginated pay
 
 ## ADM-SUP-00/01 support operations
 
-Status: implemented; final acceptance awaits a green repository-wide Playwright
-run across the mixed live-fixture and route-mocked suites. Auth Service owns requester-safe support tickets,
+Status: complete. Final live requester/admin privacy and repository acceptance
+are recorded in
+[ADM-RC-02 evidence](../../qa/admin-rc-02-production-acceptance-2026-09-01.md).
+Auth Service owns requester-safe support tickets,
 participant messages, private notes, a filterable admin inbox, claim/release,
 priority, validated cross-domain links, explicit handoffs, resolution,
 optimistic locking, idempotency, and audit history. Owner services expose only
@@ -596,9 +599,10 @@ engine exists. See [admin-governance.md](admin-governance.md).
 
 ## ADM-ANL-01 admin analytics and operational insights
 
-Status: implemented, including authoritative final appeal outcomes and the
-appeal-adjustment rate; final acceptance remains pending the complete live and
-repository verification matrix. Auth owns a permissioned read-only facade;
+Status: complete, including authoritative final appeal outcomes and the
+appeal-adjustment rate. Final live and repository acceptance is recorded in
+[ADM-RC-02 evidence](../../qa/admin-rc-02-production-acceptance-2026-09-01.md).
+Auth owns a permissioned read-only facade;
 Product, Order, Payment, and ADM-SYS retain their source data and expose bounded
 aggregate reads. UTC half-open ranges, equal-duration comparisons,
 finance/system/governance visibility, partial failure, typed drill-downs,

@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -162,7 +163,7 @@ public class CatalogService {
         return governanceClient.evaluateCategoryDisable(context.accessToken(), category, impact, request, key);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CategoryDetail changeStatus(String categoryId, String idempotencyKey,
                                        ChangeCategoryStatusRequest request) {
         AdminContext context = require(AdminPermission.CATALOG_POLICY_MANAGE);
@@ -172,6 +173,9 @@ public class CatalogService {
                 .orElse(null);
         if (replay != null) return replay(replay, hash, context);
         CatalogRepository.CategoryRow before = locked(categoryId);
+        // A concurrent caller may have committed the same command while this transaction waited on the category lock.
+        replay = repository.idempotency(context.userId(), "CATEGORY_STATUS", key).orElse(null);
+        if (replay != null) return replay(replay, hash, context);
         CategoryStatus status = required(request.status(), "Status");
         if (status == before.status()) return detail(before.id(), context);
         Instant now = Instant.now();

@@ -40,6 +40,7 @@ class OrderDisputeRepositoryMySqlIntegrationTests {
         String url = MYSQL.getJdbcUrl() + (MYSQL.getJdbcUrl().contains("?") ? "&" : "?")
                 + "connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true";
         var dataSource = new DriverManagerDataSource(url, MYSQL.getUsername(), MYSQL.getPassword());
+        Flyway.configure().dataSource(dataSource).target("15").load().migrate();
         Flyway.configure().dataSource(dataSource).load().migrate();
         jdbc = new JdbcTemplate(dataSource);
         disputes = new OrderDisputeRepository(jdbc, new ObjectMapper().findAndRegisterModules());
