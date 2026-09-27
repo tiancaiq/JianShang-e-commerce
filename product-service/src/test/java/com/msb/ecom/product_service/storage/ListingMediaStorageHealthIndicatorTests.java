@@ -6,7 +6,7 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.Status;
 
 import java.time.Duration;
-import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,12 +27,12 @@ class ListingMediaStorageHealthIndicatorTests {
         assertEquals(Status.UP, health.getStatus());
         assertEquals("metadata-only", health.getDetails().get("check"));
         verify(storage, never()).verifyReadable(org.mockito.ArgumentMatchers.anyString());
-        verify(repository, never()).findStorageHealthCheckObjectKey();
+        verify(repository, never()).findStorageHealthCheckObjectKeys(org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
     void s3UsesPersistedUploadedObjectWhenNoOverrideIsConfigured() {
-        when(repository.findStorageHealthCheckObjectKey()).thenReturn(Optional.of("private/known-image.png"));
+        when(repository.findStorageHealthCheckObjectKeys(25)).thenReturn(List.of("private/known-image.png"));
 
         Health health = indicator("s3", "").health();
 
@@ -43,8 +43,23 @@ class ListingMediaStorageHealthIndicatorTests {
     }
 
     @Test
+    void s3SkipsMissingMetadataOnlyObjectAndUsesNextReadableCandidate() {
+        when(repository.findStorageHealthCheckObjectKeys(25)).thenReturn(List.of(
+                "private/missing-image.png",
+                "private/known-image.png"));
+        org.mockito.Mockito.doThrow(new StorageObjectNotFoundException("missing"))
+                .when(storage).verifyReadable("private/missing-image.png");
+
+        Health health = indicator("s3", "").health();
+
+        assertEquals(Status.UP, health.getStatus());
+        verify(storage).verifyReadable("private/missing-image.png");
+        verify(storage).verifyReadable("private/known-image.png");
+    }
+
+    @Test
     void accessDeniedReturnsOnlyANonSecretReasonCode() {
-        when(repository.findStorageHealthCheckObjectKey()).thenReturn(Optional.of("private/known-image.png"));
+        when(repository.findStorageHealthCheckObjectKeys(25)).thenReturn(List.of("private/known-image.png"));
         org.mockito.Mockito.doThrow(new StorageObjectAccessDeniedException("provider detail"))
                 .when(storage).verifyReadable("private/known-image.png");
 
@@ -58,7 +73,7 @@ class ListingMediaStorageHealthIndicatorTests {
 
     @Test
     void missingKnownObjectMakesS3DeploymentUnhealthy() {
-        when(repository.findStorageHealthCheckObjectKey()).thenReturn(Optional.empty());
+        when(repository.findStorageHealthCheckObjectKeys(25)).thenReturn(List.of());
 
         Health health = indicator("s3", "").health();
 

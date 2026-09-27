@@ -10,6 +10,7 @@ public class ListingMediaStorageHealthIndicator implements HealthIndicator {
 
     private static final String MODE_LOCAL_DEMO = "local-demo";
     private static final String MODE_S3 = "s3";
+    private static final int MAX_PERSISTED_OBJECT_CANDIDATES = 25;
 
     private final ListingMediaStorage storage;
     private final ListingMediaStorageProperties properties;
@@ -39,18 +40,24 @@ public class ListingMediaStorageHealthIndicator implements HealthIndicator {
 
         try {
             String configuredObjectKey = trimmed(properties.healthCheckObjectKey());
-            String check = configuredObjectKey.isEmpty() ? "persisted-object" : "configured-object";
-            String objectKey = configuredObjectKey.isEmpty()
-                    ? mediaRepository.findStorageHealthCheckObjectKey().orElse("")
-                    : configuredObjectKey;
-            if (objectKey.isEmpty()) {
-                return down(mode, "NO_CHECK_OBJECT", check);
+            if (!configuredObjectKey.isEmpty()) {
+                storage.verifyReadable(configuredObjectKey);
+                return up(mode, "configured-object");
             }
-            storage.verifyReadable(objectKey);
-            return Health.up()
-                    .withDetail("mode", mode)
-                    .withDetail("check", check)
-                    .build();
+
+            var objectKeys = mediaRepository.findStorageHealthCheckObjectKeys(MAX_PERSISTED_OBJECT_CANDIDATES);
+            if (objectKeys.isEmpty()) {
+                return down(mode, "NO_CHECK_OBJECT", "persisted-object");
+            }
+            for (String objectKey : objectKeys) {
+                try {
+                    storage.verifyReadable(objectKey);
+                    return up(mode, "persisted-object");
+                } catch (StorageObjectNotFoundException ignored) {
+                    // Local-demo metadata can outlive its intentionally absent object bytes.
+                }
+            }
+            return down(mode, "OBJECT_NOT_FOUND", "persisted-object");
         } catch (StorageObjectAccessDeniedException exception) {
             return down(mode, "ACCESS_DENIED", checkType());
         } catch (StorageObjectNotFoundException exception) {
@@ -58,6 +65,13 @@ public class ListingMediaStorageHealthIndicator implements HealthIndicator {
         } catch (RuntimeException exception) {
             return down(mode, "STORAGE_UNAVAILABLE", checkType());
         }
+    }
+
+    private Health up(String mode, String check) {
+        return Health.up()
+                .withDetail("mode", mode)
+                .withDetail("check", check)
+                .build();
     }
 
     private Health down(String mode, String reason, String check) {
