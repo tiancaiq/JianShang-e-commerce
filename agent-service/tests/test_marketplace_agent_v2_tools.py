@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import httpx
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -632,6 +633,33 @@ class MarketplaceAgentV2ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
             [("check_availability", "Checking current availability")], activities
         )
         self.assertEqual((), result.attachments)
+
+    async def test_availability_distinguishes_unknown_category_from_product_outage(self) -> None:
+        class _StatusProduct(_Product):
+            def __init__(self, status_code: int) -> None:
+                super().__init__()
+                self.status_code = status_code
+
+            async def probe_availability(self, **_: Any) -> DiscoveryAvailabilityProbe:
+                request = httpx.Request("GET", "http://product.test/availability")
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError("probe failed", request=request, response=response)
+
+        for code, status, reason in (
+            (404, "REJECTED", "CATEGORY_NOT_FOUND"),
+            (400, "REJECTED", "INVALID_ARGUMENTS"),
+            (503, "FAILED", "SEARCH_UNAVAILABLE"),
+        ):
+            with self.subTest(code=code):
+                result = await MarketplaceAgentV2ToolRegistry(_StatusProduct(code)).execute(
+                    tool="check_availability",
+                    arguments=CheckAvailabilityArguments(category="Home & Garden"),
+                    actor_user_id=ACTOR,
+                    correlation_id="availability-status",
+                    activity=None,
+                )
+                self.assertEqual(status, result.status)
+                self.assertEqual(reason, result.reason)
 
     async def test_zero_inventory_is_explicit_and_never_inferred_from_empty_search(self) -> None:
         product = _Product(inventory=0)

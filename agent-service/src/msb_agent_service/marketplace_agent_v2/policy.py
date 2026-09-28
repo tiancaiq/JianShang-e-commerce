@@ -18,6 +18,7 @@ from .schemas import (
     GetListingArguments,
     ListMyOrdersArguments,
     RemoveFromMyCartArguments,
+    RetrieveHelpArguments,
     PrepareMyCheckoutArguments,
     PreviewMyOrderCancellationArguments,
     CancelMyOrderArguments,
@@ -79,15 +80,20 @@ class MarketplaceAgentV2ToolPolicy:
     required_return_reason: str | None = None
     return_comment_source: str = ""
     seen_calls: set[str] = field(default_factory=set)
+    successful_read_calls: set[str] = field(default_factory=set)
+    last_call_fingerprint: str | None = None
+    successful_order_ids_this_turn: set[str] = field(default_factory=set)
     search_executed: bool = False
     cart_mutation_attempted: bool = False
     order_cancellation_attempted: bool = False
     return_preparation_attempted: bool = False
+    knowledge_retrieval_attempted: bool = False
     orders_listed_this_turn: bool = False
     order_ids_read_this_turn: set[str] = field(default_factory=set)
     return_targets_read_this_turn: set[tuple[str, str, str]] = field(
         default_factory=set
     )
+    skill_allowed_tools: frozenset[str] | None = None
     return_eligible_this_turn: bool = False
     return_blocked_this_turn: bool = False
     capability_boundary: MarketplaceCustomerCapabilityBoundary = field(
@@ -111,6 +117,13 @@ class MarketplaceAgentV2ToolPolicy:
                 status="REJECTED",
                 reason=reason,
             )
+        if (
+            self.skill_allowed_tools is not None
+            and proposal.tool not in self.skill_allowed_tools
+        ):
+            return None, self._rejection(
+                proposal.tool, "SKILL_TOOL_NOT_ALLOWED"
+            )
         if self.message_scope in {"OUT_OF_SCOPE", "CONVERSATIONAL"}:
             return None, self._rejection(
                 proposal.tool, "MESSAGE_OUT_OF_MARKETPLACE_SCOPE"
@@ -118,12 +131,21 @@ class MarketplaceAgentV2ToolPolicy:
         if (
             proposal.tool != "collect_listing_information"
             and (
-                self.required_grounding in {"NONE", "KNOWLEDGE_RAG"}
+                self.required_grounding == "NONE"
+                or (
+                    self.required_grounding == "KNOWLEDGE_RAG"
+                    and proposal.tool != "retrieve_help"
+                )
                 or (
                     self.required_grounding == "PRIVATE_TOOL"
                     and proposal.tool not in _PRIVATE_COMMERCE_TOOLS
                 )
             )
+        ):
+            return None, self._rejection(proposal.tool, "GROUNDING_TOOL_REQUIRED")
+        if (
+            proposal.tool == "retrieve_help"
+            and self.required_grounding != "KNOWLEDGE_RAG"
         ):
             return None, self._rejection(proposal.tool, "GROUNDING_TOOL_REQUIRED")
         if (
@@ -191,6 +213,8 @@ class MarketplaceAgentV2ToolPolicy:
             return None, self._rejection(proposal.tool, "COMPARISON_CONTEXT_REQUIRED")
         if proposal.tool == "search_listings" and self.search_executed:
             return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
+        if proposal.tool == "retrieve_help" and self.knowledge_retrieval_attempted:
+            return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
         if proposal.tool in _CART_MUTATION_TOOLS and self.cart_mutation_attempted:
             return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
         if (
@@ -213,7 +237,9 @@ class MarketplaceAgentV2ToolPolicy:
         if not 1 <= step <= 5:
             return None, self._rejection(proposal.tool, "STEP_BUDGET_EXHAUSTED")
         try:
-            if proposal.tool == "check_availability":
+            if proposal.tool == "retrieve_help":
+                arguments = RetrieveHelpArguments.model_validate(proposal.arguments)
+            elif proposal.tool == "check_availability":
                 arguments = CheckAvailabilityArguments.model_validate(proposal.arguments)
             elif proposal.tool == "search_listings":
                 arguments = SearchListingsArguments.model_validate(proposal.arguments)
@@ -278,7 +304,12 @@ class MarketplaceAgentV2ToolPolicy:
             and not isinstance(arguments, GetMyReturnArguments)
             and arguments.order_id in self.order_ids_read_this_turn
         ):
-            return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
+            return None, self._rejection(
+                proposal.tool,
+                "READ_ALREADY_SATISFIED"
+                if arguments.order_id in self.successful_order_ids_this_turn
+                else "DUPLICATE_TOOL_CALL",
+            )
         if isinstance(arguments, GetMyReturnArguments) and not isinstance(
             arguments, PrepareMyReturnRequestArguments
         ):
@@ -426,8 +457,14 @@ class MarketplaceAgentV2ToolPolicy:
             ).encode("utf-8")
         ).hexdigest()
         if fingerprint in self.seen_calls:
-            return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
+            return None, self._rejection(
+                proposal.tool,
+                "READ_ALREADY_SATISFIED"
+                if fingerprint in self.successful_read_calls
+                else "DUPLICATE_TOOL_CALL",
+            )
         self.seen_calls.add(fingerprint)
+        self.last_call_fingerprint = fingerprint
         if isinstance(arguments, ListMyOrdersArguments):
             self.orders_listed_this_turn = True
         elif (
@@ -449,6 +486,25 @@ class MarketplaceAgentV2ToolPolicy:
         """Prevent another Product search after this turn reached a terminal search fact."""
 
         self.prior_observations = (*self.prior_observations, observation)[-5:]
+        if observation.tool in {
+            "get_listing", "check_availability", "get_my_checkout", "get_my_order",
+        } and observation.status == "SUCCEEDED" and self.last_call_fingerprint and (
+            observation.tool == "check_availability"
+            or observation.tool == "get_listing" and bool(observation.attachments)
+            or observation.tool == "get_my_checkout" and observation.checkout is not None
+            or observation.tool == "get_my_order" and observation.order is not None
+        ):
+            self.successful_read_calls.add(self.last_call_fingerprint)
+            if observation.tool == "get_my_order" and observation.order is not None:
+                self.successful_order_ids_this_turn.add(observation.order.order_id)
+        if observation.tool in _CART_MUTATION_TOOLS | {
+            "submit_my_checkout", "cancel_my_order", "submit_my_return_request",
+        } and observation.status == "SUCCEEDED":
+            # A state-changing event may require an exact same-target revalidation.
+            self.seen_calls.difference_update(self.successful_read_calls)
+            self.successful_read_calls.clear()
+            self.order_ids_read_this_turn.clear()
+            self.successful_order_ids_this_turn.clear()
         if observation.tool == "get_my_cart" and observation.status == "SUCCEEDED":
             # A model-first cart read may resolve a named or ordinal cart target in
             # the same turn. Trust only the actor-owned references returned by the
@@ -464,6 +520,8 @@ class MarketplaceAgentV2ToolPolicy:
             "SUCCEEDED", "FAILED",
         }:
             self.search_executed = True
+        if observation.tool == "retrieve_help":
+            self.knowledge_retrieval_attempted = True
         if observation.tool in _CART_MUTATION_TOOLS:
             self.cart_mutation_attempted = True
         if observation.tool == "preview_my_order_cancellation":

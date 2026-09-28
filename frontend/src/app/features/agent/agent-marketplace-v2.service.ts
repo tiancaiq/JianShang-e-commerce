@@ -16,8 +16,12 @@ const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const PUBLIC_LISTING_MEDIA = /^\/api\/v1\/public\/listing-media\/[0-9A-HJKMNP-TV-Z]{26}$/;
 const TOOLS = [
-  'check_availability', 'search_listings', 'get_listing', 'request_confirmation',
-  'collect_listing_information',
+  'retrieve_help', 'check_availability', 'search_listings', 'get_listing', 'request_confirmation',
+  'collect_listing_information', 'get_my_cart', 'list_my_orders', 'get_my_order',
+  'add_to_my_cart', 'update_my_cart_quantity', 'remove_from_my_cart',
+  'prepare_my_checkout', 'get_my_checkout', 'submit_my_checkout',
+  'preview_my_order_cancellation', 'cancel_my_order',
+  'get_my_return', 'prepare_my_return_request', 'submit_my_return_request',
 ] as const;
 const TOOL_STATUSES = ['SUCCEEDED', 'REJECTED', 'FAILED'] as const;
 const CONDITIONS = ['NEW', 'OPEN_BOX', 'LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS'] as const;
@@ -338,22 +342,31 @@ function parseRefinement(value: unknown): void {
 function parsePendingInteraction(value: unknown): void {
   if (value === null) return;
   const record = object(value);
-  exact(record, [
+  exactWithOptional(record, [
     'id', 'type', 'action', 'workflowType', 'field', 'question', 'arguments',
     'status', 'createdAt',
+  ], [
+    'confirmationId', 'summary', 'expiresAt',
   ]);
   const sellerField = record['type'] === 'ANSWER_FIELD';
   if (!ULID.test(String(record['id']))
       || !['CONFIRM_ACTION', 'SELECT_OPTION', 'ANSWER_FIELD'].includes(String(record['type']))
-      || !['WAITING', 'CONSUMED', 'CANCELLED'].includes(String(record['status']))) {
+      || !['WAITING', 'CONFIRMED', 'CONSUMED', 'CANCELLED', 'EXPIRED', 'INVALIDATED']
+        .includes(String(record['status']))) {
     throw new MarketplaceAgentV2ContractError();
   }
+  if ('confirmationId' in record) nullableUlid(record['confirmationId']);
+  if ('summary' in record) nullableString(record['summary']);
+  if ('expiresAt' in record && record['expiresAt'] !== null) date(record['expiresAt']);
   if (sellerField) {
     if (record['action'] !== null || record['workflowType'] !== 'CREATE_LISTING'
         || !['ITEM_TYPE', 'TITLE', 'CONDITION', 'PRICE', 'DESCRIPTION', 'LOCATION', 'FULFILLMENT']
           .includes(String(record['field']))) throw new MarketplaceAgentV2ContractError();
     string(record['question']);
-  } else if (!['SHOW_DETAILS', 'COMPARE_LISTINGS', 'RUN_REFINED_SEARCH']
+  } else if (![
+    'SHOW_DETAILS', 'COMPARE_LISTINGS', 'RUN_REFINED_SEARCH',
+    'SUBMIT_CHECKOUT', 'CANCEL_ORDER', 'SUBMIT_RETURN_REQUEST',
+  ]
       .includes(String(record['action']))
       || record['workflowType'] !== null || record['field'] !== null
       || record['question'] !== null) {

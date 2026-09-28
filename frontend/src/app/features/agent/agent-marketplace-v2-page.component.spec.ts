@@ -5,6 +5,36 @@ import { AgentMarketplaceV2PageComponent } from './agent-marketplace-v2-page.com
 import { AgentMarketplaceV2Service } from './agent-marketplace-v2.service';
 
 describe('AgentMarketplaceV2PageComponent results-first presentation', () => {
+  it('clears previous evaluation evidence in a new conversation', async () => {
+    const service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
+      'AgentMarketplaceV2Service',
+      ['createSession', 'listMessages', 'streamMessage', 'retryResponse', 'stopMessage'],
+    );
+    service.createSession.and.returnValue(of({
+      sessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', sessionType: 'MARKETPLACE_AGENT_V2',
+      status: 'OPEN', createdAt: '2026-09-28T01:00:00Z', updatedAt: '2026-09-28T01:00:00Z',
+    }));
+    service.listMessages.and.returnValue(of({ data: [], hasMore: false }));
+    await TestBed.configureTestingModule({
+      imports: [AgentMarketplaceV2PageComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: AgentMarketplaceV2Service, useValue: service },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(AgentMarketplaceV2PageComponent);
+    fixture.detectChanges();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fixture.componentInstance.evidence.set({
+      modelCalls: 1, action: 'Previous action', policy: 'Previous policy',
+      executedTool: 'None', eventOrder: 'done',
+    });
+
+    await fixture.componentInstance.newConversation();
+
+    expect(fixture.componentInstance.evidence()).toBeNull();
+  });
+
   it('renders a customer-facing embedded shell without evaluation-only labels', async () => {
     const service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
       'AgentMarketplaceV2Service',
@@ -75,6 +105,44 @@ describe('AgentMarketplaceV2PageComponent results-first presentation', () => {
     expect(fixture.nativeElement.querySelector('.follow-up')).toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('Marketplace discovery');
     expect(fixture.nativeElement.textContent).not.toContain('Retry response');
+  });
+
+  it('renders stable help citations from persisted assistant messages', async () => {
+    const service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
+      'AgentMarketplaceV2Service',
+      ['createSession', 'listMessages', 'streamMessage', 'retryResponse', 'stopMessage'],
+    );
+    service.createSession.and.returnValue(of({
+      sessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', sessionType: 'MARKETPLACE_AGENT_V2',
+      status: 'OPEN', createdAt: '2026-09-28T01:00:00Z', updatedAt: '2026-09-28T01:00:00Z',
+    }));
+    service.listMessages.and.returnValue(of({ data: [{
+      id: '01ARZ3NDEKTSV4RRFFQ69G5FAW', role: 'ASSISTANT',
+      body: 'Use the favorite control on a listing to save it.',
+      clientMessageId: null, retryable: false, responseRetryUserMessageId: null,
+      createdAt: '2026-09-28T01:00:02Z', message: {
+        role: 'ASSISTANT', content: 'Use the favorite control on a listing to save it.',
+        attachments: [], refinement: null, pendingInteraction: null,
+        citations: ['HELP-FAVORITES-001: Save and revisit favorite listings'],
+        toolActivity: [], inputTokens: 10, outputTokens: 8,
+      },
+    }], hasMore: false }));
+
+    await TestBed.configureTestingModule({
+      imports: [AgentMarketplaceV2PageComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: AgentMarketplaceV2Service, useValue: service },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(AgentMarketplaceV2PageComponent);
+    fixture.detectChanges();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fixture.detectChanges();
+
+    const sources = fixture.nativeElement.querySelector('.citations');
+    expect(sources.textContent).toContain('Sources');
+    expect(sources.textContent).toContain('HELP-FAVORITES-001');
   });
 
   it('renders validated cards before an optional refinement and never auto-sends it', async () => {
@@ -276,6 +344,66 @@ describe('AgentMarketplaceV2PageComponent results-first presentation', () => {
     expect(fixture.nativeElement.textContent).toContain('What are you selling?');
     expect(fixture.nativeElement.querySelector('.follow-up')).toBeNull();
     expect(fixture.nativeElement.querySelectorAll('.follow-up button').length).toBe(0);
+  });
+
+  it('clears prior confirmation controls from the authoritative terminal SSE response', async () => {
+    const service = jasmine.createSpyObj<AgentMarketplaceV2Service>(
+      'AgentMarketplaceV2Service',
+      ['createSession', 'listMessages', 'streamMessage', 'retryResponse', 'stopMessage'],
+    );
+    const sessionId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    const confirmationId = '01ARZ3NDEKTSV4RRFFQ69G5FAX';
+    const pending = {
+      id: confirmationId, type: 'CONFIRM_ACTION' as const,
+      action: 'SUBMIT_RETURN_REQUEST' as const, arguments: {},
+      workflowType: null, field: null, question: null,
+      status: 'WAITING' as const, createdAt: '2026-08-03T01:00:01Z',
+    };
+    const stream = new Subject<import('./agent-marketplace-v2.model').MarketplaceAgentV2StreamEvent>();
+    service.createSession.and.returnValue(of({
+      sessionId, sessionType: 'MARKETPLACE_AGENT_V2', status: 'OPEN',
+      createdAt: '2026-08-03T01:00:00Z', updatedAt: '2026-08-03T01:00:00Z',
+    }));
+    service.listMessages.and.returnValue(of({ data: [{
+      id: '01ARZ3NDEKTSV4RRFFQ69G5FAW', role: 'ASSISTANT',
+      body: 'Submit this return request?', clientMessageId: null,
+      retryable: false, responseRetryUserMessageId: null,
+      createdAt: '2026-08-03T01:00:02Z', message: {
+        role: 'ASSISTANT', content: 'Submit this return request?',
+        attachments: [], refinement: null, pendingInteraction: pending,
+        citations: [], toolActivity: [], inputTokens: 0, outputTokens: 0,
+      },
+    }], hasMore: false }));
+    service.streamMessage.and.returnValue(stream);
+    await TestBed.configureTestingModule({
+      imports: [AgentMarketplaceV2PageComponent],
+      providers: [provideZonelessChangeDetection(),
+        { provide: AgentMarketplaceV2Service, useValue: service }],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(AgentMarketplaceV2PageComponent);
+    fixture.detectChanges();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fixture.componentInstance.draft = 'No, never mind.';
+    await fixture.componentInstance.send();
+    const userMessage = {
+      id: '01ARZ3NDEKTSV4RRFFQ69G5FAY', role: 'USER' as const,
+      body: 'No, never mind.', createdAt: '2026-08-03T01:00:03Z',
+    };
+    stream.next({ schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1',
+      sequence: 1, type: 'message_started', userMessage });
+    stream.next({ schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1',
+      sequence: 2, type: 'done', messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ',
+      response: { sessionId, userMessage,
+        assistantMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ', decisionCount: 0,
+        message: { role: 'ASSISTANT', content: "Okay — I won't submit that return request.",
+          attachments: [], refinement: null,
+          pendingInteraction: { ...pending, status: 'CANCELLED' },
+          citations: [], toolActivity: [], inputTokens: 0, outputTokens: 0 },
+      },
+    });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.messages()[0].pendingInteraction?.status).toBe('CANCELLED');
+    expect(fixture.nativeElement.querySelector('.follow-up')).toBeNull();
   });
 
   it('restores the persisted terminal assistant and Retry response after a stream error', async () => {

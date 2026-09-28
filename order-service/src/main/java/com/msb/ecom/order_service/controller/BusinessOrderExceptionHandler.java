@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.List;
 
-@RestControllerAdvice(assignableTypes = BusinessOrderController.class)
+@RestControllerAdvice(assignableTypes = {BusinessOrderController.class, BusinessOrderReturnController.class})
 public class BusinessOrderExceptionHandler {
 
     @ExceptionHandler(BusinessOrderException.class)

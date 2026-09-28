@@ -262,6 +262,7 @@ class MarketplaceAgentV2Service:
                     referenced_listings=referenced,
                     pending_interaction=current_pending,
                     preference_state=session.preference_state,
+                    prior_observations=prior_observations,
                 )
                 pending_workflow_cancelled = False
                 if current_workflow is not None and current_workflow.status != "CANCELLED":
@@ -359,6 +360,7 @@ class MarketplaceAgentV2Service:
                         referenced_listings=referenced,
                         pending_interaction=current_pending,
                         preference_state=session.preference_state,
+                        prior_observations=prior_observations,
                     )
                 elif confirmation is not None:
                     scope_result = self._scope_classifier.classify(
@@ -367,6 +369,7 @@ class MarketplaceAgentV2Service:
                         referenced_listings=referenced,
                         pending_interaction=current_pending,
                         preference_state=session.preference_state,
+                        prior_observations=prior_observations,
                     )
                     if (
                         not confirmation
@@ -477,6 +480,7 @@ class MarketplaceAgentV2Service:
                         referenced_listings=referenced,
                         pending_interaction=current_pending,
                         preference_state=session.preference_state,
+                        prior_observations=prior_observations,
                     )
                     if (
                         current_pending is not None
@@ -603,7 +607,9 @@ class MarketplaceAgentV2Service:
                         if tool_activity.status == "SUCCEEDED"
                         else None
                     ),
-                    source_refs=(),
+                    source_refs=_tool_audit_source_refs(
+                        tool_activity, result.observations
+                    ),
                     result_status=(
                         AgentToolCallStatus.SUCCEEDED
                         if tool_activity.status == "SUCCEEDED"
@@ -634,6 +640,11 @@ class MarketplaceAgentV2Service:
                     **result.message.refinement.model_dump(
                         mode="json", by_alias=True, exclude_none=True
                     ),
+                })
+            if result.message.citations:
+                message_actions.append({
+                    "type": "MARKETPLACE_AGENT_V2_CITATIONS",
+                    "citations": list(result.message.citations),
                 })
             if result.pending_interaction is not None:
                 message_actions.append({
@@ -1097,13 +1108,40 @@ def _assistant_message(message: AgentMessage) -> MarketplaceAgentV2Message:
         ),
         None,
     )
+    citations = _persisted_citations(message.actions)
     return MarketplaceAgentV2Message(
         content=message.body,
         attachments=attachments,
         refinement=refinement,
         pendingInteraction=pending,
+        citations=citations,
         toolActivity=activities,
     )
+
+
+def _persisted_citations(
+    actions: tuple[dict[str, object], ...],
+) -> tuple[str, ...]:
+    """Restore only bounded public citations written by this Agent version."""
+
+    for action in actions:
+        if action.get("type") != "MARKETPLACE_AGENT_V2_CITATIONS":
+            continue
+        raw = action.get("citations")
+        if not isinstance(raw, list) or len(raw) > 10:
+            return ()
+        result: list[str] = []
+        for item in raw:
+            if (
+                not isinstance(item, str)
+                or item != item.strip()
+                or not 1 <= len(item) <= 500
+            ):
+                return ()
+            if item not in result:
+                result.append(item)
+        return tuple(result)
+    return ()
 
 
 def _referenced_listings(messages: tuple[AgentMessage, ...]) -> tuple[ListingAttachment, ...]:
@@ -1236,7 +1274,9 @@ def _recent_observations(messages: tuple[AgentMessage, ...]) -> tuple[ToolObserv
                 result.append(ToolObservation.model_validate_json(json.dumps(payload)))
             except Exception:
                 continue
-    return tuple(result[-5:])
+    # Keep bounded actor-owned identities across a short commerce conversation;
+    # persisted observations below contain references, never stale cart/order facts.
+    return tuple(result[-12:])
 
 
 def _persistable_observation(observation: ToolObservation) -> ToolObservation:
@@ -1375,6 +1415,22 @@ def _tool_observation_latency(
 ) -> int:
     observation = _matching_tool_observation(activity, observations)
     return 0 if observation is None or observation.latency_ms is None else observation.latency_ms
+
+
+def _tool_audit_source_refs(
+    activity: ToolActivity,
+    observations: tuple[ToolObservation, ...],
+) -> tuple[dict[str, object], ...]:
+    """Persist exact public-help identities and versions for retrieval audits."""
+
+    observation = _matching_tool_observation(activity, observations)
+    if observation is None or activity.tool != "retrieve_help":
+        return ()
+    return tuple({
+        "sourceType": "KNOWLEDGE_DOCUMENT",
+        "sourceId": passage.article_id,
+        "sourceVersion": passage.version,
+    } for passage in observation.knowledge_passages)
 
 
 def _hash(value: object) -> str:

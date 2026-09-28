@@ -35,7 +35,9 @@ from msb_agent_service.marketplace_agent_v2.schemas import (
     MarketplaceAgentV2PendingInteraction,
     MarketplaceAgentV2Refinement,
     OrchestrationResult,
+    ToolActivity,
     ToolFacets,
+    HelpKnowledgePassage,
     ToolObservation,
 )
 from msb_agent_service.marketplace_agent_v2.seller_workflow import (
@@ -105,13 +107,15 @@ class _Conversation:
         self.failure_kwargs: dict[str, object] | None = None
         self.completion_kwargs: dict[str, object] | None = None
         self.tool_calls = 0
+        self.tool_call_kwargs: list[dict[str, object]] = []
 
     @property
     def maximum_failed_retries(self) -> int:
         return 2
 
-    async def append_tool_call(self, **_: Any) -> None:
+    async def append_tool_call(self, **kwargs: Any) -> None:
         self.tool_calls += 1
+        self.tool_call_kwargs.append(kwargs)
         return None
 
     async def complete_invocation(self, **kwargs: Any) -> tuple[AgentInvocation, AgentMessage]:
@@ -391,6 +395,39 @@ class _EvidenceOrchestrator(_Orchestrator):
                 sourceType="LISTING", sourceId="01ARZ3NDEKTSV4RRFFQ69G5FB1",
                 version="a" * 64, retrievedAt=NOW,
             ),),
+            scopeResult=kwargs["scope_result"],
+        )
+
+
+class _HelpCitationOrchestrator(_Orchestrator):
+    async def run(self, **kwargs: Any) -> OrchestrationResult:
+        passage = HelpKnowledgePassage(
+            articleId="HELP-FAVORITES-001",
+            title="Save and revisit favorite listings",
+            section="Save a listing",
+            audience="signed-in marketplace users",
+            excerpt="Open a listing and use the heart control.",
+            availability="core",
+            version="a" * 64,
+        )
+        observation = ToolObservation(
+            tool="retrieve_help", status="SUCCEEDED",
+            reason="KNOWLEDGE_AVAILABLE", knowledgePassages=(passage,),
+            observedAt=NOW,
+        )
+        return OrchestrationResult(
+            message=MarketplaceAgentV2Message(
+                content="Open the listing and use the heart control.",
+                citations=(
+                    "HELP-FAVORITES-001: Save and revisit favorite listings — Save a listing",
+                ),
+                toolActivity=(ToolActivity(
+                    tool="retrieve_help", status="SUCCEEDED",
+                    reason="KNOWLEDGE_AVAILABLE", observedAt=NOW,
+                ),),
+            ),
+            decisionCount=2,
+            observations=(observation,),
             scopeResult=kwargs["scope_result"],
         )
 
@@ -941,6 +978,38 @@ class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("LISTING", evidence["sourceType"])
         self.assertNotIn(evidence["sourceId"], response.message.content)
+
+    async def test_help_citations_and_tool_sources_survive_persistence_projection(self) -> None:
+        persistence = _Persistence()
+        service = MarketplaceAgentV2Service(
+            persistence, _HelpCitationOrchestrator(),
+            provider_name="openai", model_name="test",
+        )
+
+        response = await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="How do I save a favorite listing?", correlation_id="v2-help",
+        )
+
+        actions = persistence.conversation.completion_kwargs["actions"]
+        citation_action = next(
+            action for action in actions
+            if action.get("type") == "MARKETPLACE_AGENT_V2_CITATIONS"
+        )
+        stored = replace(
+            _assistant(),
+            body=response.message.content,
+            actions=tuple(actions),
+        )
+        restored = _assistant_message(stored)
+
+        self.assertEqual(list(response.message.citations), citation_action["citations"])
+        self.assertEqual(response.message.citations, restored.citations)
+        self.assertEqual(({
+            "sourceType": "KNOWLEDGE_DOCUMENT",
+            "sourceId": "HELP-FAVORITES-001",
+            "sourceVersion": "a" * 64,
+        },), persistence.conversation.tool_call_kwargs[0]["source_refs"])
 
     async def test_rejected_capability_persists_minimal_policy_audit(self) -> None:
         persistence = _Persistence()

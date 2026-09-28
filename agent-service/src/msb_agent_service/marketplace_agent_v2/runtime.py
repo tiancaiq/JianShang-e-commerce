@@ -21,10 +21,13 @@ from .orchestrator import MarketplaceAgentV2Orchestrator
 from .provider import OpenAIMarketplaceAgentV2Model
 from .tools import MarketplaceAgentV2ToolRegistry
 from .capabilities import (
+    CUSTOMER_CAPABILITIES,
     CapabilityFamily,
     MarketplaceCustomerCapabilityBoundary,
 )
 from .commerce import CommerceReadClient
+from .help_knowledge import HelpKnowledgeRetriever
+from .skill_registry import SkillRegistry
 
 
 @dataclass
@@ -124,18 +127,27 @@ def build_marketplace_agent_v2_runtime(
                 "Marketplace Agent V2 return requests require commerce reads"
             )
         enabled_families.add(CapabilityFamily.CUSTOMER_RETURN_REQUEST)
+    help_knowledge = None
+    if selected.help_knowledge_enabled:
+        assert selected.help_corpus_path is not None
+        help_knowledge = HelpKnowledgeRetriever(selected.help_corpus_path)
+        enabled_families.add(CapabilityFamily.CUSTOMER_KNOWLEDGE_READ)
     capability_boundary = MarketplaceCustomerCapabilityBoundary(
         frozenset(enabled_families)
     )
     tool_registry = MarketplaceAgentV2ToolRegistry(
         product,
         commerce=commerce,
+        help_knowledge=help_knowledge,
         direct_result_max=selected.direct_result_max,
         clarification_result_min=selected.clarification_result_min,
         max_clarification_options=selected.max_clarification_options,
         default_discovery_top_k=selected.default_discovery_top_k,
         max_discovery_top_k=selected.max_discovery_top_k,
         capability_boundary=capability_boundary,
+    )
+    skill_registry = SkillRegistry.default(
+        known_tools=(item.name for item in CUSTOMER_CAPABILITIES)
     )
     model = OpenAIMarketplaceAgentV2Model(
         settings, allowed_tool_names=tool_registry.names
@@ -145,6 +157,7 @@ def build_marketplace_agent_v2_runtime(
         tool_registry,
         model_timeout_seconds=selected.model_call_timeout_seconds,
         confirmation_execution_enabled=selected.generation_enabled,
+        skill_registry=skill_registry,
     )
     return MarketplaceAgentV2Runtime(
         orchestrator=orchestrator,

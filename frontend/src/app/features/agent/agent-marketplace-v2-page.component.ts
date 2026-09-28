@@ -30,6 +30,7 @@ interface V2ViewMessage {
   attachments: MarketplaceAgentV2ListingAttachment[];
   refinement: MarketplaceAgentV2Message['refinement'];
   pendingInteraction: MarketplaceAgentV2Message['pendingInteraction'];
+  citations: string[];
   partial: boolean;
 }
 
@@ -65,6 +66,10 @@ interface V2TurnEvidence {
         <article *ngFor="let message of messages()" [class.user]="message.role === 'USER'">
           <strong>{{ message.role === 'USER' ? 'You' : 'Marketplace assistant' }}</strong>
           <p class="message-text">{{ message.body }}</p>
+          <aside class="citations" *ngIf="message.citations.length" aria-label="Sources">
+            <strong>Sources</strong>
+            <ul><li *ngFor="let citation of message.citations">{{ citation }}</li></ul>
+          </aside>
           <div class="attachments" *ngIf="message.attachments.length">
             <h3 *ngIf="hasRelated(message)">Closest matches</h3>
             <a class="listing-card" *ngFor="let item of primaryAttachments(message)"
@@ -144,6 +149,7 @@ interface V2TurnEvidence {
     h1,h2{margin:.2rem 0}.status{min-height:1.5rem;color:#624f70}.conversation{display:grid;gap:14px;margin:20px 0}.conversation:focus-visible{outline:2px solid #b983cf;outline-offset:-2px}
     article{box-sizing:border-box;min-width:0;max-width:78%;padding:16px;border:1px solid #decbe8;border-radius:18px;background:white;overflow-wrap:anywhere}.user{align-self:flex-end;justify-self:end;background:#6d3f82;color:white}
     .message-text{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:.5rem 0}.attachments{display:grid;min-width:0;gap:8px}.attachments h3{font-size:.9rem;margin:8px 0 0;color:#6d5879}.listing-card{box-sizing:border-box;display:grid;width:100%;min-width:0;max-width:100%;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:12px;overflow:hidden;padding:8px;border:1px solid #eadff0;border-radius:12px;color:inherit;text-decoration:none}.listing-card:hover{border-color:#b983cf;background:#fcf9fe}.listing-card:focus-visible{outline:3px solid #d37ab9;outline-offset:2px}.listing-thumbnail-frame{position:relative;display:grid;place-items:center;width:76px;aspect-ratio:1;overflow:hidden;border-radius:9px;background:#f0e9f4;color:#705d7a;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}.listing-thumbnail{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.listing-title{min-width:0;overflow-wrap:anywhere;line-height:1.35}.listing-card b{white-space:nowrap}
+    .citations{margin-top:10px;padding-top:9px;border-top:1px solid #eadff0;color:#62536b;font-size:.84rem}.citations ul{margin:5px 0 0;padding-left:20px}.citations li+li{margin-top:3px}
     .follow-up{margin-top:12px;padding-top:10px;border-top:1px solid #eadff0}.follow-up button{padding:7px 11px}
     .partial{font-size:.9rem;color:#8a4a63}.evidence{background:#fff;padding:12px;border-radius:12px}.evidence dl{display:grid;grid-template-columns:140px 1fr;gap:6px}.evidence dt{font-weight:700}.evidence dd{margin:0}
     form{display:grid;flex:0 0 auto;min-width:0;gap:8px;margin-top:20px}textarea{box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:100px;max-height:180px;padding:12px;border:1px solid #bca8c8;border-radius:12px;font:inherit}button{padding:10px 15px;border-radius:999px;border:1px solid #8d52a4;background:white;color:#5d2e72;font-weight:700;margin-right:8px}.cursor{animation:blink 1s steps(1) infinite}@keyframes blink{50%{opacity:0}}@media(prefers-reduced-motion:reduce){.cursor{animation:none}.v2-shell.embedded .conversation{scroll-behavior:auto}}@media(max-width:640px){.v2-shell{padding:16px}header{flex-wrap:wrap}article{max-width:92%}.listing-card{grid-template-columns:64px minmax(0,1fr)}.listing-thumbnail-frame{width:64px}.listing-card b{grid-column:2}}
@@ -290,6 +296,7 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
 
   private async open(newConversation: boolean): Promise<void> {
     this.stream?.unsubscribe();
+    if (newConversation) this.evidence.set(null);
     this.working.set(true);
     this.status.set('Loading marketplace assistant…');
     try {
@@ -322,6 +329,7 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
           id: event.userMessage.id, role: 'USER', body: event.userMessage.body,
           clientMessageId: this.activeClientMessageId, retryUserMessageId: null,
           attachments: [], refinement: null, pendingInteraction: null, partial: false,
+          citations: [],
         }]);
         this.draft = '';
       }
@@ -348,11 +356,17 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
       void this.reconcileTerminalError();
     } else if (event.type === 'done') {
       const message = event.response.message;
-      this.messages.update(items => [...items.filter(item => item.id !== event.messageId), {
+      const terminal = message.pendingInteraction;
+      this.messages.update(items => [...items.filter(item => item.id !== event.messageId).map(item =>
+        terminal && terminal.status !== 'WAITING' && item.pendingInteraction?.id === terminal.id
+          ? { ...item, pendingInteraction: terminal }
+          : item,
+      ), {
         id: event.messageId, role: 'ASSISTANT', body: message.content,
         clientMessageId: null, retryUserMessageId: null,
         attachments: message.attachments, refinement: message.refinement,
-        pendingInteraction: message.pendingInteraction, partial: false,
+        pendingInteraction: message.pendingInteraction, citations: message.citations,
+        partial: false,
       }]);
       const activities = message.toolActivity;
       this.evidence.set({
@@ -423,6 +437,7 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
       attachments: item.message?.attachments ?? [],
       refinement: item.message?.refinement ?? null,
       pendingInteraction: item.message?.pendingInteraction ?? null,
+      citations: item.message?.citations ?? [],
       partial: item.retryable,
     };
   }
@@ -432,9 +447,9 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
   }
 
   private confirmationAnswer(value: string): boolean | null {
-    const normalized = value.trim().toLocaleLowerCase().replace(/[.!?]+$/, '');
-    if (['yes', 'y', 'yes please', 'sure', 'okay', 'ok'].includes(normalized)) return true;
-    if (['no', 'n', 'no thanks', 'no thank you'].includes(normalized)) return false;
+    const normalized = value.trim().toLocaleLowerCase().replace(/[.!?]+$/, '').replace(/[,;:]+/g, ' ').replace(/\s+/g, ' ');
+    if (['yes', 'y', 'yes please', 'sure', 'okay', 'ok', 'confirm', 'go ahead', 'do it'].includes(normalized)) return true;
+    if (['no', 'n', 'no thanks', 'no thank you', 'never mind', 'nevermind', "don't do it", 'do not do it', 'cancel that', 'cancel the request', 'no never mind', 'no nevermind'].includes(normalized)) return false;
     return null;
   }
 }

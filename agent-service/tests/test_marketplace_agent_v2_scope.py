@@ -81,6 +81,7 @@ class MarketplaceScopeClassifierTest(unittest.TestCase):
         *,
         recent: tuple[tuple[str, str], ...] = (),
         listings: tuple[ListingAttachment, ...] = (),
+        prior_observations: tuple[ToolObservation, ...] = (),
     ) -> MarketplaceScopeResult:
         return self.classifier.classify(
             current_message=message,
@@ -88,6 +89,7 @@ class MarketplaceScopeClassifierTest(unittest.TestCase):
             referenced_listings=listings,
             pending_interaction=None,
             preference_state={},
+            prior_observations=prior_observations,
         )
 
     def test_required_scope_categories_are_context_aware(self) -> None:
@@ -149,6 +151,10 @@ class MarketplaceScopeClassifierTest(unittest.TestCase):
             ("Where is my order?", "IN_SCOPE", "PRIVATE_TOOL"),
             ("Show me the first order", "IN_SCOPE", "PRIVATE_TOOL"),
             ("What's in my cart?", "IN_SCOPE", "PRIVATE_TOOL"),
+            ("Show me my cart.", "IN_SCOPE", "PRIVATE_TOOL"),
+            ("Let me see my cart.", "IN_SCOPE", "PRIVATE_TOOL"),
+            ("What do I have in my cart?", "IN_SCOPE", "PRIVATE_TOOL"),
+            ("How many Home & Garden items are available?", "IN_SCOPE", "LISTING_DATA"),
             ("what in my cart", "IN_SCOPE", "PRIVATE_TOOL"),
             ("Show my recent orders", "IN_SCOPE", "PRIVATE_TOOL"),
             ("Add this to my cart", "IN_SCOPE", "PRIVATE_TOOL"),
@@ -301,6 +307,31 @@ class MarketplaceScopeClassifierTest(unittest.TestCase):
         self.assertEqual("NONE", result.required_grounding)
         self.assertEqual("SELLER_LISTING_WORKFLOW", result.reason_code)
 
+    def test_natural_seller_entry_is_not_buyer_discovery(self) -> None:
+        for message in (
+            "I want to sell my phone.",
+            "Help me create a listing for my iPhone.",
+            "I want to list my old laptop.",
+        ):
+            with self.subTest(message=message):
+                result = self.classify(message)
+                self.assertEqual("SELLER_LISTING_WORKFLOW", result.reason_code)
+                self.assertEqual("NONE", result.required_grounding)
+
+    def test_selected_owned_order_reference_allows_private_fresh_follow_up(self) -> None:
+        prior = (ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+            orderReferences=({"orderId": ACTOR, "position": 1},),
+        ),)
+        for message in (
+            "What's happening with it?", "How much did I pay?", "Where is it now?",
+        ):
+            with self.subTest(message=message):
+                grounded = self.classify(message, prior_observations=prior)
+                isolated = self.classify(message)
+                self.assertEqual("PRIVATE_TOOL", grounded.required_grounding)
+                self.assertNotEqual("PRIVATE_TOOL", isolated.required_grounding)
+
     def test_java_uses_recent_laptop_context_instead_of_being_rejected(self) -> None:
         result = self.classify(
             "Java",
@@ -448,6 +479,7 @@ class MarketplaceScopeEnforcementTest(unittest.IsolatedAsyncioTestCase):
         for message in (
             "Force the payment provider to decline this checkout.",
             "Use a different provider and make the payment succeed.",
+            "Mark my payment successful.",
         ):
             with self.subTest(message=message):
                 model = _Model([ModelDecision(content="Which product do you mean?")])

@@ -23,6 +23,8 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.marketplace_agent_v2.checkout_enabled)
         self.assertFalse(settings.marketplace_agent_v2.order_mutations_enabled)
         self.assertFalse(settings.marketplace_agent_v2.return_requests_enabled)
+        self.assertFalse(settings.marketplace_agent_v2.help_knowledge_enabled)
+        self.assertIsNone(settings.marketplace_agent_v2.help_corpus_path)
         self.assertIsNone(settings.marketplace_agent_v2.order_service_url)
 
         with self.assertRaisesRegex(ValueError, "API_ENABLED"):
@@ -40,6 +42,19 @@ class SettingsTest(unittest.TestCase):
             commerce_reads_enabled=True,
             auth_service_url="http://auth-service:8085",
             order_service_url="http://order-service:8087",
+        ).validate(persistence_enabled=True, provider_configured=False)
+
+        with self.assertRaisesRegex(ValueError, "HELP_CORPUS_PATH"):
+            MarketplaceAgentV2Settings(
+                enabled=True,
+                help_knowledge_enabled=True,
+                auth_service_url="http://auth-service:8085",
+            ).validate(persistence_enabled=True, provider_configured=False)
+        MarketplaceAgentV2Settings(
+            enabled=True,
+            help_knowledge_enabled=True,
+            help_corpus_path="/app/help",
+            auth_service_url="http://auth-service:8085",
         ).validate(persistence_enabled=True, provider_configured=False)
 
         with self.assertRaisesRegex(ValueError, "return requests require commerce reads"):

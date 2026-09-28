@@ -1,0 +1,12 @@
+# Disposable RC-FIXTURE-01 override. Keep normal S3 configuration untouched;
+# select Product's approved local-demo adapter and a combined Agent/Orders UI.
+services:
+  product-service:
+    environment:
+      LISTING_MEDIA_STORAGE: local-demo
+  frontend:
+    image: msb-ecom-frontend:customer-agent-rc
+    build:
+      args:
+        FRONTEND_BUILD_CONFIGURATION: demo-customer-agent-rc
+        GATEWAY_FEATURE_AGENT_DISCOVERY: "true"

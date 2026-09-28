@@ -71,6 +71,79 @@ describe('MarketplaceAgentV2SseParser', () => {
     })]);
   });
 
+  it('accepts the public-help tool activity in the strict stream contract', () => {
+    const parser = new MarketplaceAgentV2SseParser();
+    const frames = [
+      'event: activity\ndata: {"schemaVersion":"MARKETPLACE_AGENT_V2_STREAM_EVENT_V1","sequence":1,"type":"activity","tool":"retrieve_help","label":"Checking marketplace help"}\n\n',
+      'event: tool_completed\ndata: {"schemaVersion":"MARKETPLACE_AGENT_V2_STREAM_EVENT_V1","sequence":2,"type":"tool_completed","tool":"retrieve_help","status":"SUCCEEDED","reason":"KNOWLEDGE_AVAILABLE","observedAt":"2026-09-27T16:54:52Z"}\n\n',
+    ];
+
+    const events = frames.flatMap(frame => parser.push(new TextEncoder().encode(frame)));
+
+    expect(events.map(event => event.type)).toEqual(['activity', 'tool_completed']);
+    expect(events.map(event => 'tool' in event ? event.tool : null))
+      .toEqual(['retrieve_help', 'retrieve_help']);
+  });
+
+  it('accepts every existing customer commerce tool without accepting unknown tools', () => {
+    const names = [
+      'get_my_cart', 'list_my_orders', 'get_my_order',
+      'add_to_my_cart', 'update_my_cart_quantity', 'remove_from_my_cart',
+      'prepare_my_checkout', 'get_my_checkout', 'submit_my_checkout',
+      'preview_my_order_cancellation', 'cancel_my_order',
+      'get_my_return', 'prepare_my_return_request', 'submit_my_return_request',
+    ];
+    for (const name of names) {
+      const parser = new MarketplaceAgentV2SseParser();
+      const frame = `event: activity\ndata: ${JSON.stringify({
+        schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1', sequence: 1,
+        type: 'activity', tool: name, label: 'Checking owned marketplace state',
+      })}\n\n`;
+      expect(parser.push(new TextEncoder().encode(frame))[0])
+        .toEqual(jasmine.objectContaining({ tool: name }));
+    }
+    const parser = new MarketplaceAgentV2SseParser();
+    const unknown = 'event: activity\ndata: {"schemaVersion":"MARKETPLACE_AGENT_V2_STREAM_EVENT_V1","sequence":1,"type":"activity","tool":"issue_refund","label":"No"}\n\n';
+    expect(() => parser.push(new TextEncoder().encode(unknown)))
+      .toThrowError(MarketplaceAgentV2ContractError);
+  });
+
+  it('accepts the current durable checkout confirmation projection', () => {
+    const parser = new MarketplaceAgentV2SseParser();
+    const pendingInteraction = {
+      id: '01ARZ3NDEKTSV4RRFFQ69G5FAY',
+      confirmationId: '01ARZ3NDEKTSV4RRFFQ69G5FAY',
+      type: 'CONFIRM_ACTION', action: 'SUBMIT_CHECKOUT', workflowType: null,
+      field: null, question: null, summary: 'Submit this checkout?',
+      arguments: {}, status: 'WAITING', createdAt: '2026-07-30T01:00:01Z',
+      expiresAt: '2026-07-30T01:05:01Z',
+    };
+    const response = {
+      sessionId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      userMessage: {
+        id: '01ARZ3NDEKTSV4RRFFQ69G5FAW', role: 'USER', body: 'Buy it',
+        createdAt: '2026-07-30T01:00:00Z',
+      },
+      assistantMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX',
+      message: {
+        role: 'ASSISTANT', content: 'Please confirm this checkout.',
+        attachments: [], refinement: null, pendingInteraction,
+        citations: [], toolActivity: [{
+          tool: 'prepare_my_checkout', status: 'SUCCEEDED', reason: 'CHECKOUT_READY',
+          observedAt: '2026-07-30T01:00:01Z',
+        }], inputTokens: 10, outputTokens: 6,
+      },
+      decisionCount: 2,
+    };
+    const frame = `event: done\ndata: ${JSON.stringify({
+      schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1', sequence: 1,
+      type: 'done', messageId: response.assistantMessageId, response,
+    })}\n\n`;
+    const event = parser.push(new TextEncoder().encode(frame))[0];
+    expect(event.type === 'done' && event.response.message.pendingInteraction?.action)
+      .toBe('SUBMIT_CHECKOUT');
+  });
+
   it('accepts zero decisions only for a strict completed response shape', () => {
     const parser = new MarketplaceAgentV2SseParser();
     const response = {

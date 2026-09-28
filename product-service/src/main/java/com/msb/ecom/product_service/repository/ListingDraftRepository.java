@@ -488,6 +488,84 @@ public class ListingDraftRepository {
         return count == null ? 0 : count;
     }
 
+    public Optional<AvailabilityCategory> resolveActiveAvailabilityCategory(String reference) {
+        return jdbcTemplate.query("""
+                select id, slug from categories
+                where status = 'ACTIVE'
+                  and (id = ? or lower(slug) = ? or lower(name) = ?)
+                limit 1
+                """, (rs, rowNum) -> new AvailabilityCategory(
+                rs.getString("id"), rs.getString("slug")),
+                reference, reference, reference).stream().findFirst();
+    }
+
+    // Product owns category identity and listing visibility; Auth supplies visible business IDs.
+    public Set<String> findAvailabilityBusinessIds(String categoryId, String keyword) {
+        return Set.copyOf(jdbcTemplate.queryForList(
+                availabilitySql("select distinct l.business_id", categoryId, keyword,
+                        "and l.seller_type = 'BUSINESS' and l.business_id is not null"),
+                String.class, availabilityParameters(categoryId, keyword).toArray()));
+    }
+
+    public long countActiveMarketplaceInventory(
+            String categoryId, String keyword, Set<String> visibleBusinessIds) {
+        String businessPredicate = visibleBusinessIds.isEmpty() ? "and l.seller_type = 'INDIVIDUAL'"
+                : "and (l.seller_type = 'INDIVIDUAL' or l.business_id in (%s))"
+                .formatted(placeholders(visibleBusinessIds.size()));
+        List<Object> parameters = availabilityParameters(categoryId, keyword);
+        parameters.addAll(visibleBusinessIds);
+        Long count = jdbcTemplate.queryForObject(
+                availabilitySql("select count(*)", categoryId, keyword, businessPredicate),
+                Long.class, parameters.toArray());
+        return count == null ? 0 : count;
+    }
+
+    private String availabilitySql(String selection, String categoryId, String keyword, String businessPredicate) {
+        String categoryTree = categoryId == null ? "" : """
+                with recursive category_tree as (
+                    select id from categories where id = ? and status = 'ACTIVE'
+                    union all
+                    select c.id from categories c join category_tree p on c.parent_id = p.id
+                    where c.status = 'ACTIVE'
+                )
+                """;
+        String filter = categoryId == null ? """
+                and (lower(l.title) like ? escape '!'
+                     or lower(l.description) like ? escape '!'
+                     or lower(c.name) like ? escape '!'
+                     or lower(c.slug) like ? escape '!')
+                """ : "and l.category_id in (select id from category_tree)";
+        return categoryTree + selection + "\n" + """
+                from listings l join categories c on c.id = l.category_id
+                where l.status = 'ACTIVE' and l.quantity > 0
+                  and ((l.seller_type = 'INDIVIDUAL' and l.moderation_status = 'APPROVED')
+                    or (l.seller_type = 'BUSINESS' and l.publication_source = 'BUSINESS_SELF_PUBLISHED'))
+                  and not exists (
+                    select 1 from enforcement_actions ea
+                    join enforcement_action_scopes eas on eas.enforcement_action_id = ea.id
+                    where ea.target_type = 'LISTING' and ea.target_id = l.id
+                      and eas.scope = 'LISTING_PUBLIC_VISIBILITY' and ea.revoked_at is null
+                      and ea.effective_at <= utc_timestamp(6)
+                      and (ea.expires_at is null or ea.expires_at > utc_timestamp(6))
+                  )
+                """ + filter + "\n" + businessPredicate;
+    }
+
+    private List<Object> availabilityParameters(String categoryId, String keyword) {
+        List<Object> parameters = new ArrayList<>();
+        if (categoryId != null) {
+            parameters.add(categoryId);
+        } else {
+            String pattern = "%" + escapedLike(keyword) + "%";
+            for (int index = 0; index < 4; index++) {
+                parameters.add(pattern);
+            }
+        }
+        return parameters;
+    }
+
+    public record AvailabilityCategory(String id, String slug) { }
+
     // Supplies bounded business candidates so auth-service can enforce active business/store visibility before paging.
     public Set<String> findSelfPublishedBusinessIds(int limit) {
         return new java.util.LinkedHashSet<>(jdbcTemplate.queryForList("""

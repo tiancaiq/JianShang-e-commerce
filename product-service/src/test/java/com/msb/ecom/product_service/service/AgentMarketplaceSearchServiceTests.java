@@ -5,6 +5,7 @@ import com.msb.ecom.product_service.dto.AgentMarketplaceSearchResponse;
 import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.PublicListingSearchRequest;
 import com.msb.ecom.product_service.dto.PublicListingSearchPageResponse;
+import com.msb.ecom.product_service.model.CategoryNotFoundException;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.search.ListingSearchProperties;
@@ -12,9 +13,12 @@ import com.msb.ecom.product_service.search.OpenSearchListingSearchClient;
 import com.msb.ecom.product_service.search.hybrid.ListingConceptCompatibilityService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -52,6 +56,13 @@ class AgentMarketplaceSearchServiceTests {
             listingService,
             meterRegistry,
             TOKEN);
+
+    @BeforeEach
+    void emptyStorefrontByDefault() {
+        when(listingService.searchBusinessStoreListings(
+                org.mockito.ArgumentMatchers.any(PublicListingSearchRequest.class)))
+                .thenReturn(page());
+    }
 
     @Test
     void rejectsInvalidServiceTokenBeforeSearchOrDatabaseWork() {
@@ -148,6 +159,31 @@ class AgentMarketplaceSearchServiceTests {
     }
 
     @Test
+    void mergesAuthoritativeBusinessStorefrontResultsWhenIndexMissesThem() {
+        PublicListingResponse lamp = listing(
+                "01L00000000000000000000009", "BUSINESS", 1);
+        when(searchClient.searchRelevantIds(
+                org.mockito.ArgumentMatchers.eq("ALL"),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(20)))
+                .thenReturn(List.of());
+        when(listingService.searchBusinessStoreListings(
+                org.mockito.ArgumentMatchers.argThat(candidate ->
+                        "Harbor business".equals(candidate.q()))))
+                .thenReturn(page(lamp));
+        when(conceptCompatibility.productTypeCompatible("Harbor business", lamp))
+                .thenReturn(true);
+        PublicListingSearchRequest request = new PublicListingSearchRequest(
+                "Harbor business items", null, null, null, null, null, null,
+                "newest", null, 20);
+
+        AgentMarketplaceSearchResponse result = service.search(TOKEN, request);
+
+        assertEquals(List.of(new AgentMarketplaceSearchResponse.Candidate(lamp.id(), 1)),
+                result.data());
+    }
+
+    @Test
     void mysqlModeUsesBoundedPublicSearchServicesAndKeepsOnlyCompatibleResults() {
         ListingSearchProperties mysql = new ListingSearchProperties(
                 "mysql",
@@ -201,13 +237,18 @@ class AgentMarketplaceSearchServiceTests {
                 ListingAuthorizationException.class,
                 () -> service.availability("wrong", "laptop", 1));
 
-        verify(repository, never()).countActiveIndividualInventory(
+        verify(repository, never()).resolveActiveAvailabilityCategory(
                 org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
     void availabilityProbeReturnsStrictBroadProductOwnedCount() {
-        when(repository.countActiveIndividualInventory("laptop")).thenReturn(7L);
+        when(repository.resolveActiveAvailabilityCategory("laptop"))
+                .thenReturn(Optional.empty());
+        when(repository.findAvailabilityBusinessIds(null, "laptop"))
+                .thenReturn(Set.of());
+        when(repository.countActiveMarketplaceInventory(null, "laptop", Set.of()))
+                .thenReturn(7L);
 
         AgentMarketplaceAvailabilityResponse response =
                 service.availability(TOKEN, "  Laptop  ", 1);
@@ -230,13 +271,13 @@ class AgentMarketplaceSearchServiceTests {
         assertThrows(IllegalArgumentException.class, () -> service.availability(TOKEN, " ", 1));
         assertThrows(IllegalArgumentException.class, () -> service.availability(TOKEN, "laptop", 2));
 
-        verify(repository, never()).countActiveIndividualInventory(
-                org.mockito.ArgumentMatchers.anyString());
+        verify(repository, never()).findAvailabilityBusinessIds(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
     void availabilityProbeRecordsOnlyFixedFailureTelemetry() {
-        when(repository.countActiveIndividualInventory("laptop"))
+        when(repository.findAvailabilityBusinessIds(null, "laptop"))
                 .thenThrow(new RuntimeException("private database detail"));
 
         assertThrows(RuntimeException.class, () -> service.availability(TOKEN, "laptop", 1));
@@ -244,6 +285,39 @@ class AgentMarketplaceSearchServiceTests {
         assertEquals(1.0, meterRegistry.get(
                 "product.agent.marketplace.availability.operations")
                 .tag("result", "failure").counter().count());
+    }
+
+    @Test
+    void availabilityResolvesDisplaySlugAndIdToOneProductOwnedCategory() {
+        String id = "01K00000000000000000000003";
+        var category = new ListingDraftRepository.AvailabilityCategory(id, "home-garden");
+        for (String input : List.of("Home & Garden", "home-garden", id)) {
+            String normalized = input.toLowerCase(java.util.Locale.ROOT);
+            when(repository.resolveActiveAvailabilityCategory(
+                    input.equals(id) ? id : normalized))
+                    .thenReturn(Optional.of(category));
+            when(repository.findAvailabilityBusinessIds(id, normalized))
+                    .thenReturn(Set.of());
+            when(repository.countActiveMarketplaceInventory(id, normalized, Set.of()))
+                    .thenReturn(3L);
+
+            var response = service.availability(TOKEN, input, 1);
+
+            assertEquals("home-garden", response.category());
+            assertEquals(3L, response.totalActiveCategoryInventory());
+        }
+    }
+
+    @Test
+    void availabilityRejectsUnknownCategorySlugWithoutTreatingItAsAKeyword() {
+        when(repository.resolveActiveAvailabilityCategory("quantum-zebra-999"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(CategoryNotFoundException.class,
+                () -> service.availability(TOKEN, "quantum-zebra-999", 1));
+
+        verify(repository, never()).findAvailabilityBusinessIds(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
     }
 
     private PublicListingResponse listing(String id, String sellerType, int quantity) {

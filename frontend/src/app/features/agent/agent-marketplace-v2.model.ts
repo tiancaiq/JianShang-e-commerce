@@ -1,18 +1,26 @@
 export type MarketplaceAgentV2Tool =
-  'check_availability' | 'search_listings' | 'get_listing' | 'request_confirmation'
-  | 'collect_listing_information';
+  'retrieve_help' | 'check_availability' | 'search_listings' | 'get_listing' | 'request_confirmation'
+  | 'collect_listing_information' | 'get_my_cart' | 'list_my_orders' | 'get_my_order'
+  | 'add_to_my_cart' | 'update_my_cart_quantity' | 'remove_from_my_cart'
+  | 'prepare_my_checkout' | 'get_my_checkout' | 'submit_my_checkout'
+  | 'preview_my_order_cancellation' | 'cancel_my_order'
+  | 'get_my_return' | 'prepare_my_return_request' | 'submit_my_return_request';
 
 export interface MarketplaceAgentV2PendingInteraction {
   id: string;
+  confirmationId?: string | null;
   type: 'CONFIRM_ACTION' | 'SELECT_OPTION' | 'ANSWER_FIELD';
-  action: 'SHOW_DETAILS' | 'COMPARE_LISTINGS' | 'RUN_REFINED_SEARCH' | null;
+  action: 'SHOW_DETAILS' | 'COMPARE_LISTINGS' | 'RUN_REFINED_SEARCH'
+    | 'SUBMIT_CHECKOUT' | 'CANCEL_ORDER' | 'SUBMIT_RETURN_REQUEST' | null;
   workflowType: 'CREATE_LISTING' | null;
   field: 'ITEM_TYPE' | 'TITLE' | 'CONDITION' | 'PRICE' | 'DESCRIPTION'
     | 'LOCATION' | 'FULFILLMENT' | null;
   question: string | null;
+  summary?: string | null;
   arguments: Record<string, unknown>;
-  status: 'WAITING' | 'CONSUMED' | 'CANCELLED';
+  status: 'WAITING' | 'CONFIRMED' | 'CONSUMED' | 'CANCELLED' | 'EXPIRED' | 'INVALIDATED';
   createdAt: string;
+  expiresAt?: string | null;
 }
 
 export interface MarketplaceAgentV2ListingAttachment {

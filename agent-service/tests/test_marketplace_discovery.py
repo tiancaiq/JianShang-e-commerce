@@ -2423,6 +2423,37 @@ class MarketplaceDiscoveryTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ProductDiscoveryAdapterTest(unittest.IsolatedAsyncioTestCase):
+    async def test_availability_accepts_product_canonical_category_aliases(self) -> None:
+        from msb_agent_service.marketplace_discovery import ProductMarketplaceDiscoveryClient
+
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.params["category"])
+            return httpx.Response(200, json={
+                "schemaVersion": "MARKETPLACE_AVAILABILITY_PROBE_V1",
+                "mode": "AVAILABILITY_PROBE", "searchExecuted": True,
+                "category": "home-garden", "totalActiveCategoryInventory": 3,
+                "relatedCategoryMatches": 0, "failureReason": None,
+                "retryable": False,
+            })
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            adapter = ProductMarketplaceDiscoveryClient(
+                "http://product-service:8091",
+                internal_service_token="opaque-test-token", client=client,
+            )
+            for reference in ("Home & Garden", "home-garden", "01K00000000000000000000003"):
+                result = await adapter.probe_availability(
+                    actor_user_id=ACTOR, category=reference,
+                    correlation_id="category-alias",
+                )
+                self.assertEqual("home-garden", result.category)
+                self.assertEqual(3, result.total_active_category_inventory)
+        self.assertEqual(
+            ["home & garden", "home-garden", "01k00000000000000000000003"], seen,
+        )
+
     async def test_availability_adapter_uses_narrow_service_authenticated_probe(self) -> None:
         from msb_agent_service.marketplace_discovery import (
             ProductMarketplaceDiscoveryClient,

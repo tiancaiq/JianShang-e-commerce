@@ -17,6 +17,11 @@
 docs/
 Project-Context/
 *.md
+!docs/
+docs/*
+!docs/help/
+docs/help/*
+!docs/help/*.md
 LICENSE
 
 # ── Env files (we pass env vars via docker-compose) ──────────

@@ -11,8 +11,9 @@ WORKDIR /app
 RUN groupadd --system agent \
     && useradd --system --gid agent --home-dir /app agent
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY agent-service/pyproject.toml agent-service/README.md ./
+COPY agent-service/src ./src
+COPY docs/help /app/help
 
 RUN python -m pip install --no-cache-dir . \
     && mkdir -p "${TIKTOKEN_CACHE_DIR}" \

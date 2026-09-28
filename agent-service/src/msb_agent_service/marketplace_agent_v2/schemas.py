@@ -63,7 +63,7 @@ def _canonical_search_query(
 
 
 ToolName = Literal[
-    "check_availability", "search_listings", "get_listing", "request_confirmation",
+    "retrieve_help", "check_availability", "search_listings", "get_listing", "request_confirmation",
     "collect_listing_information", "get_my_cart", "list_my_orders", "get_my_order",
     "add_to_my_cart", "update_my_cart_quantity", "remove_from_my_cart",
     "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
@@ -325,16 +325,45 @@ class ToolProposal(StrictModel):
     arguments: dict[str, object]
 
 
+class SkillSelection(StrictModel):
+    """A model-selected instruction load; this is not an executable tool call."""
+
+    name: str = Field(
+        min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    )
+
+
+class SkillSummary(StrictModel):
+    name: str = Field(
+        min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    )
+    description: str = Field(min_length=1, max_length=300)
+    version: int = Field(ge=1)
+    surface: Literal["customer"]
+
+
+class ActiveSkill(SkillSummary):
+    allowed_tools: tuple[str, ...] = Field(min_length=1, max_length=32)
+    instructions: str = Field(min_length=1, max_length=12_000)
+
+
 class ModelDecision(StrictModel):
     content: str | None = Field(default=None, min_length=1, max_length=12_000)
     tool_proposal: ToolProposal | None = None
+    skill_selection: SkillSelection | None = None
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def exactly_one_decision(self) -> "ModelDecision":
-        if (self.content is None) == (self.tool_proposal is None):
-            raise ValueError("A model decision requires content or one tool proposal")
+        selected = sum(
+            item is not None
+            for item in (self.content, self.tool_proposal, self.skill_selection)
+        )
+        if selected != 1:
+            raise ValueError(
+                "A model decision requires content, one tool proposal, or one Skill"
+            )
         return self
 
 
@@ -514,9 +543,23 @@ class CustomerCheckoutSnapshot(StrictModel):
     items: tuple[CustomerCheckoutItemSnapshot, ...] = Field(min_length=1, max_length=100)
 
 
+class HelpKnowledgePassage(StrictModel):
+    """A bounded, customer-safe excerpt from one approved public help article."""
+
+    article_id: str = Field(
+        min_length=8, max_length=96, pattern=r"^HELP-[A-Z0-9-]+$"
+    )
+    title: str = Field(min_length=1, max_length=180)
+    section: str = Field(min_length=1, max_length=180)
+    audience: str = Field(min_length=1, max_length=180)
+    availability: str = Field(min_length=1, max_length=180)
+    excerpt: str = Field(min_length=1, max_length=2_400)
+    version: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ToolObservation(StrictModel):
     tool: Literal[
-        "check_availability", "search_listings", "get_listing",
+        "retrieve_help", "check_availability", "search_listings", "get_listing",
         "request_confirmation", "collect_listing_information", "get_my_cart",
         "list_my_orders", "get_my_order", "add_to_my_cart",
         "update_my_cart_quantity", "remove_from_my_cart", "DIRECT_RESPONSE",
@@ -528,7 +571,11 @@ class ToolObservation(StrictModel):
     status: ObservationStatus
     reason: Literal[
         "RESULTS_AVAILABLE",
+        "KNOWLEDGE_AVAILABLE",
+        "KNOWLEDGE_NOT_FOUND",
+        "KNOWLEDGE_UNAVAILABLE",
         "CATEGORY_UNAVAILABLE",
+        "CATEGORY_NOT_FOUND",
         "FILTERS_TOO_STRICT",
         "LOW_RELEVANCE",
         "LISTING_VERIFIED",
@@ -541,7 +588,9 @@ class ToolObservation(StrictModel):
         "UNKNOWN_TOOL",
         "CAPABILITY_DISABLED",
         "SURFACE_MISMATCH",
+        "SKILL_TOOL_NOT_ALLOWED",
         "DUPLICATE_TOOL_CALL",
+        "READ_ALREADY_SATISFIED",
         "STEP_BUDGET_EXHAUSTED",
         "INTERACTION_READY",
         "COMPARISON_CONTEXT_REQUIRED",
@@ -552,8 +601,10 @@ class ToolObservation(StrictModel):
         "AVAILABILITY_TOOL_REQUIRED",
         "CART_READ_TOOL_REQUIRED",
         "CART_MUTATION_TOOL_REQUIRED",
+        "CART_QUANTITY_TOOL_REQUIRED",
         "CHECKOUT_READ_TOOL_REQUIRED",
         "ORDER_DETAIL_TOOL_REQUIRED",
+        "SELLER_COLLECTION_TOOL_REQUIRED",
         "RETURN_STATUS_TOOL_REQUIRED",
         "RETURN_ELIGIBILITY_REQUIRED",
         "RETURN_PREPARATION_REQUIRED",
@@ -661,6 +712,9 @@ class ToolObservation(StrictModel):
     )
     checkout: CustomerCheckoutSnapshot | None = None
     return_request: CustomerReturnSnapshot | None = None
+    knowledge_passages: tuple[HelpKnowledgePassage, ...] = Field(
+        default=(), max_length=3
+    )
     latency_ms: int | None = Field(default=None, ge=0, le=86_400_000)
 
 
@@ -698,6 +752,21 @@ class SearchListingsArguments(StrictModel):
             maximum_price=self.maximum_price,
         )
         return self
+
+
+class RetrieveHelpArguments(StrictModel):
+    query: str = Field(min_length=2, max_length=500)
+    # The provider-safe schema intentionally strips numeric bounds. An enum keeps
+    # the model-facing contract and the executable bound identical.
+    limit: Literal[1, 2, 3] = 3
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) < 2:
+            raise ValueError("query must contain a marketplace help concept")
+        return normalized
 
 
 class RequestConfirmationArguments(SearchListingsArguments):
@@ -868,6 +937,8 @@ class AgentContext(StrictModel):
     active_workflow: MarketplaceAgentV2ActiveWorkflow | None = None
     contextual_refinement: MarketplaceAgentV2ContextualRefinement | None = None
     scope_result: MarketplaceScopeResult | None = None
+    available_skills: tuple[SkillSummary, ...] = Field(default=(), max_length=32)
+    active_skill: ActiveSkill | None = None
 
 
 class OrchestrationResult(StrictModel):

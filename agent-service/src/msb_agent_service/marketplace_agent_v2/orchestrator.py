@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
@@ -12,6 +13,7 @@ from .provider import (
     TextDeltaCallback,
 )
 from .schemas import (
+    ActiveSkill,
     AgentContext,
     CollectListingInformationArguments,
     EvidenceReference,
@@ -30,11 +32,14 @@ from .schemas import (
     ToolActivity,
     ToolObservation,
     ToolProposal,
+    SkillSummary,
 )
+from .skill_registry import Skill, SkillRegistry, SkillValidationError
 from .seller_workflow import extract_initial_item_type
 from .scope import (
     MARKETPLACE_SCOPE_BOUNDARY_RESPONSE,
     MarketplaceScopeClassifier,
+    _selected_order_follow_up,
     hard_safety_response,
     unsupported_customer_authority_response,
 )
@@ -42,6 +47,7 @@ from .tools import ActivityCallback, MarketplaceAgentV2ToolRegistry
 
 
 MAX_AGENT_STEPS = 5
+_LOGGER = logging.getLogger(__name__)
 ToolCompletedCallback = Callable[[ToolObservation], Awaitable[None]]
 ConfirmationPreparedCallback = Callable[
     [MarketplaceAgentV2PendingInteraction],
@@ -50,11 +56,14 @@ ConfirmationPreparedCallback = Callable[
 _CART_MUTATION_TOOLS = {
     "add_to_my_cart", "update_my_cart_quantity", "remove_from_my_cart",
 }
+_RETURN_REQUEST_TOOLS = {
+    "get_my_return", "prepare_my_return_request", "submit_my_return_request",
+}
 _PRIVATE_COMMERCE_TOOLS = {
     "get_my_cart", "list_my_orders", "get_my_order", *_CART_MUTATION_TOOLS,
     "prepare_my_checkout", "get_my_checkout", "submit_my_checkout",
     "preview_my_order_cancellation", "cancel_my_order",
-    "get_my_return", "prepare_my_return_request", "submit_my_return_request",
+    *_RETURN_REQUEST_TOOLS,
 }
 _DEFERRED_COMMERCE_ACTION_RESPONSE = (
     "I can help with your cart, but I can’t check out, take payment, or place an "
@@ -132,10 +141,12 @@ def _listing_detail_request(value: str) -> bool:
 
     normalized = " ".join(value.casefold().replace("’", "'").split())
     return bool(re.search(
-        r"\b(?:tell\s+me\s+more\s+about|details?\s+(?:of|about)|"
+        r"\b(?:tell\s+me\s+more\s+about|show\s+me\s+details?\s+(?:for|of|about)|"
+        r"details?\s+(?:of|about)|"
         r"what\s+are\s+the\s+details\s+of|open)\b.{0,80}"
         r"\b(?:first|second|third|fourth|fifth|this|that|it|one|listing)\b|"
-        r"\b(?:tell\s+me\s+more\s+about|open)\s+.{2,120}$",
+        r"\b(?:tell\s+me\s+more\s+about|open)\s+.{2,120}$|"
+        r"\bwhat\s+is\s+(?:this|that)\s+item\b",
         normalized,
     ))
 
@@ -161,15 +172,25 @@ def _explicit_cart_removal_request(value: str) -> bool:
     ))
 
 
-def _current_order_follow_up(value: str) -> bool:
-    """Require a refresh for state or paid-total questions about a selected order."""
+def _explicit_cart_quantity_request(value: str) -> bool:
+    """Recognize a requested quantity change only for grounding validation."""
 
     normalized = " ".join(value.casefold().replace("’", "'").split())
     return bool(re.search(
-        r"\bwhat(?:'s| is)\s+happening\s+with\s+(?:it|that|this)\b|"
-        r"\bwhat\s+is\s+(?:its|that\s+order's|this\s+order's)\s+status\b|"
-        r"\bhow\s+much\s+did\s+i\s+pay\b|"
-        r"\bwhat\s+did\s+i\s+pay\b",
+        r"\b(?:make|set|change|update)\b.{0,65}"
+        r"\b(?:quantity\s+)?(?:back\s+)?(?:to\s+)?"
+        r"(?:[1-9][0-9]{0,2}|one|two|three|four|five)\b",
+        normalized,
+    ))
+
+
+def _ordered_order_detail_request(value: str) -> bool:
+    """Require a fresh detail read when the customer selects a listed order."""
+
+    normalized = " ".join(value.casefold().replace("’", "'").split())
+    return bool(re.search(
+        r"\b(?:first|second|third|latest|most recent)\s+order\b|"
+        r"\border\s+(?:one|two|three|1|2|3)\b",
         normalized,
     ))
 
@@ -181,8 +202,15 @@ def _terminal_tool_requirement(
     prior_observations: Sequence[ToolObservation],
     turn_observations: Sequence[ToolObservation],
     ambiguous_cart_reference: bool,
+    seller_collection_required: bool = False,
 ) -> str | None:
     """Validate missing operational evidence without globally routing messages."""
+
+    if seller_collection_required and not any(
+        item.tool == "collect_listing_information"
+        for item in turn_observations
+    ):
+        return "SELLER_COLLECTION_TOOL_REQUIRED"
 
     if (
         referenced_listings
@@ -220,23 +248,97 @@ def _terminal_tool_requirement(
             and not any(item.tool == "get_my_cart" for item in turn_observations)
         ):
             return "CART_READ_TOOL_REQUIRED"
+    if _explicit_cart_quantity_request(current_message) and not ambiguous_cart_reference:
+        if any(item.tool == "update_my_cart_quantity" for item in turn_observations):
+            return None
+        cart_references = next((
+            item.cart_item_references
+            for item in reversed((*prior_observations, *turn_observations))
+            if item.tool in {"get_my_cart", *_CART_MUTATION_TOOLS}
+            and item.cart_item_references
+        ), ())
+        if cart_references:
+            return "CART_QUANTITY_TOOL_REQUIRED"
+        if not any(item.tool == "get_my_cart" for item in turn_observations):
+            return "CART_READ_TOOL_REQUIRED"
     if (
         _checkout_read_request(current_message)
         and _referenced_checkout_ids(prior_observations)
         and not any(item.tool == "get_my_checkout" for item in turn_observations)
     ):
         return "CHECKOUT_READ_TOOL_REQUIRED"
+    if (
+        _ordered_order_detail_request(current_message)
+        and any(
+            item.tool == "list_my_orders" and item.order_references
+            for item in prior_observations
+        )
+        and not any(
+            item.tool == "get_my_order" for item in turn_observations
+        )
+    ):
+        return "ORDER_DETAIL_TOOL_REQUIRED"
     selected_order = next((
         item for item in reversed(prior_observations)
         if item.tool == "get_my_order" and item.order_references
     ), None)
     if (
         selected_order is not None
-        and _current_order_follow_up(current_message)
+        and _selected_order_follow_up(
+            " ".join(current_message.casefold().replace("’", "'").split())
+        )
         and not any(item.tool == "get_my_order" for item in turn_observations)
     ):
         return "ORDER_DETAIL_TOOL_REQUIRED"
     return None
+
+
+def _successful_completion_read(
+    observations: Sequence[ToolObservation],
+) -> bool:
+    """Recover only from an owning-service read with enough facts to answer."""
+
+    return any(
+        item.status == "SUCCEEDED" and (
+            item.tool == "get_listing" and item.reason == "LISTING_VERIFIED"
+            and bool(item.attachments)
+            or item.tool == "check_availability"
+            and item.broad_inventory_count is not None
+            or item.tool == "get_my_checkout" and item.checkout is not None
+            or item.tool == "get_my_order" and item.order is not None
+        )
+        for item in observations
+    )
+
+
+def _grounded_selected_order_follow_up(
+    current_message: str,
+    observations: Sequence[ToolObservation],
+) -> str | None:
+    """Answer a selected-order follow-up from the refreshed owned order, not an unrelated return probe."""
+
+    if not _selected_order_follow_up(current_message.casefold()):
+        return None
+    read = next((
+        item.order for item in reversed(observations)
+        if item.tool == "get_my_order"
+        and item.status == "SUCCEEDED"
+        and item.order is not None
+    ), None)
+    if read is None:
+        return None
+    status = read.status.replace("_", " ").lower()
+    payment = read.payment_status.replace("_", " ").lower()
+    if re.search(r"\b(?:how much|what)\s+(?:did\s+)?i\s+pay\b", current_message.casefold()):
+        return (
+            f"The recorded total for your selected order is "
+            f"{read.total.amount} {read.total.currency}. Its payment status is {payment}."
+        )
+    return (
+        f"Your selected order is currently {status}. Its payment status is "
+        f"{payment}, and its recorded total is {read.total.amount} "
+        f"{read.total.currency}."
+    )
 
 
 def _natural_no_tool_fallback(
@@ -282,11 +384,13 @@ class MarketplaceAgentV2Orchestrator:
         *,
         model_timeout_seconds: float = 10.0,
         confirmation_execution_enabled: bool = True,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._model_timeout_seconds = model_timeout_seconds
         self._confirmation_execution_enabled = confirmation_execution_enabled
+        self._skill_registry = skill_registry
 
     async def close(self) -> None:
         await self._model.close()
@@ -728,6 +832,13 @@ class MarketplaceAgentV2Orchestrator:
         schemas = self._registry.provider_schemas()
         if tuple(item["name"] for item in schemas) != self._registry.names:
             raise RuntimeError("Marketplace Agent V2 registry is inconsistent")
+        available_skills = (
+            self._skill_registry.available(
+                surface="customer", enabled_tools=self._registry.names
+            )
+            if self._skill_registry is not None else ()
+        )
+        active_skill: Skill | None = None
         cart_mutation_disabled = (
             _is_explicit_cart_mutation_request(current_message)
             and not any(tool in self._registry.names for tool in _CART_MUTATION_TOOLS)
@@ -1027,6 +1138,11 @@ class MarketplaceAgentV2Orchestrator:
                 prior_observations=prior_observations,
                 turn_observations=turn_observations,
                 ambiguous_cart_reference=ambiguous_cart_reference,
+                seller_collection_required=(
+                    selected_scope.reason_code == "SELLER_LISTING_WORKFLOW"
+                    and active_workflow is None
+                    and "collect_listing_information" in self._registry.names
+                ),
             )
             context = AgentContext(
                 currentMessage=current_message,
@@ -1050,6 +1166,14 @@ class MarketplaceAgentV2Orchestrator:
                 activeWorkflow=new_active_workflow,
                 contextualRefinement=contextual_refinement,
                 scopeResult=selected_scope,
+                availableSkills=tuple(
+                    SkillSummary.model_validate(skill.compact())
+                    for skill in available_skills
+                ) if active_skill is None else (),
+                activeSkill=(
+                    ActiveSkill.model_validate(active_skill.model_context())
+                    if active_skill is not None else None
+                ),
             )
             grounding_available = _has_required_grounding(
                 selected_scope.required_grounding,
@@ -1067,6 +1191,7 @@ class MarketplaceAgentV2Orchestrator:
                 and not current_private_commerce
                 and new_pending is None
                 and terminal_tool_requirement is None
+                and not _successful_completion_read(turn_observations)
             )
             safe_stream = _CustomerTextStream(
                 (
@@ -1094,6 +1219,23 @@ class MarketplaceAgentV2Orchestrator:
                 if policy.return_request_mutation_requested
                 else schemas
             )
+            if active_skill is not None:
+                decision_schemas = tuple(
+                    schema for schema in decision_schemas
+                    if schema["name"] in active_skill.allowed_tools
+                )
+            elif self._skill_registry is not None and available_skills:
+                decision_schemas = (
+                    *decision_schemas,
+                    self._skill_registry.selection_schema(available_skills),
+                )
+            if _selected_order_follow_up(current_message.casefold()) and not informational_return:
+                # The selected owned order needs a fresh order read; a prior
+                # assistant offer about returns is not return-read authority.
+                decision_schemas = tuple(
+                    schema for schema in decision_schemas
+                    if schema["name"] not in _RETURN_REQUEST_TOOLS
+                )
             try:
                 decision = await self._model.decide(
                     context=context,
@@ -1110,7 +1252,10 @@ class MarketplaceAgentV2Orchestrator:
             except MarketplaceAgentV2ProviderFailure as error:
                 if (
                     error.kind == "MODEL_RESPONSE_UNSUPPORTED"
-                    and current_search_executed
+                    and (
+                        current_search_executed
+                        or _successful_completion_read(turn_observations)
+                    )
                     and not stream_provider_text
                 ):
                     # Preserve an authoritative successful read when the model's
@@ -1159,6 +1304,58 @@ class MarketplaceAgentV2Orchestrator:
                 ) from error
             input_tokens += decision.input_tokens
             output_tokens += decision.output_tokens
+            if decision.skill_selection is not None:
+                if self._skill_registry is None or active_skill is not None:
+                    _LOGGER.warning(
+                        "skill_validation_failed",
+                        extra={"correlation_id": correlation_id, "error_category": "INVALID_STATE"},
+                    )
+                    raise MarketplaceAgentV2OrchestrationFailure("UNKNOWN_SKILL")
+                try:
+                    selected_skill = self._skill_registry.get(
+                        decision.skill_selection.name
+                    )
+                except SkillValidationError as error:
+                    _LOGGER.warning(
+                        "skill_validation_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "skill_name": decision.skill_selection.name,
+                            "error_category": "UNKNOWN_SKILL",
+                        },
+                    )
+                    raise MarketplaceAgentV2OrchestrationFailure(
+                        "UNKNOWN_SKILL"
+                    ) from error
+                if selected_skill not in available_skills:
+                    _LOGGER.warning(
+                        "skill_validation_failed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "skill_name": selected_skill.name,
+                            "error_category": "DISABLED_CAPABILITY",
+                        },
+                    )
+                    raise MarketplaceAgentV2OrchestrationFailure("UNKNOWN_SKILL")
+                active_skill = selected_skill
+                policy.skill_allowed_tools = frozenset(active_skill.allowed_tools)
+                _LOGGER.info(
+                    "skill_selected",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "skill_name": active_skill.name,
+                        "outcome": "SELECTED",
+                    },
+                )
+                _LOGGER.info(
+                    "skill_loaded",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "skill_name": active_skill.name,
+                        "outcome": "LOADED",
+                    },
+                )
+                continue
             return_progress_reason = _return_terminal_progress_reason(
                 current_message=current_message,
                 required_reason=policy.required_return_reason,
@@ -1290,6 +1487,11 @@ class MarketplaceAgentV2Orchestrator:
                         tuple(attachments.values()),
                         required_grounding=selected_scope.required_grounding,
                     )
+                selected_order_answer = _grounded_selected_order_follow_up(
+                    current_message, turn_observations
+                )
+                if selected_order_answer is not None:
+                    content = selected_order_answer
                 try:
                     _validate_grounding(
                         required_grounding=selected_scope.required_grounding,
@@ -1332,7 +1534,9 @@ class MarketplaceAgentV2Orchestrator:
                         continue
                     if error.kind != "MODEL_RESPONSE_UNSUPPORTED":
                         raise
-                    if current_search_executed:
+                    if current_search_executed or _successful_completion_read(
+                        turn_observations
+                    ):
                         # Post-search model text is buffered until validation so
                         # unusable synthesis can never expose codes or discard facts.
                         content = _step_limit_content(
@@ -1340,6 +1544,9 @@ class MarketplaceAgentV2Orchestrator:
                             tuple(attachments.values()),
                             required_grounding=selected_scope.required_grounding,
                         )
+                        content = _grounded_selected_order_follow_up(
+                            current_message, turn_observations
+                        ) or content
                     elif current_private_commerce:
                         rejection = ToolObservation(
                             tool="DIRECT_RESPONSE",
@@ -1397,12 +1604,22 @@ class MarketplaceAgentV2Orchestrator:
                 effective_pending = _effective_workflow_pending(
                     new_pending, pending_interaction, new_active_workflow
                 )
+                if active_skill is not None:
+                    _LOGGER.info(
+                        "skill_completed",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "skill_name": active_skill.name,
+                            "outcome": "COMPLETED",
+                        },
+                    )
                 return OrchestrationResult(
                     message=MarketplaceAgentV2Message(
                         content=_safe_content(content),
                         attachments=response_attachments,
                         refinement=_refinement(turn_observations),
                         pendingInteraction=effective_pending,
+                        citations=_knowledge_citations(turn_observations),
                         toolActivity=tuple(activities),
                         inputTokens=input_tokens,
                         outputTokens=output_tokens,
@@ -1703,6 +1920,9 @@ class MarketplaceAgentV2Orchestrator:
             tuple(attachments.values()),
             required_grounding=selected_scope.required_grounding,
         )
+        fallback = _grounded_selected_order_follow_up(
+            current_message, turn_observations
+        ) or fallback
         if new_pending is not None and new_pending.status == "WAITING":
             fallback = (
                 f"{new_pending.summary} Confirm?"
@@ -1711,6 +1931,15 @@ class MarketplaceAgentV2Orchestrator:
             )
         if text_delta is not None:
             await text_delta(fallback)
+        if active_skill is not None:
+            _LOGGER.info(
+                "skill_abandoned",
+                extra={
+                    "correlation_id": correlation_id,
+                    "skill_name": active_skill.name,
+                    "outcome": "STEP_BUDGET_EXHAUSTED",
+                },
+            )
         effective_pending = _effective_workflow_pending(
             new_pending, pending_interaction, new_active_workflow
         )
@@ -1720,6 +1949,7 @@ class MarketplaceAgentV2Orchestrator:
                 attachments=tuple(attachments.values()),
                 refinement=_refinement(turn_observations),
                 pendingInteraction=effective_pending,
+                citations=_knowledge_citations(turn_observations),
                 toolActivity=tuple(activities),
                 inputTokens=input_tokens,
                 outputTokens=output_tokens,
@@ -2247,6 +2477,8 @@ def _confirmation_answer(value: str) -> bool | None:
         "no leave my order unchanged", "no leave that order alone",
     }:
         return False
+    if re.fullmatch(r"no(?:\s+please)?\s+(?:never\s*mind|don't\s+do\s+it)", normalized):
+        return False
     return None
 
 
@@ -2651,7 +2883,14 @@ def _has_required_grounding(
             and item.status in {"SUCCEEDED", "REJECTED"}
             for item in observations
         )
-    # V2 still has no runtime policy-document tool.
+    if required_grounding == "KNOWLEDGE_RAG":
+        return any(
+            item.tool == "retrieve_help"
+            and item.status == "SUCCEEDED"
+            and item.reason == "KNOWLEDGE_AVAILABLE"
+            and item.knowledge_passages
+            for item in observations
+        )
     return False
 
 
@@ -2769,6 +3008,17 @@ def _evidence_references(
     for observation in observations:
         if observation.status != "SUCCEEDED":
             continue
+        for passage in observation.knowledge_passages:
+            identity = ("KNOWLEDGE_DOCUMENT", passage.article_id)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(EvidenceReference(
+                sourceType="KNOWLEDGE_DOCUMENT",
+                sourceId=passage.article_id,
+                version=passage.version,
+                retrievedAt=observation.observed_at,
+            ))
         order_ids = (
             tuple(item.order_id for item in observation.orders)
             + (() if observation.order is None else (observation.order.order_id,))
@@ -2791,6 +3041,27 @@ def _evidence_references(
                 retrievedAt=observation.observed_at,
             ))
     return tuple(result[:20])
+
+
+def _knowledge_citations(
+    observations: Sequence[ToolObservation],
+) -> tuple[str, ...]:
+    """Project approved help evidence into stable customer-visible citations."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for observation in reversed(observations):
+        if observation.tool != "retrieve_help" or observation.status != "SUCCEEDED":
+            continue
+        for passage in observation.knowledge_passages:
+            if passage.article_id in seen:
+                continue
+            seen.add(passage.article_id)
+            section = (
+                "" if passage.section == passage.title else f" — {passage.section}"
+            )
+            result.append(f"{passage.article_id}: {passage.title}{section}")
+    return tuple(result[:10])
 
 
 def _validate_terminal_response(
@@ -2833,6 +3104,12 @@ def _validate_terminal_response(
     if re.search(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b", content):
         raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
     if re.search(
+        r"\b(?:broadInventoryCount|exactMatchCount|normalizedQuery|"
+        r"resultCount|totalMatches)\b",
+        content,
+    ) or re.search(r"\b(?:NEW|GOOD|FAIR|OPEN_BOX|LIKE_NEW|FOR_PARTS)\b", content):
+        raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
+    if re.search(
         r"\b(?:open_box|like_new|for_parts)\b|"
         r"\bmatch\s*:\s*(?:exact|related)\b|\bmatch_quality\b",
         lowered,
@@ -2849,6 +3126,12 @@ def _validate_terminal_response(
         raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
     if not has_waiting_interaction and re.search(
         r"\byes\s*(?:/|or)\s*no\b", lowered
+    ):
+        raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
+    if not has_waiting_interaction and re.search(
+        r"\b(?:add|adding|put)\b.{0,80}\bcart\b.{0,80}"
+        r"\brequires?\b.{0,30}\bconfirmation\b",
+        lowered,
     ):
         raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
     if (
@@ -2970,6 +3253,12 @@ def _validate_terminal_response(
             for item in observations
         )
     ):
+        if re.search(
+            r"\b(?:do you want me to|would you like me to|shall i|i can)\s+"
+            r"(?:check|verify|look up)\b",
+            lowered,
+        ):
+            raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
         # Ordinals identify the grounded target here; they do not turn the
         # response into a multi-listing comparison.
         return
@@ -3063,6 +3352,11 @@ def _claims_or_offers_unavailable_action(
         r"\b(?:pickup|payment)\b.{0,40}\binstructions\b",
     )
     checkout_unavailable = (
+        r"\b(?:do you\s+)?want\s+to\s+(?:checkout|check\s*out)\b",
+        r"\bor\s+(?:checkout|check\s*out)(?:\s+(?:now|next))?\s*\?",
+        r"\b(?:you can|you may|feel free to)\s+(?:checkout|check\s*out)\b",
+        r"(?m)^\s*(?:\d+\s*[).]|[-*])\s*(?:checkout|check\s*out)\b",
+        r"\b(?:purchase|buy)\s+(?:everything|all)\s+in\s+(?:my|your|the)\s+cart\b",
         r"\b(?:i(?:'m| am)|we(?:'re| are))\s+starting\s+(?:a|the)\s+purchase\b",
         r"\b(?:would you like me to|i can|we can|shall i|let me)\s+"
         r"(?:start|complete|make)\s+(?:a|the)\s+purchase\b",
@@ -3183,8 +3477,13 @@ def _return_read_only_request(
         return True
     if not recent_messages:
         return False
-    recent = " ".join(content.casefold() for _, content in recent_messages[-6:])
-    if not re.search(r"\b(?:return|refund|order)\b", recent):
+    # An assistant's optional offer to help with returns does not turn the
+    # customer's later order-status pronoun into a return-status question.
+    recent = " ".join(
+        content.casefold() for role, content in recent_messages[-6:]
+        if role.casefold() == "user"
+    )
+    if not re.search(r"\b(?:return|refund)\b", recent):
         return False
     normalized = " ".join(
         current_message.casefold().replace("’", "'").split()
@@ -3672,6 +3971,93 @@ def _step_limit_content(
 ) -> str:
     """Complete a bounded turn from current authoritative tool facts at step five."""
 
+    knowledge = next((
+        item for item in reversed(observations)
+        if item.tool == "retrieve_help"
+        and item.status == "SUCCEEDED"
+        and item.knowledge_passages
+    ), None)
+    if knowledge is not None:
+        passage = knowledge.knowledge_passages[0]
+        return (
+            f"The marketplace help article “{passage.title}” says:\n\n"
+            f"{passage.excerpt}"
+        )
+
+    # The model gets the first synthesis opportunity. At the hard step limit,
+    # preserve only facts supplied by the successful owning-service read.
+    checkout_read = next((
+        item for item in reversed(observations)
+        if item.tool == "get_my_checkout"
+        and item.status == "SUCCEEDED"
+        and item.checkout is not None
+    ), None)
+    if checkout_read is not None:
+        checkout = checkout_read.checkout
+        items = "; ".join(
+            f"{item.title} (quantity {item.quantity})"
+            for item in checkout.items[:5]
+        )
+        return (
+            f"Your checkout is {checkout.status.replace('_', ' ').lower()}. "
+            f"It contains {items}. The current total is {checkout.total} "
+            f"{checkout.currency}. No payment or order was submitted by this read."
+        )
+    listing_read = next((
+        item for item in reversed(observations)
+        if item.tool == "get_listing"
+        and item.status == "SUCCEEDED"
+        and item.reason == "LISTING_VERIFIED"
+        and item.attachments
+    ), None)
+    if listing_read is not None:
+        listing = listing_read.attachments[0]
+        return (
+            f"{listing.title} is a current {listing.category_name} listing at "
+            f"{listing.price_amount} {listing.currency}. "
+            "This detail check does not verify live stock."
+        )
+    availability_read = next((
+        item for item in reversed(observations)
+        if item.tool == "check_availability"
+        and item.status == "SUCCEEDED"
+        and item.broad_inventory_count is not None
+    ), None)
+    if availability_read is not None:
+        count = availability_read.broad_inventory_count
+        category = availability_read.normalized_query or "that category"
+        return (
+            f"The current category check shows {count} active "
+            f"listing{'s' if count != 1 else ''} in "
+            f"{category}. This category check does not confirm stock for one "
+            "specific listing."
+        )
+    if any(
+        item.tool == "get_listing" and item.reason == "LISTING_NOT_FOUND"
+        for item in observations
+    ):
+        return "I couldn't find a current listing for that item."
+    if any(
+        item.tool == "check_availability" and item.status == "FAILED"
+        for item in observations
+    ):
+        return "I couldn't verify current availability right now. Please try again later."
+    if any(
+        item.tool == "check_availability" and item.reason == "CATEGORY_NOT_FOUND"
+        for item in observations
+    ):
+        return "I couldn't find that marketplace category. Please choose a current category."
+    if any(
+        item.tool == "check_availability" and item.reason == "INVALID_ARGUMENTS"
+        for item in observations
+    ):
+        return "I couldn't understand which category to check. Please name a marketplace category."
+    if any(
+        item.tool == "get_listing" and item.status == "FAILED"
+        for item in observations
+    ):
+        return "I couldn't verify that listing's current details right now."
+
     result = next(
         (
             item for item in reversed(observations)
@@ -3783,6 +4169,7 @@ def _step_limit_content(
                 "not only selected items. I did not prepare or submit a request."
             ),
             "ORDER_NOT_FOUND": "I couldn't find that order in your account.",
+            "FORBIDDEN": "I couldn't find an order you can access with that reference.",
             "RETURN_VERSION_CONFLICT": (
                 "That order group changed, so I did not submit the return request. "
                 "Please review it again."
@@ -4001,6 +4388,26 @@ def _step_limit_content(
             cart_rejection.reason,
             "I couldn't safely apply that cart update.",
         )
+    cart_read = next((
+        item for item in reversed(observations)
+        if item.tool == "get_my_cart"
+        and item.status == "SUCCEEDED"
+        and item.cart is not None
+    ), None)
+    if cart_read is not None:
+        cart = cart_read.cart
+        if not cart.items:
+            return "Your cart is empty."
+        items = "; ".join(
+            f"{item.title} (quantity {item.quantity})" for item in cart.items[:5]
+        )
+        remainder = f" and {len(cart.items) - 5} more" if len(cart.items) > 5 else ""
+        totals = "; ".join(
+            f"{total.amount} {total.currency}" for total in cart.totals
+        )
+        total_text = f" Current cart total: {totals}." if totals else ""
+        noun = "item" if cart.item_count == 1 else "items"
+        return f"Your cart has {cart.item_count} {noun}: {items}{remainder}.{total_text}"
     if any(item.status == "FAILED" for item in observations):
         return "I could not complete the marketplace check because the service is temporarily unavailable. Please try again."
     private = next((
@@ -4043,8 +4450,12 @@ def _step_limit_content(
                 for group in private.order.groups
                 for item in group.items
             )
+            total = private.order.total
             if not items:
-                return f"Your order is currently {status}."
+                return (
+                    f"Your order is currently {status}. Its recorded total is "
+                    f"{total.amount} {total.currency}."
+                )
             item_summary = "; ".join(
                 f"{item.title} — quantity {item.quantity} at "
                 f"{item.purchase_unit_price} {item.currency} each"
@@ -4052,7 +4463,8 @@ def _step_limit_content(
             )
             suffix = "" if len(items) <= 5 else f"; plus {len(items) - 5} more item(s)"
             return (
-                f"Your order is currently {status}. Purchase-time items: "
+                f"Your order is currently {status}. Its recorded total is "
+                f"{total.amount} {total.currency}. Purchase-time items: "
                 f"{item_summary}{suffix}."
             )
         if private.reason == "ORDER_NOT_FOUND":

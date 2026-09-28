@@ -524,6 +524,8 @@ class MarketplaceAgentV2Settings:
     checkout_enabled: bool = False
     order_mutations_enabled: bool = False
     return_requests_enabled: bool = False
+    help_knowledge_enabled: bool = False
+    help_corpus_path: str | None = None
     hybrid_retrieval_enabled: bool = False
     query_embedding_enabled: bool = False
     auth_service_url: str | None = None
@@ -608,6 +610,7 @@ class MarketplaceAgentV2Settings:
                 self.checkout_enabled,
                 self.order_mutations_enabled,
                 self.return_requests_enabled,
+                self.help_knowledge_enabled,
                 self.hybrid_retrieval_enabled,
                 self.query_embedding_enabled,
             )):
@@ -647,6 +650,10 @@ class MarketplaceAgentV2Settings:
                     "Marketplace Agent V2 return requests require commerce reads"
                 )
             _validate_service_url("ORDER_SERVICE_URL", self.order_service_url)
+        if self.help_knowledge_enabled and not self.help_corpus_path:
+            raise ValueError(
+                "AGENT_MARKETPLACE_V2_HELP_CORPUS_PATH is required when help knowledge is enabled"
+            )
         if self.provider_enabled and not provider_configured:
             raise ValueError("OPENAI_API_KEY is required when Marketplace Agent V2 provider is enabled")
         if self.hybrid_retrieval_enabled and (
@@ -1281,6 +1288,12 @@ class Settings:
             ),
             return_requests_enabled=_boolean(
                 "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED", False
+            ),
+            help_knowledge_enabled=_boolean(
+                "AGENT_MARKETPLACE_V2_HELP_KNOWLEDGE_ENABLED", False
+            ),
+            help_corpus_path=_optional_text(
+                "AGENT_MARKETPLACE_V2_HELP_CORPUS_PATH"
             ),
             hybrid_retrieval_enabled=_boolean("AGENT_MARKETPLACE_V2_HYBRID_RETRIEVAL_ENABLED", False),
             query_embedding_enabled=_boolean("AGENT_MARKETPLACE_V2_QUERY_EMBEDDING_ENABLED", False),

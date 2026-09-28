@@ -154,6 +154,7 @@ class MarketplaceAgentV2ProviderTest(unittest.IsolatedAsyncioTestCase):
             "CART_MUTATION_TOOL_REQUIRED": "remove_from_my_cart",
             "CHECKOUT_READ_TOOL_REQUIRED": "get_my_checkout",
             "ORDER_DETAIL_TOOL_REQUIRED": "get_my_order",
+            "SELLER_COLLECTION_TOOL_REQUIRED": "collect_listing_information",
         }
         available = tuple(item["name"] for item in ALL_TOOLS)
 
@@ -172,6 +173,35 @@ class MarketplaceAgentV2ProviderTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     {"type": "function", "name": tool_name}, choice
                 )
+
+    def test_completed_recovery_read_does_not_force_it_again(self) -> None:
+        cases = {
+            "LISTING_DETAIL_TOOL_REQUIRED": "get_listing",
+            "AVAILABILITY_TOOL_REQUIRED": "check_availability",
+            "CHECKOUT_READ_TOOL_REQUIRED": "get_my_checkout",
+            "ORDER_DETAIL_TOOL_REQUIRED": "get_my_order",
+        }
+        available = tuple(item["name"] for item in ALL_TOOLS)
+        for reason, tool_name in cases.items():
+            with self.subTest(tool=tool_name):
+                context = AgentContext(
+                    currentMessage="Tell me the current state",
+                    observations=(
+                        ToolObservation(
+                            tool="DIRECT_RESPONSE", status="REJECTED",
+                            reason=reason,
+                        ),
+                        ToolObservation(
+                            tool=tool_name, status="SUCCEEDED",
+                            reason="RESULTS_AVAILABLE",
+                        ),
+                        ToolObservation(
+                            tool=tool_name, status="REJECTED",
+                            reason="READ_ALREADY_SATISFIED",
+                        ),
+                    ),
+                )
+                self.assertEqual("auto", _required_tool_choice(context, available))
 
     async def test_output_limit_is_classified_without_leaking_provider_data(self) -> None:
         responses = _Responses(

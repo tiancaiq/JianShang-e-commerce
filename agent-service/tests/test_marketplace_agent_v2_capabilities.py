@@ -53,6 +53,7 @@ class MarketplaceCustomerCapabilityBoundaryTest(unittest.TestCase):
     def test_registry_is_the_exact_current_customer_capability_set(self) -> None:
         self.assertEqual(
             (
+                "retrieve_help",
                 "check_availability",
                 "search_listings",
                 "get_listing",

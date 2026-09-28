@@ -7,6 +7,7 @@ from .schemas import (
     ListingAttachment,
     MarketplaceAgentV2PendingInteraction,
     MarketplaceScopeResult,
+    ToolObservation,
 )
 
 
@@ -40,7 +41,7 @@ _KNOWLEDGE_PHRASES = (
 _PRIVATE_STATUS_PATTERNS = (
     r"\b(?:where|what)\s+(?:is|was)\s+my\s+order\b",
     r"\b(?:what(?:'s|s| is)?\s+in|what\s+do\s+i\s+have\s+in|"
-    r"show|open|check)\s+my\s+cart\b",
+    r"(?:show|open|check)(?:\s+me)?|let\s+me\s+see)\s+my\s+cart\b",
     r"\b(?:list|show)\s+(?:my\s+)?(?:recent\s+)?orders?\b",
     r"\b(?:list|show)(?:\s+me)?\s+(?:my\s+)?"
     r"(?:last|latest|recent)\s+(?:one|two|three|[1-9][0-9]?)\s+orders?\b",
@@ -91,6 +92,19 @@ _CONTEXT_ANCHORS = (
 )
 
 
+def _selected_order_follow_up(value: str) -> bool:
+    """Recognize current-state questions only when an owned order was selected."""
+
+    return bool(re.search(
+        r"\bwhat(?:'s| is)\s+happening\s+with\s+(?:it|that|this)\b|"
+        r"\bwhat\s+is\s+(?:its|that\s+order's|this\s+order's)\s+status\b|"
+        r"\bhow\s+much\s+did\s+i\s+pay\b|"
+        r"\bwhat\s+did\s+i\s+pay\b|"
+        r"\bwhere\s+is\s+(?:it|that|this)(?:\s+now)?\b",
+        value,
+    ))
+
+
 class MarketplaceScopeClassifier:
     """Classifies only the broad marketplace boundary and never selects a tool."""
 
@@ -102,6 +116,7 @@ class MarketplaceScopeClassifier:
         referenced_listings: Sequence[ListingAttachment],
         pending_interaction: MarketplaceAgentV2PendingInteraction | None,
         preference_state: Mapping[str, object],
+        prior_observations: Sequence[ToolObservation] = (),
     ) -> MarketplaceScopeResult:
         normalized = _normalize(current_message)
         context_available = _has_marketplace_context(
@@ -140,10 +155,34 @@ class MarketplaceScopeClassifier:
             return _result(
                 "IN_SCOPE", "NONE", "HIGH", context_available, "AGENT_CAPABILITIES"
             )
+        if re.search(
+            r"\bhow\s+many\b.{0,90}\b(?:items|listings|products)\b"
+            r".{0,40}\bavailable\b|"
+            r"\bcheck\b.{0,70}\b(?:category|availability)\b",
+            normalized,
+        ):
+            return _result(
+                "IN_SCOPE", "LISTING_DATA", "HIGH", context_available,
+                "MARKETPLACE_AVAILABILITY",
+            )
         if any(re.search(pattern, normalized) for pattern in _PRIVATE_STATUS_PATTERNS):
             return _result(
                 "IN_SCOPE", "PRIVATE_TOOL", "HIGH", context_available,
                 "PRIVATE_MARKETPLACE_STATUS",
+            )
+        if (
+            any(
+                item.status == "SUCCEEDED"
+                and item.tool == "get_my_order"
+                and item.order_references
+                for item in prior_observations
+            )
+            and _selected_order_follow_up(normalized)
+        ):
+            # A session-owned reference identifies the target, not its current state.
+            return _result(
+                "IN_SCOPE", "PRIVATE_TOOL", "HIGH", True,
+                "PRIVATE_COMMERCE_FOLLOW_UP",
             )
         if _is_current_order_item_listing_follow_up(normalized, recent_messages):
             return _result(
@@ -166,7 +205,8 @@ class MarketplaceScopeClassifier:
                 "MARKETPLACE_KNOWLEDGE",
             )
         if re.search(
-            r"\b(?:i\s+(?:want|need|would like)\s+to\s+sell|help me (?:sell|list)|"
+            r"\b(?:i\s+(?:want|need|would like)\s+to\s+(?:sell|list)|"
+            r"help me (?:sell|list|create (?:a )?listing)|"
             r"create (?:a )?listing)\b",
             normalized,
         ):
@@ -456,16 +496,30 @@ def unsupported_customer_authority_response(value: str) -> tuple[str, str] | Non
     if re.search(
         r"\b(?:force|choose|select|set|simulate|fake|override|control|use)\b.{0,55}"
         r"\b(?:payment\s+provider|provider|payment\s+outcome|payment\s+result|"
-        r"declin(?:e|ed)|fail(?:ure|ed)?|succeed(?:ed)?)\b|"
+        r"declin(?:e|ed)|fail(?:ure|ed)?|succeed(?:ed)?|success(?:ful)?)\b|"
         r"\b(?:make|mark)\b.{0,35}\bpayment\b.{0,20}\b(?:declin(?:e|ed)|"
-        r"fail(?:ed)?|succeed(?:ed)?|paid)\b",
+        r"fail(?:ed)?|succeed(?:ed)?|success(?:ful)?|paid)\b",
         normalized,
     ):
         return (
             "UNSUPPORTED_PAYMENT_CONTROL",
-            "I can't choose or force a payment provider or payment outcome. Payment "
-            "results come only from the configured Payment Service. No payment or "
+            "I can't choose or force a payment provider, status, or outcome. No payment or "
             "order was submitted.",
+        )
+    combined_authorities = bool(
+        re.search(r"\b(?:admin|administrator|moderator)\b", normalized)
+        and re.search(r"\b(?:refund|payment|publish)\b", normalized)
+    )
+    if not combined_authorities and re.search(r"\b(?:approve|issue|force|process)\b.{0,35}\brefund\b|\brefund\s+me\s+directly\b", normalized):
+        return (
+            "FORBIDDEN_CUSTOMER_AUTHORITY",
+            "I can't approve or directly issue refunds. I can help with the "
+            "supported return and refund-request process.",
+        )
+    if not combined_authorities and re.search(r"\b(?:act as|become|use|invoke)\b.{0,35}\b(?:admin|administrator|moderator)\b", normalized):
+        return (
+            "FORBIDDEN_CUSTOMER_AUTHORITY",
+            "I don't have customer-facing access to Admin actions.",
         )
     patterns = (
         r"\b(?:act as|become|use|invoke)\b.{0,35}\b(?:admin|administrator|moderator)\b",

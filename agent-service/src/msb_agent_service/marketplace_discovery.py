@@ -901,8 +901,8 @@ class ProductMarketplaceDiscoveryClient:
         )
         response.raise_for_status()
         result = DiscoveryAvailabilityProbe.model_validate(response.json())
-        if result.category != normalized:
-            raise ValueError("Product availability category did not match the request")
+        # Product resolves display names and IDs to its authoritative slug.
+        # A different canonical category is expected for those aliases.
         return result
 
     async def search_individual(
@@ -1898,16 +1898,12 @@ def _normalize_requested_category(value: str) -> str:
     normalized = " ".join(value.strip().lower().split())
     normalized = re.sub(r"^(?:a|an|some|used|new)\s+", "", normalized)
     normalized = normalized.strip(" .?!,'\"")
-    if normalized.endswith("ies") and len(normalized) > 4:
-        normalized = normalized[:-3] + "y"
-    elif normalized.endswith("s") and not normalized.endswith("ss") and len(normalized) > 3:
-        normalized = normalized[:-1]
     if (
         not 1 <= len(normalized) <= 80
         or normalized in _NON_CATEGORY_WORDS
         or normalized.split(" ", 1)[0] in {"anything", "help", "something"}
         or _CONTROL_PATTERN.search(normalized)
-        or re.fullmatch(r"[a-z0-9][a-z0-9 .'-]{0,79}", normalized) is None
+        or re.fullmatch(r"[a-z0-9][a-z0-9 &.'-]{0,79}", normalized) is None
     ):
         raise ValueError("A meaningful broad marketplace category is required")
     return normalized

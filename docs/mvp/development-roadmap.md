@@ -1828,6 +1828,18 @@ production legal/provider decisions, and explicit rollout approval are green.
    refund processing, and final state. Partial returns, direct refunds, dispute
    resolution, seller tools, and Admin finance tools remain unavailable. See
    `docs/mvp/ai/ai-ret-01-customer-return-refund-request.md`.
+   `AI-SKILL-CLI-00` adds an inert, versioned `SKILL.md` procedure layer above
+   Marketplace Agent V2's existing tool registry. The model receives compact
+   Skill metadata first, may spend one of the existing five decisions loading
+   one Skill, and then sees only that Skill's already-enabled tool subset plus
+   its full instructions. Tool capability policy, actor authorization,
+   authoritative Java adapters, and durable confirmation remain unchanged and
+   fail closed. A packaged `agent skills` CLI lists, shows, validates, and
+   inspects the deterministic library for CI and operators. Four representative
+   Skills prove discovery, cart, purchase preparation, and order-help boundaries;
+   no public API, migration, frontend change, remote Skill execution, shell
+   capability, or rollout gate is added. See
+   `docs/mvp/ai/ai-skill-cli-00-skills-cli-foundation.md`.
 9. Keep all automated report/listing operations disabled until shadow-mode
    quality, appeal, restoration, and explicit approval gates pass.
 

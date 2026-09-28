@@ -90,7 +90,8 @@ _CORRECTION = re.compile(
 )
 _INITIAL_ITEM_TYPE = re.compile(
     r"^(?:i\s+(?:want|need|would like)\s+to\s+(?:sell|list)|"
-    r"help me (?:sell|list)|create (?:a )?listing(?:\s+for)?)\s+(?P<value>.+)$",
+    r"help me (?:sell|list|create (?:a )?listing(?:\s+for)?)|"
+    r"create (?:a )?listing(?:\s+for)?)\s+(?P<value>.+)$",
     re.IGNORECASE,
 )
 _GENERIC_ITEM_TYPES = frozenset({"item", "an item", "something", "stuff", "a thing"})

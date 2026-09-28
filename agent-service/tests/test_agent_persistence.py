@@ -133,6 +133,15 @@ class AgentPersistenceDomainTest(unittest.TestCase):
 
         self.assertEqual(refs, json.loads(_source_refs_json(refs)))
 
+    def test_source_refs_accept_versioned_public_help_documents(self) -> None:
+        refs = [{
+            "sourceType": "KNOWLEDGE_DOCUMENT",
+            "sourceId": "HELP-FAVORITES-001",
+            "sourceVersion": "a" * 64,
+        }]
+
+        self.assertEqual(refs, json.loads(_source_refs_json(refs)))
+
     def test_source_refs_reject_invalid_product_listing_identifiers(self) -> None:
         valid = {
             "listingId": "81ARZ3NDEKTSV4RRFFQ69G5FAC",
@@ -281,6 +290,23 @@ class AgentPersistenceDomainTest(unittest.TestCase):
             self.assertIn(f"'{tool_name}'", migration)
         for forbidden in (
             "admin_cancel_order", "issue_refund", "release_inventory",
+        ):
+            self.assertNotIn(f"'{forbidden}'", migration)
+        self.assertNotIn("DROP TABLE", migration.upper())
+        self.assertNotIn("TRUNCATE", migration.upper())
+
+    def test_v25_forward_adds_only_customer_help_tool(self) -> None:
+        migration = (
+            Path(__file__).parents[1]
+            / "db"
+            / "migration"
+            / "V25__allow_marketplace_agent_v2_help_tool_audit.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("'retrieve_help'", migration)
+        for forbidden in (
+            "admin_knowledge_search", "retrieve_private_document",
+            "publish_help_article",
         ):
             self.assertNotIn(f"'{forbidden}'", migration)
         self.assertNotIn("DROP TABLE", migration.upper())

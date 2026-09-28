@@ -59,6 +59,7 @@ class DemoActivationConfigTests(unittest.TestCase):
             "AGENT_MARKETPLACE_V2_CHECKOUT_ENABLED",
             "AGENT_MARKETPLACE_V2_ORDER_MUTATIONS_ENABLED",
             "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED",
+            "AGENT_MARKETPLACE_V2_HELP_KNOWLEDGE_ENABLED",
         ):
             self.assertIn(f"{variable}: ${{{variable}:-false}}", agent)
 
@@ -178,6 +179,12 @@ class DemoActivationConfigTests(unittest.TestCase):
             "AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED: "
             "${AGENT_MARKETPLACE_V2_RETURN_REQUESTS_ENABLED:-false}",
             agent,
+        )
+        self.assertIn(
+            'AGENT_MARKETPLACE_V2_HELP_KNOWLEDGE_ENABLED: "true"', agent
+        )
+        self.assertIn(
+            'AGENT_MARKETPLACE_V2_HELP_CORPUS_PATH: "/app/help"', agent
         )
         self.assertIn('AGENT_MARKETPLACE_V2_MAX_OUTPUT_TOKENS: "4096"', agent)
         self.assertIn('ORDER_SERVICE_URL: "http://order-service:8081"', agent)

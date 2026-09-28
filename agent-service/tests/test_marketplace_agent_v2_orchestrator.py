@@ -11,7 +11,9 @@ from msb_agent_service.marketplace_agent_v2.orchestrator import (
     MarketplaceAgentV2Orchestrator,
     _cart_mutation_reference_ambiguous,
     _confirmation_answer,
+    _terminal_tool_requirement,
     _step_limit_content,
+    _return_read_only_request,
     _validate_terminal_response,
 )
 from msb_agent_service.marketplace_agent_v2.capabilities import (
@@ -21,8 +23,12 @@ from msb_agent_service.marketplace_agent_v2.capabilities import (
 from msb_agent_service.marketplace_agent_v2.policy import MarketplaceAgentV2ToolPolicy
 from msb_agent_service.marketplace_agent_v2.provider import MarketplaceAgentV2ProviderFailure
 from msb_agent_service.marketplace_agent_v2.schemas import (
+    CartItemSnapshot,
+    CustomerCartSnapshot,
     CustomerCheckoutSnapshot,
+    CustomerOrderDetail,
     CustomerOrderReference,
+    CommerceMoney,
     ListingAttachment,
     MarketplaceAgentV2PendingInteraction,
     MarketplaceScopeResult,
@@ -32,6 +38,9 @@ from msb_agent_service.marketplace_agent_v2.schemas import (
     ToolProposal,
 )
 from msb_agent_service.marketplace_agent_v2.tools import MarketplaceAgentV2ToolRegistry
+from msb_agent_service.marketplace_agent_v2.seller_workflow import (
+    extract_initial_item_type, start_create_listing_workflow,
+)
 
 
 LISTING_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -149,6 +158,409 @@ def _proposal(call_id: str = "call-1") -> ModelDecision:
 
 
 class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_unusable_post_read_model_output_uses_verified_listing_facts(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_VERIFIED",
+            attachments=(_attachment(),),
+        ))
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="detail", tool="get_listing",
+                arguments={"listingId": LISTING_ID},
+            )),
+            MarketplaceAgentV2ProviderFailure("MODEL_RESPONSE_UNSUPPORTED"),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Tell me more about the first one.",
+            recent_messages=(), referenced_listings=(_attachment(),),
+            correlation_id="v2-post-read-provider-recovery",
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(2, result.decision_count)
+        self.assertIn("Office chair", result.message.content)
+        self.assertIn("99.00 USD", result.message.content)
+
+    async def test_invalid_post_read_prose_uses_verified_availability_count(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="check_availability", status="SUCCEEDED",
+            reason="RESULTS_AVAILABLE", normalizedQuery="Furniture",
+            broadInventoryCount=4,
+        ))
+        registry.names = ("check_availability",)
+        registry.provider_schemas = lambda: ({"name": "check_availability"},)
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="probe", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(content="The listing is definitely in stock. Yes or no?"),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Is it available right now?",
+            recent_messages=(), referenced_listings=(_attachment(),),
+            correlation_id="v2-post-read-terminal-recovery",
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertIn("4 active listings", result.message.content)
+        self.assertIn("does not confirm stock", result.message.content)
+
+    async def test_successful_availability_cannot_ask_to_check_again(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="check_availability", status="SUCCEEDED",
+            reason="RESULTS_AVAILABLE", normalizedQuery="Furniture",
+            broadInventoryCount=4,
+        ))
+        registry.names = ("check_availability",)
+        registry.provider_schemas = lambda: ({"name": "check_availability"},)
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="probe", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(content=(
+                "I can check current stock. Do you want me to check it?"
+            )),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Is it available right now?",
+            recent_messages=(), referenced_listings=(_attachment(),),
+            correlation_id="v2-availability-already-checked",
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertIn("4 active listings", result.message.content)
+        self.assertNotIn("Do you want me to check", result.message.content)
+
+    async def test_unusable_checkout_synthesis_preserves_authoritative_read(self) -> None:
+        checkout = CustomerCheckoutSnapshot(
+            checkoutId=ORDER_ID, status="PENDING_PAYMENT", currency="USD",
+            subtotal=Decimal("20.00"), shipping=Decimal("0.00"),
+            tax=Decimal("0.00"), discount=Decimal("0.00"),
+            total=Decimal("20.00"),
+            expiresAt=datetime.now(UTC) + timedelta(minutes=15),
+            addressSummary="Saved address", shippingSummary="Standard shipping",
+            items=({"listingId": LISTING_ID, "title": "Harbor Mouse Pad",
+                    "quantity": 1, "unitPrice": Decimal("20.00"),
+                    "lineTotal": Decimal("20.00")},),
+        )
+        registry = _Registry(ToolObservation(
+            tool="get_my_checkout", status="SUCCEEDED", reason="CHECKOUT_READY",
+            checkout=checkout,
+        ))
+        registry.names = ("get_my_checkout",)
+        registry.provider_schemas = lambda: ({"name": "get_my_checkout"},)
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_CHECKOUT})
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="checkout-read", tool="get_my_checkout",
+                arguments={"checkoutId": ORDER_ID},
+            )),
+            MarketplaceAgentV2ProviderFailure("MODEL_RESPONSE_UNSUPPORTED"),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's in this checkout?", recent_messages=(),
+            referenced_listings=(), prior_observations=(ToolObservation(
+                tool="prepare_my_checkout", status="SUCCEEDED",
+                reason="CHECKOUT_READY", checkout=checkout,
+            ),), correlation_id="v2-checkout-post-read-recovery",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_MARKETPLACE_STATUS",
+            ),
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(2, result.decision_count)
+        self.assertIn("Harbor Mouse Pad", result.message.content)
+        self.assertIn("20.00 USD", result.message.content)
+        self.assertNotIn("placed", result.message.content)
+
+    async def test_seller_entry_recovers_collector_and_does_not_publish(self) -> None:
+        workflow, pending = start_create_listing_workflow(initial_item_type="phone")
+        registry = _Registry(ToolObservation(
+            tool="collect_listing_information", status="SUCCEEDED",
+            reason="WORKFLOW_READY", activeWorkflow=workflow,
+            pendingInteraction=pending,
+        ))
+        registry.names = ("collect_listing_information",)
+        registry.provider_schemas = lambda: ({"name": "collect_listing_information"},)
+        model = _Model([
+            ModelDecision(content="I can help prepare that listing."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="seller-collect", tool="collect_listing_information",
+                arguments={"field": "ITEM_TYPE", "itemType": "phone"},
+            )),
+            ModelDecision(content="What title would you like for your phone?"),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="I want to sell my phone.", recent_messages=(),
+            referenced_listings=(), correlation_id="v2-seller-collector-entry",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="NONE",
+                confidence="HIGH", marketplaceContextUsed=False,
+                reasonCode="SELLER_LISTING_WORKFLOW",
+            ),
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual("collect_listing_information", registry.execution_calls[0]["tool"])
+        self.assertEqual("CREATE_LISTING", result.active_workflow.type)
+        self.assertEqual("COLLECTING_INFORMATION", result.active_workflow.status)
+        self.assertEqual(3, result.decision_count)
+        self.assertEqual("phone", extract_initial_item_type("I want to sell my phone."))
+        self.assertEqual("iPhone", extract_initial_item_type(
+            "Help me create a listing for my iPhone."
+        ))
+        self.assertEqual("old laptop", extract_initial_item_type(
+            "I want to list my old laptop."
+        ))
+
+    async def test_successful_listing_read_duplicate_gets_one_synthesis_chance(self) -> None:
+        listing = _attachment()
+        registry = _Registry(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_VERIFIED",
+            attachments=(listing,),
+        ))
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="read-1", tool="get_listing",
+                arguments={"listingId": LISTING_ID},
+            )),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="read-again", tool="get_listing",
+                arguments={"listingId": LISTING_ID},
+            )),
+            ModelDecision(content="Office chair is listed for 99.00 USD."),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Tell me more about the first one.",
+            recent_messages=(), referenced_listings=(listing,),
+            correlation_id="v2-listing-duplicate-synthesis",
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(3, result.decision_count)
+        self.assertIn("Office chair", result.message.content)
+        self.assertTrue(any(
+            item.reason == "READ_ALREADY_SATISFIED" for item in result.observations
+        ))
+
+    def test_read_completion_allows_other_target_or_capability_and_post_mutation_refresh(self) -> None:
+        policy = MarketplaceAgentV2ToolPolicy(
+            referenced_listing_ids=frozenset({LISTING_ID, SECOND_LISTING_ID}),
+        )
+        first = ToolProposal(
+            callId="first-read", tool="get_listing",
+            arguments={"listingId": LISTING_ID},
+        )
+        args, rejection = policy.validate(first, step=1)
+        self.assertIsNotNone(args)
+        self.assertIsNone(rejection)
+        policy.record(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_VERIFIED",
+            attachments=(_attachment(),),
+        ))
+        _, duplicate = policy.validate(first, step=2)
+        self.assertEqual("READ_ALREADY_SATISFIED", duplicate.reason)
+        for proposal in (
+            ToolProposal(
+                callId="different-target", tool="get_listing",
+                arguments={"listingId": SECOND_LISTING_ID},
+            ),
+            ToolProposal(
+                callId="other-read", tool="check_availability",
+                arguments={"category": "Furniture"},
+            ),
+        ):
+            with self.subTest(tool=proposal.tool):
+                _, rejection = policy.validate(proposal, step=3)
+                self.assertIsNone(rejection)
+        policy.record(ToolObservation(
+            tool="remove_from_my_cart", status="SUCCEEDED",
+            reason="CART_ITEM_REMOVED",
+        ))
+        _, refreshed = policy.validate(first, step=4)
+        self.assertIsNone(refreshed)
+
+    def test_failed_or_missing_read_does_not_become_successful_completion(self) -> None:
+        policy = MarketplaceAgentV2ToolPolicy(
+            referenced_listing_ids=frozenset({LISTING_ID}),
+        )
+        first = ToolProposal(
+            callId="missing", tool="get_listing",
+            arguments={"listingId": LISTING_ID},
+        )
+        policy.validate(first, step=1)
+        policy.record(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_NOT_FOUND",
+        ))
+        _, repeated = policy.validate(first, step=2)
+        self.assertEqual("DUPLICATE_TOOL_CALL", repeated.reason)
+        self.assertIn("couldn't find", _step_limit_content(policy.prior_observations))
+        self.assertIn("couldn't verify current availability", _step_limit_content((
+            ToolObservation(
+                tool="check_availability", status="FAILED",
+                reason="SEARCH_UNAVAILABLE",
+            ),
+        )))
+        self.assertIn("couldn't find that checkout", _step_limit_content((
+            ToolObservation(
+                tool="get_my_checkout", status="SUCCEEDED",
+                reason="CHECKOUT_NOT_FOUND",
+            ),
+        )))
+
+    async def test_successful_availability_duplicate_does_not_claim_exact_stock(self) -> None:
+        registry = _Registry(ToolObservation(
+            tool="check_availability", status="SUCCEEDED",
+            reason="RESULTS_AVAILABLE", normalizedQuery="Furniture",
+            broadInventoryCount=4,
+        ))
+        registry.names = ("check_availability",)
+        registry.provider_schemas = lambda: ({"name": "check_availability"},)
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="probe-1", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="probe-again", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(content=(
+                "There are active Furniture listings, but this category-level "
+                "check does not confirm exact stock for that chair."
+            )),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Is it available right now?",
+            recent_messages=(), referenced_listings=(_attachment(),),
+            correlation_id="v2-availability-duplicate-synthesis",
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(3, result.decision_count)
+        self.assertIn("category-level", result.message.content)
+        self.assertTrue(any(
+            item.reason == "READ_ALREADY_SATISFIED" for item in result.observations
+        ))
+
+    async def test_successful_checkout_read_duplicate_uses_current_total(self) -> None:
+        checkout = CustomerCheckoutSnapshot(
+            checkoutId=ORDER_ID, status="PENDING_PAYMENT", currency="USD",
+            subtotal=Decimal("20.00"), shipping=Decimal("0.00"),
+            tax=Decimal("0.00"), discount=Decimal("0.00"),
+            total=Decimal("20.00"),
+            expiresAt=datetime.now(UTC) + timedelta(minutes=15),
+            addressSummary="Saved address", shippingSummary="Standard shipping",
+            items=({"listingId": LISTING_ID, "title": "Harbor Mouse Pad",
+                    "quantity": 1, "unitPrice": Decimal("20.00"),
+                    "lineTotal": Decimal("20.00")},),
+        )
+        registry = _Registry(ToolObservation(
+            tool="get_my_checkout", status="SUCCEEDED", reason="CHECKOUT_READY",
+            checkout=checkout,
+        ))
+        registry.names = ("get_my_checkout",)
+        registry.provider_schemas = lambda: ({"name": "get_my_checkout"},)
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_CHECKOUT})
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="checkout-1", tool="get_my_checkout",
+                arguments={"checkoutId": ORDER_ID},
+            )),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="checkout-again", tool="get_my_checkout",
+                arguments={"checkoutId": ORDER_ID},
+            )),
+            ModelDecision(content=(
+                "This checkout contains one Harbor Mouse Pad. The current "
+                "total is 20.00 USD; no payment was submitted."
+            )),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's in this checkout?", recent_messages=(),
+            referenced_listings=(),
+            prior_observations=(ToolObservation(
+                tool="prepare_my_checkout", status="SUCCEEDED",
+                reason="CHECKOUT_READY", checkout=checkout,
+            ),),
+            correlation_id="v2-checkout-duplicate-synthesis",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_MARKETPLACE_STATUS",
+            ),
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(3, result.decision_count)
+        self.assertIn("Harbor Mouse Pad", result.message.content)
+        self.assertTrue(any(
+            item.reason == "READ_ALREADY_SATISFIED" for item in result.observations
+        ))
+
+    async def test_selected_order_duplicate_read_still_synthesizes_without_relisting(self) -> None:
+        reference = CustomerOrderReference(orderId=ORDER_ID, position=1)
+        order = {
+            "orderId": ORDER_ID, "status": "CONFIRMED",
+            "paymentStatus": "SUCCEEDED",
+            "total": {"amount": Decimal("20.00"), "currency": "USD"},
+            "createdAt": datetime.now(UTC), "updatedAt": datetime.now(UTC),
+            "groups": (),
+        }
+        registry = _Registry(ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+            order=order, orderReferences=(reference,),
+        ))
+        registry.names = ("list_my_orders", "get_my_order")
+        registry.provider_schemas = lambda: (
+            {"name": "list_my_orders"}, {"name": "get_my_order"},
+        )
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_COMMERCE_READ})
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="order-1", tool="get_my_order",
+                arguments={"orderId": ORDER_ID},
+            )),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="order-again", tool="get_my_order",
+                arguments={"orderId": ORDER_ID},
+            )),
+            ModelDecision(content="Your order is currently confirmed."),
+        ])
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's happening with it?", recent_messages=(),
+            referenced_listings=(),
+            prior_observations=(ToolObservation(
+                tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+                orderReferences=(reference,),
+            ),),
+            correlation_id="v2-order-duplicate-synthesis",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_COMMERCE_FOLLOW_UP",
+            ),
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(3, result.decision_count)
+        self.assertTrue(any(
+            item.reason == "READ_ALREADY_SATISFIED" for item in result.observations
+        ))
+
     async def test_provider_parse_failure_recovers_natural_no_tool_terminal(self) -> None:
         registry = _Registry(ToolObservation(
             tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE"
@@ -263,6 +675,42 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
             "check_availability", registry.execution_calls[0]["tool"]
         )
         self.assertIn("category-level", result.message.content)
+
+    async def test_availability_read_masks_internal_inventory_prose(self) -> None:
+        observation = ToolObservation(
+            tool="check_availability", status="SUCCEEDED",
+            reason="RESULTS_AVAILABLE", normalizedQuery="Furniture",
+            broadInventoryCount=41,
+        )
+        registry = _Registry(observation)
+        registry.names = ("check_availability",)
+        registry.provider_schemas = lambda: (  # type: ignore[method-assign]
+            {"name": "check_availability"},
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="availability", tool="check_availability",
+                arguments={"category": "Furniture"},
+            )),
+            ModelDecision(content=(
+                'A category-level check returned a broadInventoryCount of 41. '
+                'The listing is NEW. Adding it to your cart requires your '
+                'confirmation. Do you want me to add it?'
+            )),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Is it available right now?",
+            recent_messages=(),
+            referenced_listings=(_attachment(),),
+            correlation_id="v2-availability-internal-prose",
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertIn("category check", result.message.content)
+        self.assertNotIn("broadInventoryCount", result.message.content)
+        self.assertNotIn("confirmation", result.message.content)
 
     async def test_checkout_follow_up_reuses_reference_and_requires_checkout_read(self) -> None:
         checkout = CustomerCheckoutSnapshot(
@@ -380,6 +828,100 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
             item.tool for item in result.message.tool_activity
         ))
         self.assertIn("confirmed", result.message.content)
+
+    async def test_first_listed_order_recovers_from_ungrounded_terminal(self) -> None:
+        reference = CustomerOrderReference(orderId=ORDER_ID, position=1)
+        registry = _Registry(_order_detail_observation())
+        registry.names = ("list_my_orders", "get_my_order")
+        registry.provider_schemas = lambda: (
+            {"name": "list_my_orders"}, {"name": "get_my_order"},
+        )
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_COMMERCE_READ})
+        )
+        model = _Model([
+            ModelDecision(content="I can't verify that account status here."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="first-order", tool="get_my_order",
+                arguments={"orderId": ORDER_ID},
+            )),
+            ModelDecision(content=(
+                "Your order is shipped and includes Mechanical keyboard."
+            )),
+        ])
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Show me the first order.",
+            recent_messages=(("USER", "Show my recent orders."),),
+            referenced_listings=(),
+            prior_observations=(ToolObservation(
+                tool="list_my_orders", status="SUCCEEDED",
+                reason="ORDERS_AVAILABLE", orderReferences=(reference,),
+            ),),
+            correlation_id="v2-first-listed-order-recovery",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_COMMERCE_FOLLOW_UP",
+            ),
+        )
+
+        self.assertEqual(1, registry.executions)
+        self.assertEqual("get_my_order", registry.execution_calls[0]["tool"])
+        self.assertIn("Mechanical keyboard", result.message.content)
+
+    async def test_selected_order_status_ignores_assistant_return_offer(self) -> None:
+        reference = CustomerOrderReference(orderId=ORDER_ID, position=1)
+        order = CustomerOrderDetail(
+            orderId=ORDER_ID, status="CANCELLED", paymentStatus="SUCCEEDED",
+            total=CommerceMoney(amount=Decimal("9.75"), currency="USD"),
+            createdAt=datetime.now(UTC), updatedAt=datetime.now(UTC),
+        )
+        registry = _Registry(ToolObservation(
+            tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+            order=order, orderReferences=(reference,),
+        ))
+        registry.names = ("list_my_orders", "get_my_order", "get_my_return")
+        registry.provider_schemas = lambda: (  # type: ignore[method-assign]
+            {"name": "list_my_orders"}, {"name": "get_my_order"},
+            {"name": "get_my_return"},
+        )
+        registry.capability_boundary = MarketplaceCustomerCapabilityBoundary(
+            frozenset({CapabilityFamily.CUSTOMER_COMMERCE_READ})
+        )
+        model = _Model([
+            ModelDecision(toolProposal=ToolProposal(
+                callId="refresh", tool="get_my_order",
+                arguments={"orderId": ORDER_ID},
+            )),
+            ModelDecision(content=(
+                "That store group must be delivered before it can enter the return workflow."
+            )),
+        ])
+        recent = (
+            ("USER", "Show me the first order."),
+            ("ASSISTANT", "Would you like a refund status explanation or help with returns?"),
+        )
+        self.assertFalse(_return_read_only_request("What's happening with it?", recent))
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="What's happening with it?",
+            recent_messages=recent, prior_observations=(ToolObservation(
+                tool="get_my_order", status="SUCCEEDED", reason="ORDER_FOUND",
+                orderReferences=(reference,),
+            ),),
+            referenced_listings=(), correlation_id="v2-order-status-not-return",
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", requiredGrounding="PRIVATE_TOOL",
+                confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="PRIVATE_COMMERCE_FOLLOW_UP",
+            ),
+        )
+        self.assertEqual(1, registry.executions)
+        self.assertNotIn("get_my_return", model.tool_sets[-1])
+        self.assertIn("currently cancelled", result.message.content)
+        self.assertNotIn("return workflow", result.message.content)
 
     async def test_new_conversation_does_not_inherit_an_order_reference(self) -> None:
         registry = _Registry(ToolObservation(
@@ -2106,6 +2648,11 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
         offers = (
             "Would you like me to start a purchase for the first listing?",
             "Would you like to proceed to checkout?",
+            "Want to checkout, remove it, or make any changes?",
+            "Would you like to remove it, change quantity, or check out?",
+            "You can checkout now.",
+            "Would you like to\n1) Checkout everything in my cart, or\n2) Keep shopping?",
+            "Options: remove it, purchase everything in my cart, or keep shopping?",
             "I can show the seller's pickup and payment instructions next.",
         )
         for index, offer in enumerate(offers):
@@ -2540,6 +3087,55 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
 
 class MarketplaceAgentV2TerminalGroundingTest(unittest.TestCase):
+    def test_successful_cart_read_recovers_from_unsupported_checkout_offer(self) -> None:
+        cart = ToolObservation(
+            tool="get_my_cart", status="SUCCEEDED", reason="CART_AVAILABLE",
+            cart=CustomerCartSnapshot(
+                version=1, itemCount=1, totalQuantity=1,
+                totals=(CommerceMoney(amount=Decimal("9.75"), currency="USD"),),
+                items=(CartItemSnapshot(
+                    listingId=LISTING_ID, title="Harbor Business Mouse Pad",
+                    quantity=1, observedPrice=Decimal("9.75"), currency="USD",
+                ),),
+            ),
+        )
+        content = _step_limit_content((cart,))
+
+        self.assertIn("Harbor Business Mouse Pad (quantity 1)", content)
+        self.assertIn("9.75 USD", content)
+        self.assertNotIn("checkout", content.casefold())
+        _validate_terminal_response(
+            current_message="Show me my cart.", content=content,
+            active_recommendations=(), current_attachments=(),
+            observations=(cart,), has_waiting_interaction=False,
+            checkout_enabled=False,
+        )
+
+    def test_decline_phrase_and_grounded_quantity_recovery(self) -> None:
+        self.assertIs(_confirmation_answer("No, never mind."), False)
+        cart = ToolObservation(
+            tool="get_my_cart", status="SUCCEEDED", reason="CART_AVAILABLE",
+            cartItemReferences=({
+                "listingId": LISTING_ID, "title": "Mouse Pad", "position": 1,
+            },),
+        )
+        self.assertEqual(
+            "CART_QUANTITY_TOOL_REQUIRED",
+            _terminal_tool_requirement(
+                current_message="Make it quantity 2.",
+                referenced_listings=(), prior_observations=(cart,),
+                turn_observations=(), ambiguous_cart_reference=False,
+            ),
+        )
+        self.assertEqual(
+            "CART_READ_TOOL_REQUIRED",
+            _terminal_tool_requirement(
+                current_message="Set it back to 1.",
+                referenced_listings=(), prior_observations=(),
+                turn_observations=(), ambiguous_cart_reference=False,
+            ),
+        )
+
     def test_immediate_pronoun_resolves_to_latest_successful_cart_mutation(self) -> None:
         observation = ToolObservation(
             tool="update_my_cart_quantity",

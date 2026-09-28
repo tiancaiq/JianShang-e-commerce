@@ -14,6 +14,7 @@ class AgentSurface(str, Enum):
 
 class CapabilityFamily(str, Enum):
     MARKETPLACE_READ = "MARKETPLACE_READ"
+    CUSTOMER_KNOWLEDGE_READ = "CUSTOMER_KNOWLEDGE_READ"
     CUSTOMER_WORKFLOW_CONTROL = "CUSTOMER_WORKFLOW_CONTROL"
     CUSTOMER_COMMERCE_READ = "CUSTOMER_COMMERCE_READ"
     CUSTOMER_CART_MUTATION = "CUSTOMER_CART_MUTATION"
@@ -56,6 +57,11 @@ class CapabilityDecision:
 
 
 CUSTOMER_CAPABILITIES: tuple[CustomerCapabilityDefinition, ...] = (
+    CustomerCapabilityDefinition(
+        "retrieve_help", CapabilityFamily.CUSTOMER_KNOWLEDGE_READ,
+        AgentSurface.MARKETPLACE_CUSTOMER, CapabilityRiskLevel.READ_ONLY,
+        False, False,
+    ),
     CustomerCapabilityDefinition(
         "check_availability", CapabilityFamily.MARKETPLACE_READ,
         AgentSurface.MARKETPLACE_CUSTOMER, CapabilityRiskLevel.READ_ONLY,

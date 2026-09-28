@@ -37,6 +37,10 @@ msb-llm-smoke = "msb_agent_service.smoke:run"
 msb-agent-eval = "msb_agent_service.customer_service_evaluation:main"
 msb-agent-release-gate = "msb_agent_service.customer_service_release_gate:main"
 msb-discovery-eval = "msb_agent_service.marketplace_discovery_evaluation:main"
+agent = "msb_agent_service.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"msb_agent_service.marketplace_agent_v2" = ["skills/*/SKILL.md"]

@@ -7,6 +7,7 @@ import com.msb.ecom.product_service.dto.PublicListingResponse;
 import com.msb.ecom.product_service.dto.PublicListingSearchPageResponse;
 import com.msb.ecom.product_service.dto.PublicListingSearchRequest;
 import com.msb.ecom.product_service.model.ListingAuthorizationException;
+import com.msb.ecom.product_service.model.CategoryNotFoundException;
 import com.msb.ecom.product_service.repository.ListingDraftRepository;
 import com.msb.ecom.product_service.repository.PublicListingSearchCriteria;
 import com.msb.ecom.product_service.search.ListingSearchProperties;
@@ -21,6 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -35,7 +39,11 @@ public class AgentMarketplaceSearchService {
 
     private static final int MAX_CANDIDATES = 40;
     private static final Pattern BROAD_CATEGORY = Pattern.compile(
-            "^[\\p{L}\\p{N}][\\p{L}\\p{N} .'-]{0,79}$");
+            "^[\\p{L}\\p{N}][\\p{L}\\p{N} &.'-]{0,79}$");
+    private static final Pattern GENERIC_SEARCH_SUFFIX = Pattern.compile(
+            "(?i)\\s+(?:items|listings|products)$");
+    private static final Pattern BUSINESS_SEARCH_INTENT = Pattern.compile(
+            "(?i)(?:^|\\s)(?:business|store|shop)(?:\\s|$)");
 
     private final ListingSearchProperties searchProperties;
     private final OpenSearchListingSearchClient searchClient;
@@ -71,7 +79,13 @@ public class AgentMarketplaceSearchService {
             String suppliedToken,
             PublicListingSearchRequest request) {
         requireInternalToken(suppliedToken);
-        PublicListingSearchCriteria criteria = PublicListingSearchRequests.criteria(request);
+        String query = request.q() == null ? null
+                : GENERIC_SEARCH_SUFFIX.matcher(request.q().trim()).replaceFirst("");
+        PublicListingSearchRequest effectiveRequest = new PublicListingSearchRequest(
+                query, request.categoryId(), request.condition(), request.minPrice(),
+                request.maxPrice(), request.city(), request.county(), request.sort(),
+                request.cursor(), request.limit());
+        PublicListingSearchCriteria criteria = PublicListingSearchRequests.criteria(effectiveRequest);
         if (criteria.keyword() == null) {
             throw new IllegalArgumentException("Search keyword is required for Agent marketplace retrieval.");
         }
@@ -80,16 +94,32 @@ public class AgentMarketplaceSearchService {
                 MAX_CANDIDATES);
         List<String> rankedIds;
         List<PublicListingResponse> revalidated;
+        int candidateLimit = Math.min(MAX_CANDIDATES, Math.max(limit * 4, limit));
+        PublicListingSearchRequest candidateRequest = new PublicListingSearchRequest(
+                effectiveRequest.q(), request.categoryId(), request.condition(), request.minPrice(),
+                request.maxPrice(), request.city(), request.county(), "newest", null,
+                candidateLimit);
         if (searchProperties.openSearchEnabled()) {
-            rankedIds = searchClient.searchRelevantIds("ALL", criteria, limit);
-            revalidated = visibleBusinessListings(
-                    listingRepository.findPublicListingsByIds(rankedIds));
+            List<String> indexedIds = searchClient.searchRelevantIds("ALL", criteria, limit);
+            List<PublicListingResponse> indexed = visibleBusinessListings(
+                    listingRepository.findPublicListingsByIds(indexedIds));
+            // Business storefront search is already MySQL-backed; merge it so projection lag
+            // cannot hide otherwise public business listings from the Agent.
+            List<PublicListingResponse> storefront = listingService
+                    .searchBusinessStoreListings(candidateRequest).data();
+            Map<String, PublicListingResponse> ordered = new LinkedHashMap<>();
+            Set<String> ranked = new LinkedHashSet<>();
+            if (BUSINESS_SEARCH_INTENT.matcher(criteria.keyword()).find()) {
+                storefront.forEach(listing -> ordered.putIfAbsent(listing.id(), listing));
+                storefront.forEach(listing -> ranked.add(listing.id()));
+            }
+            ranked.addAll(indexedIds);
+            indexed.forEach(listing -> ordered.putIfAbsent(listing.id(), listing));
+            storefront.forEach(listing -> ordered.putIfAbsent(listing.id(), listing));
+            storefront.forEach(listing -> ranked.add(listing.id()));
+            revalidated = new ArrayList<>(ordered.values());
+            rankedIds = new ArrayList<>(ranked);
         } else {
-            int candidateLimit = Math.min(MAX_CANDIDATES, Math.max(limit * 4, limit));
-            PublicListingSearchRequest candidateRequest = new PublicListingSearchRequest(
-                    request.q(), request.categoryId(), request.condition(), request.minPrice(),
-                    request.maxPrice(), request.city(), request.county(), "newest", null,
-                    candidateLimit);
             PublicListingSearchPageResponse individual =
                     listingService.searchIndividualMarketplaceListings(candidateRequest);
             PublicListingSearchPageResponse business =
@@ -162,9 +192,28 @@ public class AgentMarketplaceSearchService {
             throw new IllegalArgumentException("Availability probe category or limit is invalid.");
         }
         String broadCategory = normalized.toLowerCase(Locale.ROOT);
+        boolean categoryIdRequested = broadCategory.matches("[0-9a-hjkmnp-tv-z]{26}");
+        // Canonical-looking references must resolve in Product's taxonomy, not become keyword probes.
+        boolean categorySlugRequested = broadCategory.matches("[a-z0-9]+(?:-[a-z0-9]+)+");
+        var resolved = listingRepository.resolveActiveAvailabilityCategory(
+                categoryIdRequested ? broadCategory.toUpperCase(Locale.ROOT) : broadCategory);
+        if ((categoryIdRequested || categorySlugRequested) && resolved.isEmpty()) {
+            throw new CategoryNotFoundException();
+        }
+        String categoryId = resolved.map(ListingDraftRepository.AvailabilityCategory::id).orElse(null);
+        String canonicalCategory = resolved.map(ListingDraftRepository.AvailabilityCategory::slug)
+                .orElse(broadCategory);
         long total;
         try {
-            total = listingRepository.countActiveIndividualInventory(broadCategory);
+            Set<String> businessIds = listingRepository.findAvailabilityBusinessIds(
+                    categoryId, broadCategory);
+            Set<String> visibleBusinessIds = businessIds.isEmpty() ? Set.of()
+                    : authServiceClient.searchPublicBusinessStores(null, businessIds, Set.of())
+                    .stream().map(AuthServiceClient.PublicBusinessStoreSearchResult::businessId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toSet());
+            total = listingRepository.countActiveMarketplaceInventory(
+                    categoryId, broadCategory, visibleBusinessIds);
         } catch (RuntimeException error) {
             meterRegistry.counter(
                     "product.agent.marketplace.availability.operations",
@@ -180,7 +229,7 @@ public class AgentMarketplaceSearchService {
                 AgentMarketplaceAvailabilityResponse.SCHEMA_VERSION,
                 AgentMarketplaceAvailabilityResponse.MODE,
                 true,
-                broadCategory,
+                canonicalCategory,
                 total,
                 0,
                 null,

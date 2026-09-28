@@ -56,9 +56,11 @@ _ALLOWED_TOOLS = {
     "get_my_return",
     "prepare_my_return_request",
     "submit_my_return_request",
+    "retrieve_help",
 }
 _ALLOWED_SOURCE_TYPES = {
     "LISTING",
+    "KNOWLEDGE_DOCUMENT",
     "MARKETPLACE_POLICY",
     "SAFETY_GUIDANCE",
     "MARKETPLACE_FAQ",
@@ -2257,10 +2259,15 @@ def _legacy_source_ref(item: dict[str, object]) -> dict[str, str]:
         normalized_source_id = _product_listing_id(source_id)
     else:
         normalized_source_id = _source_identity(source_id)
-    if (
-        not isinstance(source_version, str)
-        or re.fullmatch(r"(?:0|[1-9][0-9]{0,19})", source_version) is None
-    ):
+    valid_version = (
+        isinstance(source_version, str)
+        and (
+            _HASH_PATTERN.fullmatch(source_version) is not None
+            if source_type == "KNOWLEDGE_DOCUMENT"
+            else re.fullmatch(r"(?:0|[1-9][0-9]{0,19})", source_version) is not None
+        )
+    )
+    if not valid_version:
         raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
     return {
         "sourceType": source_type,
