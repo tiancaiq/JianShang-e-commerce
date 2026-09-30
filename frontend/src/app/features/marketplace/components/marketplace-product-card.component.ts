@@ -36,8 +36,8 @@ import { MarketplaceUiProduct } from './marketplace-ui.model';
         </div>
 
         <div class="engagement-summary" aria-label="Listing engagement">
-          <span>{{ product.favoriteCount }} likes</span>
-          <span>{{ product.visitCount }} views</span>
+          <span [attr.title]="product.favoriteCount + ' likes'">{{ compactCount(product.favoriteCount) }} likes</span>
+          <span [attr.title]="product.visitCount + ' views'">{{ compactCount(product.visitCount) }} views</span>
         </div>
 
         <p class="trade-note">Payment arranged with seller</p>
@@ -465,6 +465,16 @@ export class MarketplaceProductCardComponent {
 
   conditionPillLabel(): string {
     return this.product.conditionLabel || 'Condition not provided';
+  }
+
+  compactCount(count: number): string {
+    if (count < 1_000) {
+      return `${count}`;
+    }
+    return new Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(count);
   }
 
   placeholderGradient(): string {

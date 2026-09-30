@@ -15,11 +15,16 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriBuilder;
 import org.slf4j.MDC;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 
 @Component
 @Slf4j
@@ -27,6 +32,7 @@ public class RestAuthServiceClient implements AuthServiceClient {
 
     private static final String LISTING_DRAFT_CREATE = "LISTING_DRAFT_CREATE";
     private static final String INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token";
+    private static final int PUBLIC_STORE_VISIBILITY_BATCH_SIZE = 50;
 
     private final RestClient restClient;
     private final String internalServiceToken;
@@ -419,17 +425,32 @@ public class RestAuthServiceClient implements AuthServiceClient {
             String query,
             Set<String> businessIds,
             Set<String> storeIds) {
+        List<Set<String>> businessBatches = boundedIdBatches(businessIds);
+        List<Set<String>> storeBatches = boundedIdBatches(storeIds);
+        if (businessBatches.size() == 1 && storeBatches.size() == 1) {
+            return searchPublicBusinessStoresBatch(query, businessBatches.getFirst(), storeBatches.getFirst());
+        }
+
+        // Auth deliberately bounds public visibility lookups to 50 IDs. Large
+        // catalog pages retain fail-closed revalidation by composing bounded calls.
+        Map<String, PublicBusinessStoreSearchResult> visible = new LinkedHashMap<>();
+        for (Set<String> businessBatch : businessBatches) {
+            for (Set<String> storeBatch : storeBatches) {
+                for (PublicBusinessStoreSearchResult result
+                        : searchPublicBusinessStoresBatch(query, businessBatch, storeBatch)) {
+                    visible.put(result.businessId() + "|" + result.storeId(), result);
+                }
+            }
+        }
+        return List.copyOf(visible.values());
+    }
+
+    private List<PublicBusinessStoreSearchResult> searchPublicBusinessStoresBatch(
+            String query,
+            Set<String> businessIds,
+            Set<String> storeIds) {
         PublicBusinessStoreSearchEnvelope response = restClient.get()
-                .uri(uriBuilder -> {
-                    var builder = uriBuilder
-                            .path("/api/v1/public/business-stores/search")
-                            .queryParam("businessIds", businessIds.toArray())
-                            .queryParam("storeIds", storeIds.toArray());
-                    if (query != null && !query.isBlank()) {
-                        builder.queryParam("q", query);
-                    }
-                    return builder.build();
-                })
+                .uri(uriBuilder -> publicBusinessStoreSearchUri(uriBuilder, query, businessIds, storeIds))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, clientResponse) -> {
                     log.warn("Auth-service denied public business store search status={}",
@@ -442,6 +463,38 @@ public class RestAuthServiceClient implements AuthServiceClient {
             return List.of();
         }
         return response.data();
+    }
+
+    // Emits repeated scalar parameters so Spring binds every filter value as a Set entry.
+    static URI publicBusinessStoreSearchUri(
+            UriBuilder uriBuilder,
+            String query,
+            Set<String> businessIds,
+            Set<String> storeIds) {
+        UriBuilder builder = uriBuilder.path("/api/v1/public/business-stores/search");
+        if (businessIds != null) {
+            businessIds.stream().sorted().forEach(id -> builder.queryParam("businessIds", id));
+        }
+        if (storeIds != null) {
+            storeIds.stream().sorted().forEach(id -> builder.queryParam("storeIds", id));
+        }
+        if (query != null && !query.isBlank()) {
+            builder.queryParam("q", query);
+        }
+        return builder.build();
+    }
+
+    static List<Set<String>> boundedIdBatches(Set<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of(Set.of());
+        }
+        List<String> sorted = ids.stream().sorted().toList();
+        List<Set<String>> batches = new ArrayList<>();
+        for (int start = 0; start < sorted.size(); start += PUBLIC_STORE_VISIBILITY_BATCH_SIZE) {
+            int end = Math.min(start + PUBLIC_STORE_VISIBILITY_BATCH_SIZE, sorted.size());
+            batches.add(new LinkedHashSet<>(sorted.subList(start, end)));
+        }
+        return List.copyOf(batches);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

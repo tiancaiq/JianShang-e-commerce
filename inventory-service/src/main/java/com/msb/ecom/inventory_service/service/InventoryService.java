@@ -127,23 +127,63 @@ public class InventoryService {
             InventoryInitializeRequest request,
             String correlationId) {
         AuthorizedRequest authorized = authorize(businessId, INVENTORY_MANAGE);
+        return initializeAuthorized(
+                authorized.businessId(),
+                authorized.userId(),
+                listingId,
+                idempotencyKey,
+                request.onHand(),
+                request.note(),
+                correlationId);
+    }
+
+    // Supports the token-protected local catalog fixture while preserving normal initialization invariants.
+    InventoryResponse initializeSeeded(
+            String businessId,
+            String actorUserId,
+            String listingId,
+            String idempotencyKey,
+            int onHand,
+            String note,
+            String correlationId) {
+        return initializeAuthorized(
+                requiredId("Business ID", businessId),
+                requiredId("Actor user ID", actorUserId),
+                listingId,
+                idempotencyKey,
+                onHand,
+                note,
+                correlationId);
+    }
+
+    private InventoryResponse initializeAuthorized(
+            String businessId,
+            String actorUserId,
+            String listingId,
+            String idempotencyKey,
+            int onHand,
+            String suppliedNote,
+            String correlationId) {
         String normalizedListingId = requiredId("Listing ID", listingId);
         String key = requiredIdempotencyKey(idempotencyKey);
-        String note = normalizedNote(request.note());
-        String callerScope = callerScope(authorized.userId(), "INITIALIZE", authorized.businessId(), normalizedListingId);
-        String requestHash = hash("INITIALIZE", Integer.toString(request.onHand()), note);
+        String note = normalizedNote(suppliedNote);
+        if (onHand < 0) {
+            throw new IllegalArgumentException("On-hand quantity must be zero or greater.");
+        }
+        String callerScope = callerScope(actorUserId, "INITIALIZE", businessId, normalizedListingId);
+        String requestHash = hash("INITIALIZE", Integer.toString(onHand), note);
 
         InventoryResponse replay = replay(callerScope, key, requestHash);
         if (replay != null) {
             log.info("Replayed inventory initialization businessId={} listingId={}",
-                    authorized.businessId(), normalizedListingId);
+                    businessId, normalizedListingId);
             return replay;
         }
 
         ProductCommerceClient.CatalogItem catalog =
-                productCommerceClient.getBusinessItem(authorized.businessId(), normalizedListingId);
-        requireEligible(catalog, authorized.businessId(), normalizedListingId);
-        if (repository.findItem(authorized.businessId(), normalizedListingId).isPresent()) {
+                productCommerceClient.getBusinessItem(businessId, normalizedListingId);
+        requireEligible(catalog, businessId, normalizedListingId);
+        if (repository.findItem(businessId, normalizedListingId).isPresent()) {
             throw conflict("INVENTORY_ALREADY_INITIALIZED", "Inventory is already initialized for this listing.");
         }
 
@@ -152,11 +192,11 @@ public class InventoryService {
         String commandId = ulidGenerator.next();
         InventoryItemRecord item = new InventoryItemRecord(
                 inventoryItemId,
-                authorized.businessId(),
+                businessId,
                 normalizedListingId,
                 catalog.sku(),
                 catalog.version(),
-                request.onHand(),
+                onHand,
                 0,
                 0,
                 now,
@@ -172,11 +212,11 @@ public class InventoryService {
                 item,
                 "INITIALIZE",
                 "INITIAL_STOCK",
-                request.onHand(),
+                onHand,
                 0,
-                request.onHand(),
+                onHand,
                 note,
-                authorized.userId(),
+                actorUserId,
                 commandId,
                 correlationId,
                 now);
@@ -202,7 +242,7 @@ public class InventoryService {
                 now);
 
         log.info("Initialized inventory businessId={} listingId={} onHand={}",
-                authorized.businessId(), normalizedListingId, request.onHand());
+                businessId, normalizedListingId, onHand);
         return response;
     }
 

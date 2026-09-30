@@ -4709,3 +4709,45 @@ paths. Owner reads use token-protected
 `/api/v1/internal/admin/analytics/summary` and typed trend routes in Product,
 Order, and Payment. No analytics POST/PATCH/PUT/DELETE endpoint exists. See
 [adm/admin-analytics.md](adm/admin-analytics.md).
+
+## DEV-CATALOG-SEED-01 development fixture API
+
+Auth and Product each expose the following internal development-only base path
+when `SEED_LARGE_CATALOG=true`:
+
+```text
+POST   /api/v1/internal/demo-fixtures/large-catalog/identities  # Auth
+POST   /api/v1/internal/demo-fixtures/large-catalog/listings    # Product
+GET    /api/v1/internal/demo-fixtures/large-catalog/inventory-candidates?namespace=&cursor=&limit= # Product
+GET    /api/v1/internal/demo-fixtures/large-catalog/stats?namespace=
+DELETE /api/v1/internal/demo-fixtures/large-catalog?namespace=
+```
+
+Every request requires `X-Internal-Service-Token` using the existing internal
+commerce token. Both services reject the operation under `prod` or
+`production` profiles. These routes are fixture orchestration contracts, not
+public or seller APIs.
+
+When the separate `SEED_LARGE_CATALOG_INVENTORY=true` flag is enabled on
+Inventory Service, the opt-in V2 extension exposes:
+
+```text
+POST /api/v1/internal/demo-fixtures/large-catalog/inventory     # Inventory
+```
+
+The orchestration script pages Product-owned candidates into bounded batches.
+Inventory revalidates each business listing through its existing Product
+commerce client and atomically writes the ordinary inventory item, opening
+movement, idempotency record, and outbox event. Existing balances are returned
+as preserved and are never replenished by a rerun. The endpoint requires the
+internal commerce token and refuses production profiles.
+
+Auth accepts bounded deterministic seller/business counts and returns the
+service-owned IDs needed by Product. Product accepts at most 1,000 listings per
+batch, validates owner shape, active creation-enabled leaf category, positive
+price/quantity, USD currency, and ordered non-future lifecycle timestamps.
+Product queues normal derived search projection work. Stats expose ownership,
+distribution, integrity, and pending projection counts. Delete removes only
+rows registered to the requested namespace; Product must be reset before Auth.
+See
+[search/dev-catalog-seed-01-large-marketplace-catalog.md](search/dev-catalog-seed-01-large-marketplace-catalog.md).

@@ -56,7 +56,7 @@ The current repository contains implementation work for:
   planned engagement metrics: LIST-00 through LIST-08
 - Public UI surface split: SITE-01
 - Search and storefront: SEARCH-00, SEARCH-01, SEARCH-01A, SEARCH-01B,
-  SEARCH-03, SEARCH-04, and SEARCH-05
+  SEARCH-03, SEARCH-04, SEARCH-05, and DEV-CATALOG-SEED-01
 - Local/demo deployment support for teammate review
 
 The three product surfaces are:
@@ -370,6 +370,15 @@ Recommended slices:
    - Scope: URL-based frontend search state, business store-name/SKU keyword
      matching, active business/store visibility revalidation, and improved
      empty result states.
+8. DEV-CATALOG-SEED-01 large marketplace development catalog.
+   - Status: implemented as an opt-in, production-refusing fixture.
+   - Reference:
+     `docs/mvp/search/dev-catalog-seed-01-large-marketplace-catalog.md`
+   - Scope: deterministic metadata-only import, service-owned seed registries,
+     safe reset, OpenSearch projection, and public/Agent retrieval verification.
+   - Optional V2 extension: `inventory` explicitly initializes missing
+     Inventory-owned stock for registered business seed listings. It is
+     disabled by default, production-refusing, and preserves existing balances.
 
 ### 5.6 Basic Buyer/Seller Chat
 

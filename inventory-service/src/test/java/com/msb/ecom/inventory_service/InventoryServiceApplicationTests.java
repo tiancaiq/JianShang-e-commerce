@@ -30,6 +30,7 @@ import java.util.concurrent.Executors;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -42,6 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "commerce.internal-service-token=test-commerce-token",
+        "demo.large-catalog-inventory-seed.enabled=true",
         "inventory.reservations.expiry-enabled=false",
         "inventory.cancellation-restock.enabled=true",
         "inventory.return-restock-enabled=true"
@@ -54,6 +56,7 @@ class InventoryServiceApplicationTests {
     private static final String OTHER_BUSINESS_ID = "01B00000000000000000000002";
     private static final String LISTING_ID = "01L00000000000000000000001";
     private static final String SECOND_LISTING_ID = "01L00000000000000000000002";
+    private static final String SEED_LISTING_ID = "01M00000000000000000000001";
 
     @ServiceConnection
     static MySQLContainer<?> mysqlContainer = new MySQLContainer<>("mysql:8.4")
@@ -107,6 +110,8 @@ class InventoryServiceApplicationTests {
                 .thenReturn(catalogItem(LISTING_ID, BUSINESS_ID, "ACTIVE", 4, 2));
         when(productCommerceClient.getBusinessItem(BUSINESS_ID, SECOND_LISTING_ID))
                 .thenReturn(catalogItem(SECOND_LISTING_ID, BUSINESS_ID, "ACTIVE", 4, 2));
+        when(productCommerceClient.getBusinessItem(BUSINESS_ID, SEED_LISTING_ID))
+                .thenReturn(catalogItem(SEED_LISTING_ID, BUSINESS_ID, "ACTIVE", 8, 2));
         when(productCommerceClient.getBusinessItems(
                 eq(BUSINESS_ID), nullable(String.class), nullable(String.class), nullable(String.class), eq(24)))
                 .thenReturn(new ProductCommerceClient.CatalogPage(
@@ -137,6 +142,61 @@ class InventoryServiceApplicationTests {
                         .header("X-Internal-Service-Token", "wrong-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code", equalTo("INVENTORY_INTERNAL_AUTH_REQUIRED")));
+    }
+
+    @Test
+    void optInLargeCatalogSeedInitializesMissingStockAndPreservesExistingBalance() throws Exception {
+        String body = """
+                {
+                  "namespace":"catalog-test",
+                  "listings":[{
+                    "listingId":"01M00000000000000000000001",
+                    "businessId":"01B00000000000000000000001",
+                    "suggestedOnHand":8
+                  }]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/internal/demo-fixtures/large-catalog/inventory")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.received", equalTo(1)))
+                .andExpect(jsonPath("$.initialized", equalTo(1)))
+                .andExpect(jsonPath("$.preserved", equalTo(0)));
+
+        jdbcTemplate.update("update inventory_items set on_hand = 7, version = version + 1 where listing_id = ?", SEED_LISTING_ID);
+
+        mockMvc.perform(post("/api/v1/internal/demo-fixtures/large-catalog/inventory")
+                        .header("X-Internal-Service-Token", "test-commerce-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.initialized", equalTo(0)))
+                .andExpect(jsonPath("$.preserved", equalTo(1)));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select on_hand from inventory_items where listing_id = ?", Integer.class, SEED_LISTING_ID)).isEqualTo(7);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from inventory_movements where listing_id = ?", Integer.class, SEED_LISTING_ID)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from inventory_outbox_events", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void optInLargeCatalogSeedRequiresInternalToken() throws Exception {
+        mockMvc.perform(post("/api/v1/internal/demo-fixtures/large-catalog/inventory")
+                        .header("X-Internal-Service-Token", "wrong-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"namespace":"catalog-test","listings":[{
+                                  "listingId":"01L00000000000000000000001",
+                                  "businessId":"01B00000000000000000000001",
+                                  "suggestedOnHand":8
+                                }]}
+                                """))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

@@ -1199,12 +1199,22 @@ export class PublicListingDetailComponent implements OnDestroy, OnInit {
 
   viewCountLabel(): string {
     const count = this.visitCount();
-    return `👁 ${count} ${count === 1 ? 'view' : 'views'}`;
+    return `👁 ${this.compactCount(count)} ${count === 1 ? 'view' : 'views'}`;
   }
 
   likeCountLabel(): string {
     const count = this.likeCount();
-    return `♡ ${count} ${count === 1 ? 'like' : 'likes'}`;
+    return `♡ ${this.compactCount(count)} ${count === 1 ? 'like' : 'likes'}`;
+  }
+
+  private compactCount(count: number): string {
+    if (count < 1_000) {
+      return `${count}`;
+    }
+    return new Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(count);
   }
 
   sellerProfile(): ProfileCardUser | null {

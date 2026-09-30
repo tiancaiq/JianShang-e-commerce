@@ -199,6 +199,11 @@ describe('PublicListingDetailComponent', () => {
     expect(fixture.nativeElement.querySelector('app-listing-image-gallery img')?.getAttribute('src')).toBe('/api/v1/public/listing-media/01I00000000000000000000001');
   });
 
+  it('formats marketplace-scale engagement counts compactly', () => {
+    expect((component as unknown as { compactCount(count: number): string }).compactCount(14_171_683)).toBe('14.2M');
+    expect((component as unknown as { compactCount(count: number): string }).compactCount(999)).toBe('999');
+  });
+
   it('toggles the signed-in user like state on the listing detail page', () => {
     fixture.detectChanges();
     listingService.recordListingVisit.calls.reset();

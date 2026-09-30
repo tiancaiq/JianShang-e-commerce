@@ -1,0 +1,16 @@
+services:
+  auth-service:
+    environment:
+      SEED_LARGE_CATALOG: "true"
+
+  product-service:
+    environment:
+      SEED_LARGE_CATALOG: "true"
+      LISTING_SEARCH_ENGINE: opensearch
+      LISTING_SEARCH_PROJECTION_SYNC_ENABLED: "true"
+      LISTING_SEARCH_PROJECTION_SYNC_BATCH_SIZE: "500"
+      LISTING_SEARCH_PROJECTION_SYNC_POLL_INTERVAL_MS: "1000"
+
+  inventory-service:
+    environment:
+      SEED_LARGE_CATALOG_INVENTORY: "true"

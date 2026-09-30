@@ -1809,3 +1809,27 @@ All queries execute in the owning schema using server-side `COUNT`, `SUM`,
 `analytics_orders`, `analytics_reports`, `analytics_refunds`, warehouse,
 materialized dashboard, or Redis cache is introduced. See
 [adm/admin-analytics.md](adm/admin-analytics.md).
+
+## DEV-CATALOG-SEED-01 fixture ownership registries
+
+Product migrations `V202609280100__add_marketplace_catalog_leaf_categories.sql`
+and `V202609280200__create_large_catalog_seed_registry.sql` add the initial
+development catalog leaves and `large_catalog_seed_listings`.
+`V202609280300__consolidate_marketplace_catalog_categories.sql` moves listings
+to 13 shopper-facing categories and deprecates source-oriented leaves with
+replacement IDs. The registry
+owns only the namespace/source-identity-to-listing mapping; listing data remains
+in Product's existing `listings` and moderation tables. Its foreign key uses
+`ON DELETE RESTRICT` so reset must explicitly remove registered dependents.
+
+Auth migration
+`V202609280100__create_large_catalog_seed_registry.sql` adds
+`large_catalog_seed_entities`, keyed by namespace, entity type, and entity ID.
+It records fixture ownership of users, individual profiles, business
+applications, businesses, and stores without copying Product data. Reset joins
+only against this registry and follows Auth's existing dependency order.
+
+Neither registry is a runtime marketplace projection. Both support an opt-in
+local/development fixture and must not be enabled under production profiles.
+See
+[search/dev-catalog-seed-01-large-marketplace-catalog.md](search/dev-catalog-seed-01-large-marketplace-catalog.md).
