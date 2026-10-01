@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from pydantic import ValidationError
 
 from .capabilities import MarketplaceCustomerCapabilityBoundary
+from .refinement import (
+    SearchRefinementEdit, refinement_mismatch_reason, refinement_repair_signal,
+)
 from .schemas import (
     AddToMyCartArguments,
     CheckAvailabilityArguments,
@@ -28,6 +31,7 @@ from .schemas import (
     SearchListingsArguments,
     ToolName,
     GroundingRequirement,
+    ExecutedSearchSnapshot,
     MarketplaceAgentV2ActiveWorkflow,
     ScopeCategory,
     ToolObservation,
@@ -72,6 +76,9 @@ class MarketplaceAgentV2ToolPolicy:
     seller_search_allowed: bool = False
     required_search_query: str | None = None
     required_search_category_name: str | None = None
+    latest_search: ExecutedSearchSnapshot | None = None
+    search_refinement: SearchRefinementEdit | None = None
+    explicit_search_confirmation: bool = False
     required_availability_categories: frozenset[str] = frozenset()
     cart_mutation_reference_ambiguous: bool = False
     order_cancellation_mutation_requested: bool = False
@@ -211,6 +218,13 @@ class MarketplaceAgentV2ToolPolicy:
             "check_availability", "search_listings", "request_confirmation",
         }:
             return None, self._rejection(proposal.tool, "COMPARISON_CONTEXT_REQUIRED")
+        if (
+            self.search_refinement is not None
+            and proposal.tool in {"check_availability", "get_listing"}
+        ):
+            return None, self._rejection(
+                proposal.tool, "SEARCH_REFINEMENT_TOOL_REQUIRED"
+            )
         if proposal.tool == "search_listings" and self.search_executed:
             return None, self._rejection(proposal.tool, "DUPLICATE_TOOL_CALL")
         if proposal.tool == "retrieve_help" and self.knowledge_retrieval_attempted:
@@ -440,8 +454,26 @@ class MarketplaceAgentV2ToolPolicy:
             return None, self._rejection(
                 proposal.tool, "GROUNDING_TOOL_REQUIRED"
             )
-        if isinstance(arguments, RequestConfirmationArguments) and not self.referenced_listing_ids:
-            return None, self._rejection(proposal.tool, "FORBIDDEN")
+        if isinstance(arguments, SearchListingsArguments) and not isinstance(
+            arguments, RequestConfirmationArguments
+        ) and self.search_refinement is not None and self.latest_search is not None:
+            if repair := refinement_mismatch_reason(
+                arguments, self.latest_search, self.search_refinement
+            ):
+                return None, ToolObservation(
+                    tool=proposal.tool, status="REJECTED",
+                    reason="SEARCH_REFINEMENT_MISMATCH",
+                    refinementRepair=refinement_repair_signal(
+                        self.latest_search, self.search_refinement, repair,
+                    ),
+                )
+        if isinstance(arguments, RequestConfirmationArguments):
+            if not self.explicit_search_confirmation:
+                return None, self._rejection(
+                    proposal.tool, "CONFIRMATION_INTENT_REQUIRED"
+                )
+            if not self.referenced_listing_ids and self.latest_search is None:
+                return None, self._rejection(proposal.tool, "FORBIDDEN")
         if isinstance(arguments, CollectListingInformationArguments) and (
             self.active_workflow is not None
             and self.active_workflow.status != "CANCELLED"

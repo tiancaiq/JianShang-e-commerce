@@ -13,6 +13,7 @@ from prometheus_client import CollectorRegistry
 
 from msb_agent_service.agent_persistence import (
     AgentInvocationStatus,
+    MessageCursor,
     AgentPersistenceError,
     AgentPersistenceErrorCode,
     AgentPersistenceRepository,
@@ -22,6 +23,17 @@ from msb_agent_service.agent_persistence import (
     BeginInvocationResult,
 )
 from msb_agent_service.config import AgentPersistenceSettings
+from msb_agent_service.marketplace_agent_v2.context_builder import (
+    ContextBuilder,
+    _marketplace_context_messages,
+    _recent_observations,
+    _referenced_listings,
+)
+from msb_agent_service.marketplace_agent_v2.schemas import (
+    ExecutedSearchSnapshot,
+    ListingAttachment,
+    ToolObservation,
+)
 from msb_agent_service.listing_content_proposal import (
     ListingContentProposal,
     UnknownField,
@@ -132,6 +144,114 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
             AgentPersistenceErrorCode.SESSION_NOT_FOUND,
             captured.exception.code,
         )
+
+    async def test_latest_context_after_100_rows_keeps_recent_cards_and_observations(self) -> None:
+        session, _ = await self._session()
+        fixture_rows = []
+        for index in range(110):
+            role = "USER" if index % 2 == 0 else "ASSISTANT"
+            fixture_rows.append((
+                f"01D{index:023d}", session.session_id, ACTOR_A, role,
+                f"filler-{index}", None if role == "USER" else "ANSWERED",
+                None if role == "USER" else "[]",
+                None if role == "USER" else "[]",
+                (NOW + timedelta(seconds=index)).replace(tzinfo=None),
+            ))
+        listing_ids = (
+            "01L00000000000000000000002",
+            "01L00000000000000000000003",
+        )
+        cards = tuple(
+            ListingAttachment(
+                listingId=listing_id, title=f"Lamp {ordinal}",
+                categoryName="Lamps", condition="GOOD",
+                priceAmount=Decimal("25.00"), currency="USD",
+                checkedAt=NOW + timedelta(seconds=110),
+                responseHash="a" * 64,
+            ).model_dump(mode="json", by_alias=True)
+            for ordinal, listing_id in enumerate(listing_ids, start=1)
+        )
+        fixture_rows.append((
+            "01D00000000000000000000110", session.session_id, ACTOR_A,
+            "ASSISTANT", "Here are two lamps.", "ANSWERED",
+            json.dumps(cards),
+            json.dumps([{
+                "type": "MARKETPLACE_AGENT_V2_OBSERVATION",
+                "tool": "search_listings", "status": "SUCCEEDED",
+                "reason": "RESULTS_AVAILABLE",
+                "observedAt": (NOW + timedelta(seconds=110)).isoformat(),
+            }]),
+            (NOW + timedelta(seconds=110)).replace(tzinfo=None),
+        ))
+        async with self.repository.pool.acquire() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.executemany(
+                    """
+                    INSERT INTO agent_messages (
+                        message_id, session_id, actor_user_id, role, body,
+                        resolution_type, sources_json, actions_json, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    fixture_rows,
+                )
+            await connection.commit()
+        out_of_scope = await self._begin(
+            session.session_id, "01C00000000000000000000120",
+            "Write Python code", now=NOW + timedelta(seconds=111),
+        )
+        await self.repository.complete_invocation(
+            invocation_id=out_of_scope.invocation.invocation_id,
+            actor_user_id=ACTOR_A, body="I can help with marketplace questions.",
+            resolution_type=AgentResolutionType.ANSWERED,
+            sources=(), actions=({
+                "type": "MARKETPLACE_AGENT_V2_SCOPE", "scope": "OUT_OF_SCOPE",
+            },),
+            input_tokens=0, output_tokens=0, latency_ms=0,
+            estimated_cost=Decimal("0"), now=NOW + timedelta(seconds=112),
+        )
+        current = await self._begin(
+            session.session_id, "01C00000000000000000000121",
+            "What about the second one?", now=NOW + timedelta(seconds=113),
+        )
+        future = await self._begin(
+            session.session_id, "01C00000000000000000000122",
+            "A later turn", now=NOW + timedelta(seconds=114),
+        )
+        cutoff = MessageCursor(
+            created_at=current.user_message.created_at,
+            message_id=current.user_message.message_id,
+        )
+
+        context = await self.repository.list_latest_messages(
+            session_id=session.session_id, actor_user_id=ACTOR_A,
+            before=cutoff, limit=100,
+        )
+        first_page = await self.repository.list_messages(
+            session_id=session.session_id, actor_user_id=ACTOR_A, limit=100,
+        )
+
+        self.assertEqual(100, len(context))
+        self.assertEqual("filler-13", context[0].body)
+        self.assertEqual("filler-0", first_page.messages[0].body)
+        self.assertIsNotNone(first_page.next_cursor)
+        self.assertNotIn("Here are two lamps.", [m.body for m in first_page.messages])
+        self.assertNotIn(current.user_message.message_id, [m.message_id for m in context])
+        self.assertNotIn(future.user_message.message_id, [m.message_id for m in context])
+        self.assertEqual(listing_ids, tuple(
+            item.listing_id for item in _referenced_listings(context)
+        ))
+        self.assertEqual("RESULTS_AVAILABLE", _recent_observations(context)[-1].reason)
+        self.assertNotIn("Write Python code", [
+            body for _, body in _marketplace_context_messages(
+                context, current_user_message_id=current.user_message.message_id,
+            )
+        ])
+        with self.assertRaises(AgentPersistenceError) as captured:
+            await self.repository.list_latest_messages(
+                session_id=session.session_id, actor_user_id=ACTOR_B,
+                before=cutoff, limit=100,
+            )
+        self.assertEqual(AgentPersistenceErrorCode.SESSION_NOT_FOUND, captured.exception.code)
         async with self.repository._pool.acquire() as connection:  # noqa: SLF001
             async with connection.cursor() as cursor:
                 await cursor.execute(
@@ -145,6 +265,66 @@ class AgentPersistenceRepositoryIntegrationTest(unittest.IsolatedAsyncioTestCase
                     (ACTOR_A, LISTING_ID),
                 )
                 self.assertEqual(1, (await cursor.fetchone())[0])
+
+    async def test_executed_search_filters_round_trip_in_existing_action_json(self) -> None:
+        observed = datetime.now(UTC)
+        session, _ = await self._session(now=observed)
+        first = await self._begin(
+            session.session_id, "01C00000000000000000000131", "laptop under $1000",
+            now=observed,
+        )
+        snapshot = ExecutedSearchSnapshot(
+            query="laptop with 16GB RAM", maximumPrice=Decimal("1000"),
+            currency="USD", limit=5, observedAt=observed,
+            expiresAt=observed + timedelta(minutes=5), resultsDisplayed=False,
+        )
+        observation = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="FILTERS_TOO_STRICT",
+            observedAt=observed, expiresAt=snapshot.expires_at,
+            normalizedQuery=snapshot.query, filterCategories=("MAXIMUM_PRICE",),
+            appliedSearch=snapshot, resultCount=0,
+        )
+        await self.repository.complete_invocation(
+            invocation_id=first.invocation.invocation_id,
+            actor_user_id=ACTOR_A, body="No current matches were verified.",
+            resolution_type=AgentResolutionType.ANSWERED,
+            sources=(), actions=({
+                "type": "MARKETPLACE_AGENT_V2_OBSERVATION",
+                **observation.model_dump(mode="json", by_alias=True, exclude_none=True),
+            },),
+            input_tokens=0, output_tokens=0, latency_ms=0,
+            estimated_cost=Decimal("0"), now=observed + timedelta(seconds=1),
+        )
+        next_turn = await self._begin(
+            session.session_id, "01C00000000000000000000132", "actually under $1500",
+            now=observed + timedelta(seconds=2),
+        )
+        messages = await self.repository.list_latest_messages(
+            session_id=session.session_id, actor_user_id=ACTOR_A,
+            before=MessageCursor(
+                created_at=next_turn.user_message.created_at,
+                message_id=next_turn.user_message.message_id,
+            ), limit=100,
+        )
+        turn = ContextBuilder().build_turn(
+            actor_user_id=ACTOR_A, session_id=session.session_id,
+            invocation_id=next_turn.invocation.invocation_id,
+            current_user_message=next_turn.user_message,
+            current_message="actually under $1500", messages=messages,
+            session_state={},
+        )
+        self.assertEqual(Decimal("1000"), turn.latest_search.maximum_price)
+        self.assertEqual("laptop with 16GB RAM", turn.latest_search.query)
+        self.assertFalse(turn.latest_search.results_displayed)
+        with self.assertRaises(AgentPersistenceError) as captured:
+            await self.repository.list_latest_messages(
+                session_id=session.session_id, actor_user_id=ACTOR_B,
+                before=MessageCursor(
+                    created_at=next_turn.user_message.created_at,
+                    message_id=next_turn.user_message.message_id,
+                ), limit=100,
+            )
+        self.assertEqual(AgentPersistenceErrorCode.SESSION_NOT_FOUND, captured.exception.code)
 
     async def test_schema_validation_requires_v5_correlation_width(self) -> None:
         async with self.repository._pool.acquire() as connection:  # noqa: SLF001

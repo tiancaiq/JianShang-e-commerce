@@ -231,6 +231,49 @@ class _MarketplaceScopeProduct(_FacetedProduct):
 
 
 class MarketplaceAgentV2ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_successful_search_captures_exact_applied_filters_not_a_ram_claim(self) -> None:
+        product = _Product()
+        arguments = SearchListingsArguments(
+            query="laptop at most $1000 with 16GB RAM",
+            categoryId="01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            categoryName="Computers",
+            condition="NEW",
+            minimumPrice=Decimal("200"),
+            maximumPrice=Decimal("1000"),
+            currency="USD",
+            city="Irvine",
+            county="Orange",
+            limit=3,
+        )
+
+        observation = await MarketplaceAgentV2ToolRegistry(product).execute(
+            tool="search_listings", arguments=arguments,
+            actor_user_id=ACTOR, correlation_id="v2-applied-search", activity=None,
+        )
+
+        self.assertEqual("SUCCEEDED", observation.status)
+        snapshot = observation.applied_search
+        self.assertIsNotNone(snapshot)
+        self.assertEqual("laptop with 16GB RAM", snapshot.query)
+        self.assertEqual(Decimal("1000"), snapshot.maximum_price)
+        self.assertEqual(Decimal("200"), snapshot.minimum_price)
+        self.assertEqual("NEW", snapshot.condition)
+        self.assertEqual("Computers", snapshot.category_name)
+        self.assertEqual("Irvine", snapshot.city)
+        self.assertEqual("Orange", snapshot.county)
+        self.assertEqual(3, snapshot.limit)
+        self.assertFalse(snapshot.results_displayed)
+        self.assertEqual(observation.observed_at, snapshot.observed_at)
+        self.assertEqual(observation.expires_at, snapshot.expires_at)
+        self.assertIn("16GB RAM", snapshot.query)
+
+        failed = await MarketplaceAgentV2ToolRegistry(_Product(fail=True)).execute(
+            tool="search_listings", arguments=arguments,
+            actor_user_id=ACTOR, correlation_id="v2-applied-search-fail", activity=None,
+        )
+        self.assertEqual("FAILED", failed.status)
+        self.assertIsNone(failed.applied_search)
+
     async def test_search_uses_all_marketplace_seller_types_when_adapter_supports_it(self) -> None:
         product = _MarketplaceScopeProduct(total=1, subtypes=())
 

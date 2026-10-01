@@ -5,6 +5,10 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
 
+from .context_builder import ContextBuilder, MarketplaceTurnContext
+from .refinement import (
+    customer_search_refinement, explicit_search_confirmation_requested,
+)
 from .policy import MarketplaceAgentV2ToolPolicy
 from .capabilities import MarketplaceCustomerCapabilityBoundary
 from .provider import (
@@ -14,7 +18,6 @@ from .provider import (
 )
 from .schemas import (
     ActiveSkill,
-    AgentContext,
     CollectListingInformationArguments,
     EvidenceReference,
     ListingAttachment,
@@ -95,9 +98,10 @@ _NO_REFERENCED_CHECKOUT_RESPONSE = (
 class MarketplaceAgentV2OrchestrationFailure(RuntimeError):
     """Carries only a stable failure category across the privacy boundary."""
 
-    def __init__(self, kind: str) -> None:
+    def __init__(self, kind: str, *, repair_reason: str | None = None) -> None:
         super().__init__(kind)
         self.kind = kind
+        self.repair_reason = repair_reason
 
 
 def _generic_return_policy_request(value: str) -> bool:
@@ -391,6 +395,7 @@ class MarketplaceAgentV2Orchestrator:
         self._model_timeout_seconds = model_timeout_seconds
         self._confirmation_execution_enabled = confirmation_execution_enabled
         self._skill_registry = skill_registry
+        self._context_builder = ContextBuilder()
 
     async def close(self) -> None:
         await self._model.close()
@@ -485,6 +490,7 @@ class MarketplaceAgentV2Orchestrator:
         recent_messages: Sequence[tuple[str, str]],
         referenced_listings: Sequence[ListingAttachment],
         prior_observations: Sequence[ToolObservation] = (),
+        turn_context: MarketplaceTurnContext | None = None,
         pending_interaction: MarketplaceAgentV2PendingInteraction | None = None,
         active_workflow: MarketplaceAgentV2ActiveWorkflow | None = None,
         confirmed_interaction: MarketplaceAgentV2PendingInteraction | None = None,
@@ -497,6 +503,26 @@ class MarketplaceAgentV2Orchestrator:
         confirmation_prepared: ConfirmationPreparedCallback | None = None,
         checkout_release_verified: bool | None = None,
     ) -> OrchestrationResult:
+        if turn_context is None:
+            turn_context = self._context_builder.from_existing_inputs(
+                current_message=current_message,
+                recent_messages=recent_messages,
+                referenced_listings=referenced_listings,
+                prior_observations=prior_observations,
+                pending_interaction=pending_interaction,
+                active_workflow=active_workflow,
+            )
+        elif (
+            turn_context.current_message != current_message
+            or (
+                turn_context.identity is not None
+                and turn_context.identity.actor_user_id != actor_user_id
+            )
+        ):
+            raise ValueError("Marketplace Agent V2 turn context mismatch")
+        recent_messages = turn_context.recent_messages
+        referenced_listings = turn_context.referenced_listings
+        prior_observations = turn_context.prior_observations
         selected_scope = scope_result or MarketplaceScopeClassifier().classify(
             current_message=current_message,
             recent_messages=recent_messages,
@@ -504,6 +530,26 @@ class MarketplaceAgentV2Orchestrator:
             pending_interaction=pending_interaction,
             preference_state={},
         )
+        # A canonical search anchors an exact query restatement even when a
+        # product title contains support words such as "Return".
+        if (
+            selected_scope.scope == "IN_SCOPE"
+            and selected_scope.reason_code == "MARKETPLACE_SUPPORT"
+            and active_workflow is None
+            and pending_interaction is None
+            and "search_listings" in self._registry.names
+            and (
+                replacement := customer_search_refinement(
+                    current_message, turn_context.latest_search,
+                )
+            ) is not None
+            and replacement.kind == "QUERY_REPLACEMENT"
+        ):
+            selected_scope = selected_scope.model_copy(update={
+                "required_grounding": "LISTING_DATA",
+                "reason_code": "CONTEXTUAL_MARKETPLACE_FOLLOW_UP",
+                "marketplace_context_used": True,
+            })
         if selected_scope.scope == "UNSAFE":
             safety = hard_safety_response(current_message)
             content = (
@@ -742,12 +788,34 @@ class MarketplaceAgentV2Orchestrator:
                 activeWorkflow=active_workflow,
                 scopeResult=selected_scope,
             )
+        if (
+            selected_scope.required_grounding == "LISTING_DATA"
+            and active_workflow is None
+            and pending_interaction is None
+            and _unavailable_listing_ordinal(current_message, referenced_listings)
+        ):
+            # An ordinal outside the displayed cards cannot identify a listing,
+            # even when a model could choose another active card by name.
+            content = (
+                "I don't have that numbered listing in the current results. "
+                "Please name or select a displayed listing."
+            )
+            if text_delta is not None:
+                await text_delta(content)
+            return OrchestrationResult(
+                message=MarketplaceAgentV2Message(content=content),
+                decisionCount=0,
+                pendingInteraction=pending_interaction,
+                activeWorkflow=active_workflow,
+                scopeResult=selected_scope,
+            )
         observations: list[ToolObservation] = list(prior_observations[-5:])
         turn_observations: list[ToolObservation] = []
         attachments: dict[str, ListingAttachment] = {}
         activities: list[ToolActivity] = []
         input_tokens = 0
         output_tokens = 0
+        terminal_repair_used = False
         contextual_refinement = _contextual_refinement_selection(
             current_message, prior_observations
         )
@@ -758,6 +826,23 @@ class MarketplaceAgentV2Orchestrator:
             current_message, referenced_listings
         )
         recommendation_context = bool(contextual_attachments) or comparison_context
+        search_refinement = (
+            customer_search_refinement(current_message, turn_context.latest_search)
+            if (
+                selected_scope.required_grounding == "LISTING_DATA"
+                and "search_listings" in self._registry.names
+                and active_workflow is None
+                and pending_interaction is None
+                and not comparison_context
+            ) else None
+        )
+        search_dependent_turn = bool(
+            selected_scope.required_grounding == "LISTING_DATA"
+            and turn_context.latest_search is not None
+            and active_workflow is None
+            and pending_interaction is None
+            and confirmed_interaction is None
+        )
         malformed_input = _looks_like_unintelligible_input(current_message)
         ambiguous_cart_reference = _cart_mutation_reference_ambiguous(
             current_message,
@@ -799,6 +884,11 @@ class MarketplaceAgentV2Orchestrator:
                 and contextual_refinement.facet == "CATEGORY"
                 else None
             ),
+            latest_search=turn_context.latest_search,
+            search_refinement=search_refinement,
+            explicit_search_confirmation=explicit_search_confirmation_requested(
+                current_message
+            ),
             required_availability_categories=frozenset(
                 " ".join(item.category_name.casefold().split())
                 for item in referenced_listings
@@ -824,10 +914,6 @@ class MarketplaceAgentV2Orchestrator:
                 "capability_boundary",
                 MarketplaceCustomerCapabilityBoundary(),
             ),
-        )
-        context_messages = tuple(
-            {"role": role, "content": content}
-            for role, content in recent_messages[-12:]
         )
         schemas = self._registry.provider_schemas()
         if tuple(item["name"] for item in schemas) != self._registry.names:
@@ -1144,37 +1230,6 @@ class MarketplaceAgentV2Orchestrator:
                     and "collect_listing_information" in self._registry.names
                 ),
             )
-            context = AgentContext(
-                currentMessage=current_message,
-                recentMessages=context_messages,
-                referencedListingIds=(
-                    () if current_search_results else
-                    tuple(dict.fromkeys(
-                        tuple(item.listing_id for item in referenced_listings)
-                        + _commerce_listing_ids(prior_observations)
-                    ))
-                ),
-                referencedListings=(
-                    () if current_search_results else tuple(referenced_listings)
-                ),
-                observations=tuple(
-                    _customer_observation(item) for item in observations[-5:]
-                ),
-                pendingInteraction=(
-                    new_pending or pending_interaction or confirmed_interaction
-                ),
-                activeWorkflow=new_active_workflow,
-                contextualRefinement=contextual_refinement,
-                scopeResult=selected_scope,
-                availableSkills=tuple(
-                    SkillSummary.model_validate(skill.compact())
-                    for skill in available_skills
-                ) if active_skill is None else (),
-                activeSkill=(
-                    ActiveSkill.model_validate(active_skill.model_context())
-                    if active_skill is not None else None
-                ),
-            )
             grounding_available = _has_required_grounding(
                 selected_scope.required_grounding,
                 referenced_listings=referenced_listings,
@@ -1187,7 +1242,9 @@ class MarketplaceAgentV2Orchestrator:
                 and not malformed_input
                 and grounding_available
                 and not current_search_executed
+                and not search_dependent_turn
                 and (contextual_refinement is None or current_search_executed)
+                and search_refinement is None
                 and not current_private_commerce
                 and new_pending is None
                 and terminal_tool_requirement is None
@@ -1236,13 +1293,54 @@ class MarketplaceAgentV2Orchestrator:
                     schema for schema in decision_schemas
                     if schema["name"] not in _RETURN_REQUEST_TOOLS
                 )
+            exposed_schemas = () if current_search_executed else decision_schemas
+            if terminal_repair_used and not current_search_executed:
+                # Recovery may search or clarify, but no other read or write
+                # capability can escape this one bounded terminal correction.
+                exposed_schemas = tuple(
+                    schema for schema in exposed_schemas
+                    if schema["name"] == "search_listings"
+                )
+            if (
+                search_refinement is not None
+                and not current_search_executed
+                and any(item.reason == "SEARCH_REFINEMENT_MISMATCH"
+                        for item in turn_observations)
+            ):
+                # A rejected clear read-only refinement has one safe recovery
+                # tool; the model still supplies every search argument.
+                exposed_schemas = tuple(
+                    schema for schema in exposed_schemas
+                    if schema["name"] == "search_listings"
+                )
+            packet = self._context_builder.for_decision(
+                turn=turn_context,
+                scope_result=selected_scope,
+                pending_interaction=(
+                    new_pending or pending_interaction or confirmed_interaction
+                ),
+                active_workflow=new_active_workflow,
+                observations=observations,
+                contextual_refinement=contextual_refinement,
+                available_skills=tuple(
+                    SkillSummary.model_validate(skill.compact())
+                    for skill in available_skills
+                ) if active_skill is None else (),
+                active_skill=(
+                    ActiveSkill.model_validate(active_skill.model_context())
+                    if active_skill is not None else None
+                ),
+                suppress_prior_listings=current_search_results,
+                commerce_listing_ids=_commerce_listing_ids(prior_observations),
+                exposed_tool_names=tuple(schema["name"] for schema in exposed_schemas),
+            )
             try:
                 decision = await self._model.decide(
-                    context=context,
+                    context=packet.to_agent_context(),
                     # A Product search is the only inventory action for this turn.
                     # The following bounded decision can explain its observation,
                     # but cannot start a second differently-shaped search loop.
-                    tools=() if current_search_executed else decision_schemas,
+                    tools=exposed_schemas,
                     correlation_id=correlation_id,
                     on_text_delta=safe_stream.push if text_delta is not None else None,
                     timeout_seconds=self._model_timeout_seconds,
@@ -1402,6 +1500,29 @@ class MarketplaceAgentV2Orchestrator:
                     observations.append(rejection)
                     turn_observations.append(rejection)
                     continue
+                if search_refinement is not None and not current_search_executed:
+                    # The model had the first planning choice. A clear edit to a
+                    # fresh executed search cannot complete as permission prose.
+                    rejection = ToolObservation(
+                        tool="DIRECT_RESPONSE", status="REJECTED",
+                        reason="SEARCH_REFINEMENT_TOOL_REQUIRED",
+                    )
+                    observations.append(rejection)
+                    turn_observations.append(rejection)
+                    _LOGGER.info(
+                        "marketplace_refinement_rejected reason=%s repairMismatch=%s",
+                        rejection.reason,
+                        (
+                            rejection.refinement_repair.mismatch
+                            if hasattr(rejection.refinement_repair, "mismatch")
+                            else None
+                        ),
+                        extra={
+                            "correlation_id": correlation_id,
+                            "reason": rejection.reason,
+                        },
+                    )
+                    continue
                 if text_delta is not None:
                     if not safe_stream.raw_text:
                         await safe_stream.push(decision.content)
@@ -1517,8 +1638,46 @@ class MarketplaceAgentV2Orchestrator:
                         ),
                         checkout_enabled=checkout_enabled,
                         return_read_required=informational_return,
+                        query_only_refinement=(
+                            search_refinement is not None
+                            and search_refinement.kind in {
+                                "RAM", "SIZE", "WIRELESS", "NO_RGB"
+                            }
+                        ),
+                        search_dependent=search_dependent_turn,
+                        explicit_search_confirmation=policy.explicit_search_confirmation,
                     )
                 except MarketplaceAgentV2OrchestrationFailure as error:
+                    repair_reason = error.repair_reason or (
+                        "SEARCH_TERMINAL_GROUNDING_REQUIRED"
+                        if error.kind == "GROUNDING_REQUIRED" else None
+                    )
+                    if (
+                        search_dependent_turn
+                        and not recommendation_context
+                        and not current_search_executed
+                        and not current_private_commerce
+                        and new_pending is None
+                        and repair_reason is not None
+                    ):
+                        if terminal_repair_used or step >= MAX_AGENT_STEPS:
+                            raise
+                        # Reject only the valid model text, never its bytes. One
+                        # in-loop observation can elicit a model-authored read or
+                        # focused clarification within the existing step budget.
+                        rejection = ToolObservation(
+                            tool="DIRECT_RESPONSE", status="REJECTED",
+                            reason=repair_reason,
+                        )
+                        observations.append(rejection)
+                        turn_observations.append(rejection)
+                        terminal_repair_used = True
+                        _LOGGER.info(
+                            "marketplace_terminal_repair_requested",
+                            extra={"correlation_id": correlation_id,
+                                   "reason": repair_reason},
+                        )
+                        continue
                     if error.kind == "GROUNDING_REQUIRED":
                         rejection = ToolObservation(
                             tool="DIRECT_RESPONSE",
@@ -1590,6 +1749,14 @@ class MarketplaceAgentV2Orchestrator:
                             for item in (new_pending, pending_interaction)
                         ),
                         return_read_required=informational_return,
+                        query_only_refinement=(
+                            search_refinement is not None
+                            and search_refinement.kind in {
+                                "RAM", "SIZE", "WIRELESS", "NO_RGB"
+                            }
+                        ),
+                        search_dependent=search_dependent_turn,
+                        explicit_search_confirmation=policy.explicit_search_confirmation,
                     )
                 if text_delta is not None and not stream_provider_text:
                     await text_delta(content)
@@ -1687,6 +1854,23 @@ class MarketplaceAgentV2Orchestrator:
             if rejection is not None:
                 observations.append(rejection)
                 turn_observations.append(rejection)
+                if rejection.reason in {
+                    "SEARCH_REFINEMENT_MISMATCH",
+                    "SEARCH_REFINEMENT_TOOL_REQUIRED",
+                    "CONFIRMATION_INTENT_REQUIRED",
+                }:
+                    _LOGGER.info(
+                        "marketplace_refinement_rejected",
+                        extra={
+                            "correlation_id": correlation_id,
+                            "reason": rejection.reason,
+                            "repair_mismatch": (
+                                rejection.refinement_repair.mismatch
+                                if hasattr(rejection.refinement_repair, "mismatch")
+                                else None
+                            ),
+                        },
+                    )
                 if proposal.tool in self._registry.names and proposal.tool not in {
                     "request_confirmation", "collect_listing_information",
                 }:
@@ -2324,22 +2508,6 @@ def _without_question_sentences(value: str) -> str:
     return "".join(result).strip()
 
 
-def _customer_observation(observation: ToolObservation) -> ToolObservation:
-    """Keeps authoritative counts but withholds card facts and internal ranking metadata."""
-
-    if observation.tool != "search_listings":
-        return observation
-    return observation.model_copy(update={
-        "reason": (
-            "RESULTS_AVAILABLE" if observation.attachments else observation.reason
-        ),
-        "retrieval_confidence": None,
-        "presentation_hint": None,
-        "facets": None,
-        "attachments": (),
-    })
-
-
 def _contextual_refinement_selection(
     current_message: str,
     prior_observations: Sequence[ToolObservation],
@@ -2458,6 +2626,22 @@ _ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4,
     "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
 }
+
+
+def _unavailable_listing_ordinal(
+    value: str, recommendations: Sequence[ListingAttachment]
+) -> bool:
+    """Reject explicit card ordinals beyond the active displayed result set."""
+
+    normalized = " ".join(value.casefold().split())
+    return bool(recommendations) and any(
+        ordinal > len(recommendations)
+        and re.search(
+            rf"\b(?:the\s+)?{word}\s+(?:one|listing|result|item|card)\b",
+            normalized,
+        )
+        for word, ordinal in _ORDINALS.items()
+    )
 
 
 def _confirmation_answer(value: str) -> bool | None:
@@ -3074,10 +3258,22 @@ def _validate_terminal_response(
     has_waiting_interaction: bool,
     checkout_enabled: bool = False,
     return_read_required: bool = False,
+    query_only_refinement: bool = False,
+    search_dependent: bool = False,
+    explicit_search_confirmation: bool = False,
 ) -> None:
     """Reject unsupported comparison/result claims before canonical persistence."""
 
     lowered = content.casefold()
+    if query_only_refinement and re.search(
+        r"\b(?:all|every|each|verified|confirmed|guaranteed)\b.{0,100}"
+        r"\b(?:\d{1,3}\s*gb|ram|\d{1,3}\s*inch(?:es)?|wireless|rgb)\b|"
+        r"\b(?:\d{1,3}\s*gb|ram|\d{1,3}\s*inch(?:es)?|wireless|rgb)\b"
+        r".{0,100}\b(?:verified|confirmed|guaranteed)\b",
+        lowered,
+    ):
+        # A free-text search wish is not an authoritative Product attribute.
+        raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
     disabled_cart_response = lowered == _CART_MUTATION_DISABLED_RESPONSE.casefold()
     if (
         _informational_order_cancellation_request(current_message)
@@ -3127,7 +3323,44 @@ def _validate_terminal_response(
     if not has_waiting_interaction and re.search(
         r"\byes\s*(?:/|or)\s*no\b", lowered
     ):
-        raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
+        raise MarketplaceAgentV2OrchestrationFailure(
+            "MODEL_RESPONSE_UNSUPPORTED",
+            repair_reason=(
+                "SEARCH_PERMISSION_UNREQUESTED" if search_dependent
+                and not explicit_search_confirmation else None
+            ),
+        )
+    if (
+        search_dependent and not explicit_search_confirmation
+        and not has_waiting_interaction
+        and "?" in content
+        and re.search(
+            r"\b(?:would you like me to|do you want me to|shall i|"
+            r"should i|may i|can i)\s+(?:search|look for|find|show|"
+            r"list|display|(?:run|start)\s+(?:(?:a|an|another|the|"
+            r"that|this)\s+)?(?:(?:new|updated|refined|current)\s+)?"
+            r"search)\b",
+            lowered,
+        )
+    ):
+        # A prior executed search is context, not permission to advertise a
+        # new search or ask for consent before an ordinary read-only repair.
+        raise MarketplaceAgentV2OrchestrationFailure(
+            "MODEL_RESPONSE_UNSUPPORTED",
+            repair_reason="SEARCH_PERMISSION_UNREQUESTED",
+        )
+    if (
+        search_dependent and not explicit_search_confirmation
+        and not has_waiting_interaction
+        and re.search(r"\b(?:search|re-run|rerun)\b", lowered)
+        and re.search(r"\b(?:proceed|go ahead)\s*\?\s*$", lowered)
+    ):
+        # A completed read-only search must not be presented as a proposed
+        # action awaiting permission, even when Product returned no cards.
+        raise MarketplaceAgentV2OrchestrationFailure(
+            "MODEL_RESPONSE_UNSUPPORTED",
+            repair_reason="SEARCH_PERMISSION_UNREQUESTED",
+        )
     if not has_waiting_interaction and re.search(
         r"\b(?:add|adding|put)\b.{0,80}\bcart\b.{0,80}"
         r"\brequires?\b.{0,30}\bconfirmation\b",
@@ -3212,7 +3445,12 @@ def _validate_terminal_response(
                 "MODEL_RESPONSE_UNSUPPORTED"
             )
     if presents_results and not current_attachments and not commerce_grounded:
-        raise MarketplaceAgentV2OrchestrationFailure("MODEL_RESPONSE_UNSUPPORTED")
+        raise MarketplaceAgentV2OrchestrationFailure(
+            "MODEL_RESPONSE_UNSUPPORTED",
+            repair_reason=(
+                "SEARCH_RESULT_CLAIM_UNGROUNDED" if search_dependent else None
+            ),
+        )
     if not disabled_cart_response and re.search(
         r"\b(?:added|adding|removed|removing|updated|updating|changed|"
         r"changing|set|setting)\b.{0,80}"

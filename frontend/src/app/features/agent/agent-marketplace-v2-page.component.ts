@@ -357,7 +357,10 @@ export class AgentMarketplaceV2PageComponent implements OnInit, AfterViewChecked
     } else if (event.type === 'done') {
       const message = event.response.message;
       const terminal = message.pendingInteraction;
-      this.messages.update(items => [...items.filter(item => item.id !== event.messageId).map(item =>
+      this.messages.update(items => [...items.filter(item =>
+        item.id !== event.messageId
+        && !(retry && item.retryUserMessageId === event.response.userMessage.id),
+      ).map(item =>
         terminal && terminal.status !== 'WAITING' && item.pendingInteraction?.id === terminal.id
           ? { ...item, pendingInteraction: terminal }
           : item,

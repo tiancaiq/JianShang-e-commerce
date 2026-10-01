@@ -22,6 +22,7 @@ from .schemas import (
     AddToMyCartArguments,
     CheckAvailabilityArguments,
     CollectListingInformationArguments,
+    ExecutedSearchSnapshot,
     GetMyCartArguments,
     GetMyCheckoutArguments,
     GetMyOrderArguments,
@@ -128,8 +129,12 @@ class MarketplaceAgentV2ToolRegistry:
                 "name": "search_listings",
                 "description": (
                     "Search current public marketplace listings when current inventory "
-                    "would help, including broad product requests. Returns Product-owned "
-                    "revalidated totals, facets, and top listing facts."
+                    "would help, including broad product requests and clear corrections "
+                    "to the latest executed search. Preserve untouched supported filters "
+                    "and replace the edited value; a new product starts fresh. RAM, size, "
+                    "wireless, and RGB are query text, not verified typed filters: "
+                    "include the changed term, e.g. no RGB, in the new query. Returns "
+                    "Product-owned revalidated totals, facets, and top listing facts."
                 ),
                 "strict": True,
                 "parameters": search_parameters,
@@ -150,9 +155,11 @@ class MarketplaceAgentV2ToolRegistry:
                 "type": "function",
                 "name": "request_confirmation",
                 "description": (
-                    "Prepare one persisted yes/no confirmation for a materially changed "
-                    "refined search. Never use this to display listings, compare existing "
-                    "recommendations, answer a question, or repeat a prior confirmation."
+                    "Prepare one persisted yes/no confirmation for a refined search only "
+                    "when the customer explicitly asks to be asked before searching. "
+                    "Ordinary read-only corrections need no permission. Never use this to "
+                    "display listings, compare recommendations, answer a question, or "
+                    "repeat a prior confirmation."
                 ),
                 "strict": True,
                 "parameters": _strict_parameters(RequestConfirmationArguments),
@@ -968,6 +975,20 @@ class MarketplaceAgentV2ToolRegistry:
                 expiresAt=now + timedelta(minutes=5),
                 normalizedQuery=arguments.query,
                 filterCategories=_filter_categories(arguments),
+                appliedSearch=ExecutedSearchSnapshot(
+                    query=arguments.query,
+                    categoryId=arguments.category_id,
+                    categoryName=arguments.category_name,
+                    condition=arguments.condition,
+                    minimumPrice=arguments.minimum_price,
+                    maximumPrice=arguments.maximum_price,
+                    currency=arguments.currency,
+                    city=arguments.city,
+                    county=arguments.county,
+                    limit=arguments.limit,
+                    observedAt=now,
+                    expiresAt=now + timedelta(minutes=5),
+                ),
                 resultCount=len(attachments),
                 broadInventoryCount=broad_inventory_count,
                 exactMatchCount=exact_matches,

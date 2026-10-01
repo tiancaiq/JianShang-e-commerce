@@ -86,6 +86,12 @@ _DISCOVERY_PREFIXES = (
 _AMBIGUOUS_TERMS = {
     "apple", "java", "python", "the bag issue", "can you help me with this",
 }
+_AMBIGUOUS_SUPPORT_TERMS = {"returns", "seller", "shipping"}
+_BARE_QUERY_NON_PRODUCT_WORDS = {
+    "can", "could", "do", "does", "how", "i", "is", "me", "my", "please",
+    "policy", "policies", "rules", "should", "status", "what", "when",
+    "where", "why", "would", "you", "your",
+}
 _CONTEXT_ANCHORS = (
     "listing", "marketplace", "chair", "lamp", "laptop", "phone", "desk", "bag",
     "organizer", "bicycle", "seller", "buyer", "refund", "payment", "delivery",
@@ -235,6 +241,17 @@ class MarketplaceScopeClassifier:
                 "IN_SCOPE", "LISTING_DATA", "HIGH", context_available,
                 "MARKETPLACE_DISCOVERY",
             )
+        if normalized in _AMBIGUOUS_SUPPORT_TERMS:
+            return _result(
+                "AMBIGUOUS", "NONE", "LOW", context_available,
+                "MARKETPLACE_INTERPRETATION_PLAUSIBLE",
+            )
+        if _is_bare_marketplace_query(current_message, normalized):
+            # This is a grounding signal, not a search plan or query rewrite.
+            return _result(
+                "IN_SCOPE", "LISTING_DATA", "MEDIUM", context_available,
+                "BARE_MARKETPLACE_QUERY",
+            )
         if any(phrase in normalized for phrase in _MARKETPLACE_PHRASES):
             return _result(
                 "IN_SCOPE", "KNOWLEDGE_RAG", "HIGH", context_available,
@@ -280,6 +297,21 @@ class MarketplaceScopeClassifier:
             "AMBIGUOUS", "NONE", "LOW", False,
             "MARKETPLACE_INTERPRETATION_PLAUSIBLE",
         )
+
+
+def _is_bare_marketplace_query(message: str, normalized: str) -> bool:
+    """Recognize noun-like search input without constructing search arguments."""
+
+    if "?" in message:
+        return False
+    words = re.findall(r"[^\W_]+", normalized)
+    if not 2 <= len(words) <= 12:
+        return False
+    if len(words) <= 4 and not any(
+        phrase in normalized for phrase in _MARKETPLACE_PHRASES
+    ):
+        return False
+    return not any(word in _BARE_QUERY_NON_PRODUCT_WORDS for word in words)
 
 
 def _is_private_commerce_follow_up(
@@ -546,6 +578,8 @@ def _unrelated_reason(value: str) -> str | None:
     # everything uncertain stays with the model-first planner as AMBIGUOUS.
     if _is_explicit_code_generation_request(value):
         return "UNRELATED_CODE_REQUEST"
+    if re.search(r"\btell (?:me|us) (?:a|another) joke\b", value):
+        return "UNRELATED_CREATIVE_REQUEST"
     if re.search(
         r"\b(?:what is|explain|teach me about)\s+(?:the\s+)?"
         r"(?:cosine|sine|trigonometry|calculus|photosynthesis|world war(?: ii| 2)?)\b",

@@ -1840,6 +1840,98 @@ production legal/provider decisions, and explicit rollout approval are green.
    no public API, migration, frontend change, remote Skill execution, shell
    capability, or rollout gate is added. See
    `docs/mvp/ai/ai-skill-cli-00-skills-cli-foundation.md`.
+   `CTX-00` is implemented and locally verified as the first bounded context
+   correction for Marketplace Agent V2. The Agent now reads the latest 100
+   actor/session-owned messages strictly before the accepted USER message and
+   restores them in chronological order for planning. The shared ascending
+   history cursor, public API, persistence schema, and other agent lanes remain
+   unchanged. A MySQL regression covers more than 100 rows, current/future
+   exclusion, recent listing references and observations, out-of-scope filtering,
+   and actor isolation. At the CTX-00 checkpoint, later ContextBuilder, token,
+   memory, Redis, and ordered-turn milestones remained proposals in
+   `docs/mvp/ai/ai-context-architecture-plan.md`.
+   `CTX-01` is implemented locally on `codex/context-management` as a typed,
+   in-process ContextBuilder and per-decision ContextPacket for the existing V2
+   sources. Its ephemeral selection trace stays out of provider requests,
+   persistence, and SSE. The provider-facing `AgentContext`, ordered tool schemas,
+   policy/Skill decisions, and five-step loop remain unchanged. The V2 suite
+   passed (401 tests, three environment skips), the full agent-service suite
+   passed (1041 tests, 46 environment skips), and the real MySQL persistence
+   suite passed (11 tests). See
+   `docs/mvp/ai/ai-context-ctx-01-context-builder-plan.md` for scope and evidence.
+   Memory, token allocation, Redis, and ordered-turn processing remain deferred.
+   `CTX-01-RC` live-provider/API acceptance is recorded in
+   `docs/mvp/ai/ai-context-ctx-01-runtime-acceptance.md`. Discovery, context
+   references, long-session cutoff, cart, confirmation, isolation, Stop, and
+   Retry passed, but final sign-off is **NO-GO** pending refinement-failure
+   attribution and authenticated browser acceptance. No CTX-02 work began.
+   `AI-CONTEXT-REFINEMENT-FIX-01` investigates that refinement failure. Live
+   same-build context parity strongly disfavors a CTX-01 regression; completed
+   provider text decisions were rejected by terminal validation after the model
+   skipped an available search. `REFINE-FIX-01A` is implemented locally: a
+   successful search stores its typed applied filters and completed-message
+   display indicator in existing Agent action JSON, and the private provider
+   context receives one newest unexpired search snapshot. The V2 suite passed
+   (408 tests, three environment skips), the full Agent suite passed (1049
+   tests, 47 environment skips), and real MySQL persistence passed (12 tests).
+   There is no public API/SSE field or migration. `REFINE-FIX-01B` is now
+   implemented locally with model-first read-only correction validation and
+   explicit-intent-only search confirmation. The narrow `REFINE-FIX-01B.1`
+   structured repair addition passed the focused A/B/C live gate 5/5 each,
+   three additional attribute/condition smoke sessions, the full Agent suite,
+   and real-MySQL persistence tests. The model still supplies search arguments;
+   mismatch validation remains authoritative.
+   See `docs/mvp/ai/ai-context-refinement-fix-01b-implementation.md` for
+   implementation and live evidence. `REFINE-FIX-01C` guarded terminal
+   recovery is implemented locally: current-search-dependent model text is
+   buffered until validation, with at most one in-loop, read-only repair
+   opportunity within the five-decision budget. Deterministic SSE/service,
+   full Agent (1,076 run, 47 skipped), and real-MySQL (12 passed) checks are
+   green. Two fresh-session live passes of each of four refinement/correction
+   flows passed the focused gate. See
+   `docs/mvp/ai/ai-context-refinement-fix-01c-implementation.md`.
+   `REFINE-FIX-01D` now recognizes an explicit shorter query restatement
+   against the latest executed search. It validates removal of omitted
+   free-text terms while preserving independent typed filters; the model
+   still proposes all search arguments. Seven focused tests and four
+   fresh-session live flows passed, including the fixture/store and brand
+   removal cases, typed-price carry-forward, and ordinary monitor refinement.
+   See `docs/mvp/ai/ai-context-refinement-fix-01d-implementation.md`.
+   The narrow `REFINE-FIX-01D.1` follow-up recognizes explicit command
+   wrappers such as `Search just X`. Its exact authenticated browser regression,
+   five-repeat A/B/C and replacement matrices, focused/full Agent suites, and
+   real-MySQL persistence checks passed locally. This is a focused GO only;
+   final CTX-01-RC rollout acceptance remains **NO-GO**; the earlier separate
+   context-only gate also failed and its rerun is pending. See
+   `docs/mvp/ai/ai-context-refinement-fix-01-plan.md`. Focused 01A state
+   acceptance is recorded in
+   `docs/mvp/ai/ai-context-refinement-fix-01a-runtime-acceptance.md`;
+   411 V2 tests, 1,052 full Agent tests, and 12 real MySQL persistence
+   tests passed in that acceptance. It does not sign off the 01B/01C
+   refinement experience.
+   The `CTX-01-RC-FINAL` authenticated-browser gate is recorded in
+   `docs/mvp/ai/ai-context-ctx-01-rc-final.md`. Worktree-targeted laptop and
+   monitor refinements, refresh, and a valid ordinal reference passed, but a
+   wrong-card Retry case required a narrow guard, while cart, Stop, and
+   two-user browser checks remained incomplete after Auth timeouts. Final
+   acceptance and rollout remain **NO-GO**; CTX-02 did not begin.
+   The separate `CTX-01-RC-CONTEXT-FINAL` human/adversarial context-only gate is
+   recorded in `docs/mvp/ai/ai-context-ctx-01-rc-context-final.md`. Three of
+   four required five-session matrices passed, but the bare-title fixture
+   opener failed to execute a search in all five Matrix 3 sessions, so final
+   context acceptance is **NO-GO**. Long-history, persisted-search, ordinal,
+   and actor-isolation checks passed; selected natural/ambiguous turns remain
+   incomplete. No CTX-02 work began.
+   `REFINE-FIX-01E` corrects the bare-title opener's support-substring routing
+   into forced help retrieval while preserving model-authored search proposals.
+   The focused live matrices, natural-query smokes, long-history and isolation
+   checks passed, with intermittent stream/model variability documented.
+   This is a focused GO, not final CTX-01 rollout approval. See
+   `docs/mvp/ai/ai-context-refinement-fix-01e-implementation.md`; rerun the
+   final context-only gate before CTX-02.
+   Current sequence: `CTX-00` and `CTX-01` are implemented locally;
+   `REFINE-FIX-01A/B/B.1/C/D/D.1/E` are implemented with focused verification;
+   the full `CTX-01-RC-CONTEXT-FINAL` rerun is pending; `CTX-02` has not started.
 9. Keep all automated report/listing operations disabled until shadow-mode
    quality, appeal, restoration, and explicit approval gates pass.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from msb_agent_service.config import Settings
+from msb_agent_service.marketplace_agent_v2.context_builder import ContextBuilder
 from msb_agent_service.marketplace_agent_v2.provider import (
     MarketplaceAgentV2ProviderFailure,
     OpenAIMarketplaceAgentV2Model,
@@ -17,8 +19,10 @@ from msb_agent_service.marketplace_agent_v2.schemas import (
     AgentContext,
     CartItemSnapshot,
     CustomerCartSnapshot,
+    ExecutedSearchSnapshot,
     MarketplaceAgentV2ContextualRefinement,
     MarketplaceAgentV2PendingInteraction,
+    MarketplaceScopeResult,
     ToolFacets,
     ToolObservation,
 )
@@ -146,6 +150,89 @@ def _facet_observation() -> ToolObservation:
 
 
 class MarketplaceAgentV2ProviderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_receives_only_bounded_latest_search_snapshot(self) -> None:
+        observed = datetime.now(UTC)
+        snapshot = ExecutedSearchSnapshot(
+            query="laptop with 16GB RAM", maximumPrice=Decimal("1000"),
+            currency="USD", limit=5, observedAt=observed,
+            expiresAt=observed + timedelta(minutes=5), resultsDisplayed=True,
+        )
+        responses = _Responses(
+            events=[SimpleNamespace(type="response.completed")],
+            output=[], text="I can help refine the search.",
+        )
+        model = OpenAIMarketplaceAgentV2Model(
+            Settings(openai_api_key="offline-placeholder"), _Client(responses)
+        )
+
+        await model.decide(
+            context=AgentContext(currentMessage="actually under $1500", latestSearch=snapshot),
+            tools=TOOLS, correlation_id="refine-01a-provider",
+            on_text_delta=None, timeout_seconds=5,
+        )
+
+        payload = json.loads(responses.calls[0]["input"][0]["content"])
+        self.assertEqual("1000", payload["latestSearch"]["maximumPrice"])
+        self.assertEqual("laptop with 16GB RAM", payload["latestSearch"]["query"])
+        self.assertTrue(payload["latestSearch"]["resultsDisplayed"])
+        self.assertNotIn("trace", payload)
+        self.assertNotIn("attachments", payload["latestSearch"])
+        self.assertEqual("auto", responses.calls[0]["tool_choice"])
+        instructions = str(responses.calls[0]["instructions"])
+        self.assertIn("latestSearch, when present", instructions)
+        self.assertIn("without asking permission to search", instructions)
+        self.assertIn("Product has no typed verified filters", instructions)
+        self.assertIn('"Search just X"', instructions)
+        self.assertIn('"Search just monitor"', instructions)
+
+    async def test_context_packet_preserves_exact_provider_request(self) -> None:
+        responses = _Responses(
+            events=[SimpleNamespace(type="response.completed")],
+            output=[], text="I can help find a chair.",
+        )
+        model = OpenAIMarketplaceAgentV2Model(
+            Settings(openai_api_key="offline-placeholder"), _Client(responses)
+        )
+        builder = ContextBuilder()
+        turn = builder.from_existing_inputs(
+            current_message="Find a chair", recent_messages=(("USER", "Hello"),),
+            referenced_listings=(), prior_observations=(),
+            pending_interaction=None, active_workflow=None,
+        )
+        packet = builder.for_decision(
+            turn=turn,
+            scope_result=MarketplaceScopeResult(
+                scope="IN_SCOPE", confidence="HIGH", marketplaceContextUsed=True,
+                reasonCode="MARKETPLACE_REQUEST",
+            ),
+            pending_interaction=None, active_workflow=None, observations=(),
+            contextual_refinement=None, available_skills=(), active_skill=None,
+            suppress_prior_listings=False, commerce_listing_ids=(),
+            exposed_tool_names=tuple(tool["name"] for tool in TOOLS),
+        )
+        await model.decide(
+            context=packet.to_agent_context(), tools=TOOLS,
+            correlation_id="ctx-01-provider-parity", on_text_delta=None,
+            timeout_seconds=5,
+        )
+        request = responses.calls[0]
+        legacy = AgentContext(
+            currentMessage="Find a chair",
+            recentMessages=({"role": "USER", "content": "Hello"},),
+            scopeResult=packet.scope_result,
+        )
+        expected_payload = json.dumps(
+            legacy.model_dump(mode="json", by_alias=True, exclude_none=True),
+            separators=(",", ":"), ensure_ascii=False,
+        )
+        self.assertEqual(expected_payload, request["input"][0]["content"])
+        self.assertEqual(list(TOOLS), request["tools"])
+        self.assertEqual("auto", request["tool_choice"])
+        self.assertEqual(1, request["max_tool_calls"])
+        self.assertIs(False, request["store"])
+        self.assertEqual("disabled", request["truncation"])
+        self.assertNotIn("ctx-01-v1", request["input"][0]["content"])
+
     def test_authoritative_recovery_signals_constrain_only_the_required_tool(self) -> None:
         cases = {
             "LISTING_DETAIL_TOOL_REQUIRED": "get_listing",

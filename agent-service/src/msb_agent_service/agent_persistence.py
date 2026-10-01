@@ -1568,6 +1568,70 @@ class AgentPersistenceRepository:
             next_cursor=next_cursor,
         )
 
+    async def list_latest_messages(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        before: MessageCursor,
+        limit: int,
+    ) -> tuple[AgentMessage, ...]:
+        """Read bounded context before one turn, newest first in SQL and chronological to callers."""
+
+        session = _fixed_id("session_id", session_id)
+        actor = _fixed_id("actor_user_id", actor_user_id)
+        if not 1 <= limit <= 100:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        cutoff_time = _mysql_datetime(before.created_at)
+        cutoff_id = _fixed_id("before.message_id", before.message_id)
+        async with self._pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT session_id
+                    FROM agent_sessions
+                    WHERE session_id = %s AND actor_user_id = %s
+                    """,
+                    (session, actor),
+                )
+                if await cursor.fetchone() is None:
+                    raise AgentPersistenceError(
+                        AgentPersistenceErrorCode.SESSION_NOT_FOUND
+                    )
+                await cursor.execute(
+                    """
+                    SELECT messages.*,
+                           invocations.client_message_id AS client_message_id,
+                           invocations.invocation_id AS invocation_id,
+                           invocations.result_status AS invocation_status,
+                           invocations.error_code AS invocation_error_code,
+                           invocations.retry_count AS invocation_retry_count,
+                           invocations.assistant_message_id AS invocation_assistant_message_id,
+                           invocations.user_message_id AS invocation_user_message_id
+                    FROM agent_messages messages
+                    LEFT JOIN agent_invocations invocations
+                      ON (
+                           invocations.user_message_id = messages.message_id
+                           OR invocations.assistant_message_id = messages.message_id
+                         )
+                     AND invocations.actor_user_id = messages.actor_user_id
+                    WHERE messages.session_id = %s
+                      AND messages.actor_user_id = %s
+                      AND (
+                          messages.created_at < %s
+                          OR (
+                              messages.created_at = %s
+                              AND messages.message_id < %s
+                          )
+                      )
+                    ORDER BY messages.created_at DESC, messages.message_id DESC
+                    LIMIT %s
+                    """,
+                    (session, actor, cutoff_time, cutoff_time, cutoff_id, limit),
+                )
+                rows = list(await cursor.fetchall())
+        return tuple(_message_from_row(row) for row in reversed(rows))
+
     async def get_invocation_messages(
         self,
         *,

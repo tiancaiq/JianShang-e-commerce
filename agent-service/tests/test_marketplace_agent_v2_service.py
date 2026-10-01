@@ -4,7 +4,7 @@ import asyncio
 import json
 import unittest
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -26,19 +26,24 @@ from msb_agent_service.marketplace_agent_v2.persistence import (
 )
 from msb_agent_service.marketplace_agent_v2.orchestrator import (
     MarketplaceAgentV2OrchestrationFailure,
+    MarketplaceAgentV2Orchestrator,
 )
 from msb_agent_service.marketplace_agent_v2.schemas import (
     EvidenceReference,
+    ExecutedSearchSnapshot,
     ListingAttachment,
     MarketplaceAgentV2ActiveWorkflow,
     MarketplaceAgentV2Message,
     MarketplaceAgentV2PendingInteraction,
     MarketplaceAgentV2Refinement,
+    MarketplaceScopeResult,
+    ModelDecision,
     OrchestrationResult,
     ToolActivity,
     ToolFacets,
     HelpKnowledgePassage,
     ToolObservation,
+    ToolProposal,
 )
 from msb_agent_service.marketplace_agent_v2.seller_workflow import (
     apply_field_answer,
@@ -49,13 +54,16 @@ from msb_agent_service.marketplace_agent_v2.seller_workflow import (
     restore_rejected_item_pending,
     start_create_listing_workflow,
 )
+from msb_agent_service.marketplace_agent_v2.context_builder import (
+    _marketplace_context_messages,
+    _referenced_listings,
+    _workflow_from_state,
+)
 from msb_agent_service.marketplace_agent_v2.service import (
     MarketplaceAgentV2Service,
     _assistant_message,
-    _marketplace_context_messages,
     _public_pending,
-    _referenced_listings,
-    _workflow_from_state,
+    _persistable_observation,
 )
 
 
@@ -147,6 +155,8 @@ class _Persistence:
         self.cancel_calls = 0
         self.seller_resolve_calls = 0
         self.workflow_writes = 0
+        self.history_reads = 0
+        self.context_reads: list[dict[str, Any]] = []
 
     async def get(self, **_: Any) -> MarketplaceAgentV2Session:
         return MarketplaceAgentV2Session(
@@ -179,7 +189,12 @@ class _Persistence:
         )
 
     async def list_messages(self, **_: Any) -> MessagePage:
+        self.history_reads += 1
         return MessagePage(messages=self.messages, next_cursor=None)
+
+    async def list_context_messages(self, **kwargs: Any) -> tuple[AgentMessage, ...]:
+        self.context_reads.append(kwargs)
+        return self.messages
 
     async def consume_pending_interaction(self, **kwargs: Any) -> object | None:
         self.consume_calls += 1
@@ -347,6 +362,51 @@ class _ObservationOrchestrator(_Orchestrator):
         )
 
 
+class _AppliedSearchOrchestrator(_Orchestrator):
+    async def run(self, **kwargs: Any) -> OrchestrationResult:
+        self.calls += 1
+        self.kwargs = kwargs
+        observed = datetime.now(UTC)
+        listing = ListingAttachment(
+            listingId="01ARZ3NDEKTSV4RRFFQ69G5FB1", title="Current laptop",
+            categoryName="Computers", condition="NEW", priceAmount=Decimal("900"),
+            currency="USD", checkedAt=observed, responseHash="a" * 64,
+        )
+        observation = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE",
+            observedAt=observed, expiresAt=observed + timedelta(minutes=5),
+            normalizedQuery="laptop", filterCategories=("MAXIMUM_PRICE",),
+            attachments=(listing,),
+            appliedSearch=ExecutedSearchSnapshot(
+                query="laptop", maximumPrice=Decimal("1000"), currency="USD",
+                limit=5, observedAt=observed,
+                expiresAt=observed + timedelta(minutes=5),
+            ),
+        )
+        return OrchestrationResult(
+            message=MarketplaceAgentV2Message(
+                content="Here is a current laptop listing.", attachments=(listing,),
+            ),
+            decisionCount=2, observations=(observation,),
+            scopeResult=kwargs["scope_result"],
+        )
+
+
+class _FailedSearchOrchestrator(_Orchestrator):
+    async def run(self, **kwargs: Any) -> OrchestrationResult:
+        return OrchestrationResult(
+            message=MarketplaceAgentV2Message(
+                content="Search is temporarily unavailable."
+            ),
+            decisionCount=2,
+            observations=(ToolObservation(
+                tool="search_listings", status="FAILED",
+                reason="SEARCH_UNAVAILABLE", normalizedQuery="desk",
+            ),),
+            scopeResult=kwargs["scope_result"],
+        )
+
+
 class _RejectedCapabilityOrchestrator(_Orchestrator):
     async def run(self, **kwargs: Any) -> OrchestrationResult:
         self.calls += 1
@@ -445,7 +505,167 @@ class _BlockingOrchestrator:
         raise AssertionError("unreachable")
 
 
+class _TerminalRepairModel:
+    def __init__(self, decisions: list[ModelDecision]) -> None:
+        self.decisions = decisions
+        self.calls = 0
+
+    async def decide(self, **kwargs: Any) -> ModelDecision:
+        self.calls += 1
+        decision = self.decisions.pop(0)
+        if decision.content is not None and kwargs["on_text_delta"] is not None:
+            await kwargs["on_text_delta"](decision.content)
+        return decision
+
+
+class _TerminalRepairRegistry:
+    names = ("search_listings",)
+
+    def __init__(self) -> None:
+        self.executions = 0
+
+    def provider_schemas(self) -> tuple[dict[str, object], ...]:
+        return ({"name": "search_listings"},)
+
+    async def execute(self, **kwargs: Any) -> ToolObservation:
+        self.executions += 1
+        return ToolObservation(
+            tool="search_listings", status="SUCCEEDED",
+            reason="CATEGORY_UNAVAILABLE", normalizedQuery=kwargs["arguments"].query,
+            resultCount=0,
+        )
+
+
+class _TerminalRepairScope:
+    def classify(self, **_: Any) -> MarketplaceScopeResult:
+        return MarketplaceScopeResult(
+            scope="IN_SCOPE", confidence="HIGH", marketplaceContextUsed=True,
+            reasonCode="CONTEXTUAL_MARKETPLACE_FOLLOW_UP",
+            requiredGrounding="LISTING_DATA",
+        )
+
+
+def _terminal_repair_prior_message() -> AgentMessage:
+    observed = datetime.now(UTC)
+    listing = ListingAttachment(
+        listingId="01ARZ3NDEKTSV4RRFFQ69G5FB1", title="Monitor",
+        categoryName="Electronics", condition="GOOD",
+        priceAmount=Decimal("250"), currency="USD", checkedAt=observed,
+        responseHash="a" * 64,
+    )
+    snapshot = ExecutedSearchSnapshot(
+        query="monitor", maximumPrice=Decimal("300"), currency="USD",
+        limit=5, observedAt=observed,
+        expiresAt=observed + timedelta(minutes=5),
+    )
+    prior = ToolObservation(
+        tool="search_listings", status="SUCCEEDED", reason="RESULTS_AVAILABLE",
+        normalizedQuery="monitor", resultCount=1,
+        appliedSearch=snapshot, attachments=(listing,),
+    )
+    return replace(
+        _assistant(), message_id="01ARZ3NDEKTSV4RRFFQ69G5FB2",
+        created_at=observed - timedelta(minutes=1),
+        sources=(listing.model_dump(mode="json", by_alias=True),),
+        actions=({
+            "type": "MARKETPLACE_AGENT_V2_OBSERVATION",
+            **prior.model_dump(mode="json", by_alias=True, exclude_none=True),
+        },),
+    )
+
+
 class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_terminal_repair_stream_persists_only_validated_final_text(self) -> None:
+        persistence = _Persistence()
+        persistence.messages = (_terminal_repair_prior_message(),)
+        model = _TerminalRepairModel([
+            ModelDecision(content="I found current monitor listings."),
+            ModelDecision(toolProposal=ToolProposal(
+                callId="refined-search", tool="search_listings",
+                arguments={"query": "monitor", "maximumPrice": 300,
+                           "currency": "USD"},
+            )),
+            ModelDecision(content="I couldn't find current monitor listings."),
+        ])
+        registry = _TerminalRepairRegistry()
+        service = MarketplaceAgentV2Service(
+            persistence, MarketplaceAgentV2Orchestrator(model, registry),
+            provider_name="openai", model_name="test",
+            scope_classifier=_TerminalRepairScope(),
+        )
+        deltas: list[str] = []
+
+        async def capture(delta: str) -> None:
+            deltas.append(delta)
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="Show me those again.", correlation_id="refine-01c-service-success",
+            text_delta=capture,
+        )
+        self.assertEqual(3, model.calls)
+        self.assertEqual(1, registry.executions)
+        self.assertEqual(1, persistence.conversation.completions)
+        self.assertEqual(0, persistence.conversation.failures)
+        self.assertEqual(
+            "I couldn't find current monitor listings.", "".join(deltas),
+        )
+        self.assertEqual(
+            "".join(deltas), persistence.conversation.completion_kwargs["body"],
+        )
+        self.assertNotIn("I found current monitor listings.", "".join(deltas))
+
+    async def test_repeated_bad_terminal_persists_guarded_partial_without_text(self) -> None:
+        persistence = _Persistence()
+        persistence.messages = (_terminal_repair_prior_message(),)
+        model = _TerminalRepairModel([
+            ModelDecision(content="I found current monitor listings."),
+            ModelDecision(content="I found current monitor listings."),
+        ])
+        service = MarketplaceAgentV2Service(
+            persistence,
+            MarketplaceAgentV2Orchestrator(model, _TerminalRepairRegistry()),
+            provider_name="openai", model_name="test",
+            scope_classifier=_TerminalRepairScope(),
+        )
+        deltas: list[str] = []
+
+        async def capture(delta: str) -> None:
+            deltas.append(delta)
+
+        with self.assertRaises(MarketplaceAgentV2OrchestrationFailure):
+            await service.send_message(
+                actor_user_id=ACTOR, session_id=SESSION,
+                client_message_id=CLIENT, body="Show me those again.",
+                correlation_id="refine-01c-service-failure", text_delta=capture,
+            )
+        self.assertEqual(2, model.calls)
+        self.assertEqual([], deltas)
+        self.assertEqual(0, persistence.conversation.completions)
+        self.assertEqual(1, persistence.conversation.failures)
+        self.assertEqual(
+            AgentResolutionType.PARTIAL,
+            persistence.conversation.failure_kwargs["resolution_type"],
+        )
+
+    async def test_new_turn_reads_latest_context_before_current_user(self) -> None:
+        persistence = _Persistence()
+        service = MarketplaceAgentV2Service(
+            persistence, _Orchestrator(), provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="What about the second one?", correlation_id="v2-latest-context",
+        )
+
+        self.assertEqual(0, persistence.history_reads)
+        self.assertEqual(1, len(persistence.context_reads))
+        self.assertEqual(ACTOR, persistence.context_reads[0]["actor_user_id"])
+        self.assertEqual(SESSION, persistence.context_reads[0]["session_id"])
+        self.assertEqual(100, persistence.context_reads[0]["limit"])
+        self.assertEqual(USER, persistence.context_reads[0]["before"].message_id)
+
     async def test_public_order_cancellation_confirmation_hides_exact_binding(self) -> None:
         pending = MarketplaceAgentV2PendingInteraction(
             id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
@@ -606,6 +826,75 @@ class MarketplaceAgentV2ServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("check_availability", restored.tool_activity[0].tool)
         self.assertEqual(UTC, restored.tool_activity[0].observed_at.tzinfo)
+
+    async def test_applied_search_snapshot_persists_actual_display_and_reloads(self) -> None:
+        persistence = _Persistence()
+        first = _AppliedSearchOrchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, first, provider_name="openai", model_name="test"
+        )
+
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="laptop under $1000", correlation_id="v2-search-snapshot-first",
+        )
+        completion = persistence.conversation.completion_kwargs
+        action = next(item for item in completion["actions"] if
+                      item.get("type") == "MARKETPLACE_AGENT_V2_OBSERVATION")
+        self.assertEqual("1000", action["appliedSearch"]["maximumPrice"])
+        self.assertTrue(action["appliedSearch"]["resultsDisplayed"])
+        self.assertEqual(1, len(completion["sources"]))
+
+        persistence.messages = (
+            _user(), replace(_assistant(), actions=(action,),
+                             sources=tuple(completion["sources"])),
+        )
+        second = _Orchestrator()
+        service = MarketplaceAgentV2Service(
+            persistence, second, provider_name="openai", model_name="test"
+        )
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="actually under $1500", correlation_id="v2-search-snapshot-second",
+        )
+        self.assertEqual(
+            Decimal("1000"), second.kwargs["turn_context"].latest_search.maximum_price,
+        )
+        self.assertTrue(second.kwargs["turn_context"].latest_search.results_displayed)
+
+    def test_no_display_or_failed_search_cannot_persist_a_display_claim(self) -> None:
+        observed = datetime.now(UTC)
+        snapshot = ExecutedSearchSnapshot(
+            query="laptop", maximumPrice=Decimal("1000"), currency="USD",
+            limit=5, observedAt=observed, expiresAt=observed + timedelta(minutes=5),
+        )
+        successful_empty = ToolObservation(
+            tool="search_listings", status="SUCCEEDED", reason="FILTERS_TOO_STRICT",
+            appliedSearch=snapshot,
+        )
+        persisted = _persistable_observation(
+            successful_empty, displayed_listing_ids=frozenset({"unrelated"}),
+        )
+        self.assertFalse(persisted.applied_search.results_displayed)
+        self.assertIsNone(ToolObservation(
+            tool="search_listings", status="FAILED", reason="SEARCH_UNAVAILABLE",
+        ).applied_search)
+
+    async def test_completed_failed_search_persists_safe_supersession_marker(self) -> None:
+        persistence = _Persistence()
+        service = MarketplaceAgentV2Service(
+            persistence, _FailedSearchOrchestrator(),
+            provider_name="openai", model_name="test",
+        )
+        await service.send_message(
+            actor_user_id=ACTOR, session_id=SESSION, client_message_id=CLIENT,
+            body="desk", correlation_id="v2-failed-search-snapshot",
+        )
+        action = next(item for item in persistence.conversation.completion_kwargs["actions"]
+                      if item.get("type") == "MARKETPLACE_AGENT_V2_OBSERVATION")
+        self.assertEqual("FAILED", action["status"])
+        self.assertEqual("SEARCH_UNAVAILABLE", action["reason"])
+        self.assertNotIn("appliedSearch", action)
 
     async def test_safe_observation_is_persisted_and_restored_into_next_turn(self) -> None:
         persistence = _Persistence()

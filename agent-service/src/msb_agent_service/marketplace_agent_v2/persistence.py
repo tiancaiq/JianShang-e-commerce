@@ -11,6 +11,7 @@ import aiomysql
 
 from msb_agent_service.agent_persistence import (
     AgentMessage,
+    AgentMessageRole,
     AgentPersistenceError,
     AgentPersistenceErrorCode,
     AgentPersistenceRepository,
@@ -884,6 +885,34 @@ class MarketplaceAgentV2Persistence:
             actor_user_id=actor_user_id,
             limit=limit,
             after=after,
+        )
+
+    async def list_context_messages(
+        self,
+        *,
+        session_id: str,
+        actor_user_id: str,
+        before: AgentMessage,
+        limit: int,
+    ) -> tuple[AgentMessage, ...]:
+        """Keep V2 planning before its accepted USER row without changing history pages."""
+
+        if (
+            before.session_id != session_id
+            or before.actor_user_id != actor_user_id
+            or before.role != AgentMessageRole.USER
+        ):
+            raise AgentPersistenceError(AgentPersistenceErrorCode.INVALID_ARGUMENT)
+        if await self.get(session_id=session_id, actor_user_id=actor_user_id) is None:
+            raise AgentPersistenceError(AgentPersistenceErrorCode.SESSION_NOT_FOUND)
+        return await self._repository.list_latest_messages(
+            session_id=session_id,
+            actor_user_id=actor_user_id,
+            before=MessageCursor(
+                created_at=before.created_at,
+                message_id=before.message_id,
+            ),
+            limit=limit,
         )
 
 

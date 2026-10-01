@@ -2201,6 +2201,29 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("MODEL_RESPONSE_UNSUPPORTED", caught.exception.kind)
 
+    async def test_out_of_range_listing_follow_up_does_not_select_another_card(self) -> None:
+        model = _Model([ModelDecision(content="The first listing is available.")])
+        registry = _Registry(ToolObservation(
+            tool="get_listing", status="SUCCEEDED", reason="LISTING_VERIFIED"
+        ))
+        deltas: list[str] = []
+
+        async def capture_delta(delta: str) -> None:
+            deltas.append(delta)
+
+        result = await MarketplaceAgentV2Orchestrator(model, registry).run(
+            actor_user_id=LISTING_ID,
+            current_message="Back to the mouse. Tell me about the second one.",
+            recent_messages=(), referenced_listings=(_attachment(),),
+            correlation_id="v2-out-of-range-listing-follow-up",
+            text_delta=capture_delta,
+        )
+
+        self.assertEqual(0, result.decision_count)
+        self.assertIn("don't have that numbered listing", result.message.content)
+        self.assertEqual(result.message.content, "".join(deltas))
+        self.assertEqual((), result.message.attachments)
+
     async def test_comparison_accepts_unique_shortened_active_title(self) -> None:
         first = _attachment().model_copy(update={
             "title": "HEA-969L LED desk lamp with clean everyday finish - private sale",
@@ -2535,7 +2558,7 @@ class MarketplaceAgentV2OrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
         result = await MarketplaceAgentV2Orchestrator(model, registry).run(
             actor_user_id=LISTING_ID,
-            current_message="Could you narrow these further?",
+            current_message="Ask me before searching for lamps under $25.",
             recent_messages=(), referenced_listings=(_attachment(),),
             correlation_id="v2-pending-interaction",
             confirmation_prepared=persist_confirmation,
@@ -3315,16 +3338,24 @@ class MarketplaceAgentV2PolicyTest(unittest.TestCase):
         )
 
         arguments, rejection = MarketplaceAgentV2ToolPolicy(
-            referenced_listing_ids=frozenset()
+            referenced_listing_ids=frozenset(),
+            explicit_search_confirmation=True,
         ).validate(proposal, step=1)
         self.assertIsNone(arguments)
         self.assertEqual("FORBIDDEN", rejection.reason)
 
         arguments, rejection = MarketplaceAgentV2ToolPolicy(
-            referenced_listing_ids=frozenset({LISTING_ID})
+            referenced_listing_ids=frozenset({LISTING_ID}),
+            explicit_search_confirmation=True,
         ).validate(proposal, step=1)
         self.assertIsNone(rejection)
         self.assertEqual(Decimal("25"), arguments.maximum_price)
+
+        arguments, rejection = MarketplaceAgentV2ToolPolicy(
+            referenced_listing_ids=frozenset({LISTING_ID}),
+        ).validate(proposal, step=1)
+        self.assertIsNone(arguments)
+        self.assertEqual("CONFIRMATION_INTENT_REQUIRED", rejection.reason)
 
     def test_changed_tool_arguments_are_not_treated_as_identical_duplicates(self) -> None:
         policy = MarketplaceAgentV2ToolPolicy(referenced_listing_ids=frozenset())

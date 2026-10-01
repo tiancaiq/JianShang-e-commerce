@@ -23,6 +23,10 @@ from msb_agent_service.agent_persistence import (
     AgentPersistenceErrorCode,
 )
 
+from .context_builder import (
+    ContextBuilder,
+    _pending_from_state,
+)
 from .orchestrator import (
     MarketplaceAgentV2OrchestrationFailure,
     MarketplaceAgentV2Orchestrator,
@@ -133,6 +137,7 @@ class MarketplaceAgentV2Service:
         self._provider_name = provider_name
         self._model_name = model_name
         self._scope_classifier = scope_classifier or MarketplaceScopeClassifier()
+        self._context_builder = ContextBuilder()
 
     async def create_session(
         self, *, actor_user_id: str, new_conversation: bool
@@ -239,19 +244,26 @@ class MarketplaceAgentV2Service:
                 await text_delta(delta)
 
         try:
-            current_pending = _pending_from_state(session.preference_state)
-            current_workflow = _workflow_from_state(session.preference_state)
-            history_page = await self._persistence.list_messages(
+            context_messages = await self._persistence.list_context_messages(
                 actor_user_id=actor_user_id,
                 session_id=session_id,
+                before=begin.user_message,
                 limit=100,
             )
-            prior = _marketplace_context_messages(
-                history_page.messages,
-                current_user_message_id=begin.user_message.message_id,
-            )[-12:]
-            referenced = _referenced_listings(history_page.messages)
-            prior_observations = _recent_observations(history_page.messages)
+            turn_context = self._context_builder.build_turn(
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                invocation_id=begin.invocation.invocation_id,
+                current_user_message=begin.user_message,
+                current_message=body,
+                messages=context_messages,
+                session_state=session.preference_state,
+            )
+            current_pending = turn_context.pending_interaction
+            current_workflow = turn_context.active_workflow
+            prior = turn_context.recent_messages
+            referenced = turn_context.referenced_listings
+            prior_observations = turn_context.prior_observations
             seller_resolution = None
             confirmed_interaction: MarketplaceAgentV2PendingInteraction | None = None
             unsafe = hard_safety_response(body)
@@ -547,6 +559,7 @@ class MarketplaceAgentV2Service:
                     recent_messages=prior,
                     referenced_listings=referenced,
                     prior_observations=prior_observations,
+                    turn_context=turn_context,
                     pending_interaction=current_pending,
                     active_workflow=current_workflow,
                     confirmed_interaction=confirmed_interaction,
@@ -660,15 +673,22 @@ class MarketplaceAgentV2Service:
                         mode="json", by_alias=True, exclude_none=True
                     ),
                 })
+            displayed_listing_ids = frozenset(
+                attachment.listing_id for attachment in result.message.attachments
+            )
             message_actions.extend(
                 {
                     "type": "MARKETPLACE_AGENT_V2_OBSERVATION",
-                    **_persistable_observation(item).model_dump(
+                    **_persistable_observation(
+                        item, displayed_listing_ids=displayed_listing_ids,
+                    ).model_dump(
                         mode="json", by_alias=True, exclude_none=True
                     ),
                 }
                 for item in result.observations
-                if item.status == "SUCCEEDED"
+                if item.status == "SUCCEEDED" or (
+                    item.tool == "search_listings" and item.status == "FAILED"
+                )
             )
             message_actions.extend(
                 {
@@ -1144,64 +1164,6 @@ def _persisted_citations(
     return ()
 
 
-def _referenced_listings(messages: tuple[AgentMessage, ...]) -> tuple[ListingAttachment, ...]:
-    # Only the most recent result-bearing assistant message is the active ordered
-    # recommendation set. Earlier cards remain history, not ordinal context.
-    for message in reversed(messages):
-        result: list[ListingAttachment] = []
-        for source in message.sources:
-            try:
-                attachment = ListingAttachment.model_validate_json(json.dumps(source))
-            except Exception:
-                continue
-            result.append(attachment)
-        if result:
-            return tuple(result[:20])
-    return ()
-
-
-def _marketplace_context_messages(
-    messages: tuple[AgentMessage, ...],
-    *,
-    current_user_message_id: str,
-) -> tuple[tuple[str, str], ...]:
-    """Exclude prior out-of-scope pairs so they cannot alter later tool arguments."""
-
-    excluded: set[str] = {current_user_message_id}
-    for message in messages:
-        if message.role != AgentMessageRole.ASSISTANT:
-            continue
-        scope_action = next(
-            (
-                action for action in message.actions
-                if action.get("type") == "MARKETPLACE_AGENT_V2_SCOPE"
-            ),
-            None,
-        )
-        if scope_action is None or scope_action.get("scope") != "OUT_OF_SCOPE":
-            continue
-        excluded.add(message.message_id)
-        if message.invocation_user_message_id is not None:
-            excluded.add(message.invocation_user_message_id)
-    return tuple(
-        (message.role.value, message.body)
-        for message in messages
-        if message.message_id not in excluded
-    )
-
-
-def _pending_from_state(
-    state: dict[str, object],
-) -> MarketplaceAgentV2PendingInteraction | None:
-    raw = state.get("pendingInteraction")
-    if not isinstance(raw, dict):
-        return None
-    try:
-        return MarketplaceAgentV2PendingInteraction.model_validate_json(json.dumps(raw))
-    except Exception:
-        return None
-
-
 def _public_pending(
     pending: MarketplaceAgentV2PendingInteraction | None,
 ) -> MarketplaceAgentV2PendingInteraction | None:
@@ -1212,18 +1174,6 @@ def _public_pending(
     }:
         return pending
     return pending.model_copy(update={"arguments": {}})
-
-
-def _workflow_from_state(
-    state: dict[str, object],
-) -> MarketplaceAgentV2ActiveWorkflow | None:
-    raw = state.get("activeWorkflow")
-    if not isinstance(raw, dict):
-        return None
-    try:
-        return MarketplaceAgentV2ActiveWorkflow.model_validate_json(json.dumps(raw))
-    except Exception:
-        return None
 
 
 def _seller_workflow_command(value: str) -> bool:
@@ -1261,26 +1211,22 @@ def _checkout_confirmation_inspection(
     ))
 
 
-def _recent_observations(messages: tuple[AgentMessage, ...]) -> tuple[ToolObservation, ...]:
-    """Restores only bounded safe V2 observations; display activities remain unchanged."""
+def _persistable_observation(
+    observation: ToolObservation,
+    *,
+    displayed_listing_ids: frozenset[str] = frozenset(),
+) -> ToolObservation:
+    """Retain safe search/display state and commerce references between turns."""
 
-    result: list[ToolObservation] = []
-    for message in messages:
-        for action in message.actions:
-            if action.get("type") != "MARKETPLACE_AGENT_V2_OBSERVATION":
-                continue
-            payload = {key: value for key, value in action.items() if key != "type"}
-            try:
-                result.append(ToolObservation.model_validate_json(json.dumps(payload)))
-            except Exception:
-                continue
-    # Keep bounded actor-owned identities across a short commerce conversation;
-    # persisted observations below contain references, never stale cart/order facts.
-    return tuple(result[-12:])
-
-
-def _persistable_observation(observation: ToolObservation) -> ToolObservation:
-    """Retains commerce references, never stale cart/order facts, between turns."""
+    if observation.tool == "search_listings" and observation.applied_search is not None:
+        return observation.model_copy(update={
+            "applied_search": observation.applied_search.model_copy(update={
+                "results_displayed": any(
+                    item.listing_id in displayed_listing_ids
+                    for item in observation.attachments
+                ),
+            }),
+        })
 
     if observation.tool not in {
         "get_my_cart", "list_my_orders", "get_my_order", "add_to_my_cart",

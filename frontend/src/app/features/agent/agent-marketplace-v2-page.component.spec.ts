@@ -472,6 +472,34 @@ describe('AgentMarketplaceV2PageComponent results-first presentation', () => {
     expect(fixture.componentInstance.messages().filter(item => item.role === 'ASSISTANT').length).toBe(1);
     expect(fixture.nativeElement.textContent).toContain('Retry response');
     expect(fixture.nativeElement.textContent).toContain("I couldn't complete this response");
+
+    const retryStream = new Subject<any>();
+    service.retryResponse.and.returnValue(retryStream);
+    fixture.componentInstance.retry(fixture.componentInstance.messages().find(
+      item => item.retryUserMessageId === userId,
+    )!);
+    retryStream.next({
+      schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1', sequence: 1,
+      type: 'message_started', userMessage: {
+        id: userId, role: 'USER', body: 'hi', createdAt: '2026-08-02T01:00:01Z',
+      },
+    });
+    retryStream.next({
+      schemaVersion: 'MARKETPLACE_AGENT_V2_STREAM_EVENT_V1', sequence: 2,
+      type: 'done', messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ',
+      response: { sessionId, userMessage: {
+        id: userId, role: 'USER', body: 'hi', createdAt: '2026-08-02T01:00:01Z',
+      }, assistantMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ', decisionCount: 1,
+      message: {
+        role: 'ASSISTANT', content: 'Completed response', attachments: [],
+        refinement: null, pendingInteraction: null, citations: [], toolActivity: [],
+        inputTokens: 0, outputTokens: 0,
+      } },
+    });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.messages().filter(item => item.role === 'ASSISTANT').length).toBe(1);
+    expect(fixture.nativeElement.textContent).toContain('Completed response');
+    expect(fixture.nativeElement.textContent).not.toContain("I couldn't complete this response");
   });
 
   it('keeps embedded history scrollable and opens at the newest message', async () => {

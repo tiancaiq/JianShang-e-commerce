@@ -713,7 +713,10 @@ class CartMutationPolicyAndConversationTest(unittest.IsolatedAsyncioTestCase):
             actor_authorization=TOKEN,
             current_message="Add two of the second one.",
             recent_messages=(("USER", "Find wireless mice under $50"),),
-            referenced_listings=(_listing(),),
+            referenced_listings=(
+                _listing().model_copy(update={"listing_id": OTHER_LISTING}),
+                _listing(),
+            ),
             correlation_id="add-second",
             invocation_id=INVOCATION,
             scope_result=MarketplaceScopeResult(

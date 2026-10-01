@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -557,6 +557,83 @@ class HelpKnowledgePassage(StrictModel):
     version: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ExecutedSearchSnapshot(StrictModel):
+    """Applied read-only search constraints, not proof of current inventory."""
+
+    query: str = Field(min_length=1, max_length=200)
+    category_id: str | None = Field(default=None, min_length=26, max_length=26)
+    category_name: str | None = Field(default=None, min_length=1, max_length=180)
+    condition: Literal[
+        "NEW", "OPEN_BOX", "LIKE_NEW", "GOOD", "FAIR", "FOR_PARTS"
+    ] | None = None
+    minimum_price: Decimal | None = Field(default=None, ge=0)
+    maximum_price: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    city: str | None = Field(default=None, min_length=1, max_length=100)
+    county: str | None = Field(default=None, min_length=1, max_length=100)
+    limit: int = Field(ge=1, le=8)
+    observed_at: datetime
+    expires_at: datetime
+    results_displayed: bool = False
+
+    @model_validator(mode="after")
+    def valid_applied_search(self) -> "ExecutedSearchSnapshot":
+        if (
+            self.minimum_price is not None
+            and self.maximum_price is not None
+            and self.minimum_price > self.maximum_price
+        ):
+            raise ValueError("Applied minimumPrice must not exceed maximumPrice")
+        if (
+            self.minimum_price is not None or self.maximum_price is not None
+        ) and self.currency is None:
+            raise ValueError("Applied price requires currency")
+        if (
+            self.observed_at.tzinfo is None
+            or self.expires_at.tzinfo is None
+            or self.expires_at <= self.observed_at
+            or self.expires_at - self.observed_at > timedelta(minutes=5)
+        ):
+            raise ValueError("Applied search requires a bounded aware expiry")
+        return self
+
+
+class RefinementRepairSearch(StrictModel):
+    """Only executed, supported search facts needed to repair a proposal."""
+
+    query: str = Field(min_length=1, max_length=200)
+    category_id: str | None = Field(default=None, min_length=26, max_length=26)
+    category_name: str | None = Field(default=None, min_length=1, max_length=180)
+    condition: Literal[
+        "NEW", "OPEN_BOX", "LIKE_NEW", "GOOD", "FAIR", "FOR_PARTS"
+    ] | None = None
+    minimum_price: Decimal | None = Field(default=None, ge=0)
+    maximum_price: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    city: str | None = Field(default=None, min_length=1, max_length=100)
+    county: str | None = Field(default=None, min_length=1, max_length=100)
+    limit: int = Field(ge=1, le=8)
+
+
+class RefinementRepairEdit(StrictModel):
+    field: Literal["QUERY", "QUERY_ATTRIBUTE", "PRICE", "CONDITION"]
+    operation: Literal["ADD", "REPLACE", "UPDATE"]
+    value: str = Field(min_length=1, max_length=200)
+
+
+class RefinementRepairSignal(StrictModel):
+    type: Literal["SEARCH_REFINEMENT_REPAIR"] = "SEARCH_REFINEMENT_REPAIR"
+    mismatch: Literal[
+        "UNCHANGED_FILTER_CHANGED", "PRICE_FILTER_CHANGED",
+        "QUERY_TERMS_CHANGED", "EDIT_NOT_APPLIED"
+    ]
+    current_search: RefinementRepairSearch
+    requested_edit: RefinementRepairEdit
+    preserve_product_core: bool = True
+    preserve_unchanged_filters: bool = True
+    apply_requested_edit: bool = True
+
+
 class ToolObservation(StrictModel):
     tool: Literal[
         "retrieve_help", "check_availability", "search_listings", "get_listing",
@@ -597,6 +674,12 @@ class ToolObservation(StrictModel):
         "MESSAGE_OUT_OF_MARKETPLACE_SCOPE",
         "GROUNDING_REQUIRED",
         "GROUNDING_TOOL_REQUIRED",
+        "SEARCH_REFINEMENT_TOOL_REQUIRED",
+        "SEARCH_REFINEMENT_MISMATCH",
+        "SEARCH_TERMINAL_GROUNDING_REQUIRED",
+        "SEARCH_RESULT_CLAIM_UNGROUNDED",
+        "SEARCH_PERMISSION_UNREQUESTED",
+        "CONFIRMATION_INTENT_REQUIRED",
         "LISTING_DETAIL_TOOL_REQUIRED",
         "AVAILABILITY_TOOL_REQUIRED",
         "CART_READ_TOOL_REQUIRED",
@@ -676,6 +759,11 @@ class ToolObservation(StrictModel):
     expires_at: datetime | None = None
     normalized_query: str | None = Field(default=None, max_length=200)
     filter_categories: tuple[str, ...] = Field(default=(), max_length=8)
+    refinement_repair: RefinementRepairSignal | Literal[
+        "UNCHANGED_FILTER_CHANGED", "PRICE_FILTER_CHANGED",
+        "QUERY_TERMS_CHANGED", "EDIT_NOT_APPLIED"
+    ] | None = None
+    applied_search: ExecutedSearchSnapshot | None = None
     result_count: int | None = Field(default=None, ge=0, le=100)
     broad_inventory_count: int | None = Field(default=None, ge=0)
     exact_match_count: int | None = Field(default=None, ge=0, le=80)
@@ -933,6 +1021,7 @@ class AgentContext(StrictModel):
     referenced_listing_ids: tuple[str, ...] = Field(default=(), max_length=20)
     referenced_listings: tuple[ListingAttachment, ...] = Field(default=(), max_length=20)
     observations: tuple[ToolObservation, ...] = Field(default=(), max_length=5)
+    latest_search: ExecutedSearchSnapshot | None = None
     pending_interaction: MarketplaceAgentV2PendingInteraction | None = None
     active_workflow: MarketplaceAgentV2ActiveWorkflow | None = None
     contextual_refinement: MarketplaceAgentV2ContextualRefinement | None = None

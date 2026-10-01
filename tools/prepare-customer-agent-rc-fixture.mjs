@@ -15,6 +15,7 @@ const TITLE = 'RC Delivered Return Fixture';
 const STOCK = 6;
 const PRICE = 12.5;
 const FRESH = process.argv.includes('--fresh');
+const LISTING_ONLY = process.argv.includes('--listing-only');
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=',
   'base64',
@@ -62,6 +63,13 @@ const publicListing = await api(`${PRODUCT}/api/v1/public/listings/${listing.id}
 assert(publicListing.id === listing.id && publicListing.sellerType === 'BUSINESS'
   && publicListing.businessVerified === true,
   'Dedicated listing is not publicly purchasable.');
+if (LISTING_ONLY) {
+  console.log(JSON.stringify({ milestone: 'RC-FIXTURE-01-LISTING',
+    listingId: listing.id, sellerType: publicListing.sellerType,
+    businessVerified: publicListing.businessVerified,
+    availableInventory: stock.available, orderCreated: false }));
+  process.exit(0);
+}
 
 let fixture = FRESH ? null : await reusableDeliveredOrder(listing.id);
 const reused = Boolean(fixture);
